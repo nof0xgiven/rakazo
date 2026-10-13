@@ -4,7 +4,7 @@ import { StyleSheet, Text, View } from "react-native";
 import { native, useResolvedAppearance, useThemedStyles } from "../lib/native";
 import { NativeSymbol } from "./native-symbol";
 
-export type MenuPickerChoice = { key: string; label: string };
+export type MenuPickerChoice = { key: string; label: string; disabled?: boolean };
 
 /** Native choice menu shared by rows with different layouts. */
 export function MenuPickerMenu({
@@ -28,6 +28,7 @@ export function MenuPickerMenu({
         id: `choice:${choice.key}`,
         title: choice.label,
         state: choice.key === value ? "on" : "off",
+        ...(choice.disabled ? { attributes: { disabled: true } } : {}),
       }))}
       colorScheme={colorScheme}
       onPressAction={(event) => {

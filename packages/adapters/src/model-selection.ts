@@ -20,7 +20,7 @@ import {
 import type { CodexLiveCatalog, CodexLiveReadOptions } from "./pi-codex-catalog.js";
 import { codexLiveListsModel } from "./pi-codex-catalog.js";
 import { listPiCatalog, scriptedCatalogEntry } from "./pi-models.js";
-import { parseModelSecret, secretValuesToRedact } from "./pi-oauth.js";
+import { parseModelSecret, type StoredModelSecret, secretValuesToRedact } from "./pi-oauth.js";
 import { OPENAI_COMPATIBLE_PROVIDER_ID } from "./pi-openai-compatible-provider.js";
 
 type ModelCredential = Awaited<ReturnType<typeof findDefaultModelCredential>>;
@@ -520,7 +520,13 @@ export async function loadCompatibleModelRuntime(
     select: { id: true, ciphertext: true },
   });
   if (!row) throw new UnavailableModelForAuthError(MODEL_NOT_CONFIGURED_MESSAGE);
-  const secret = parseModelSecret(await secretStore.load(row.ciphertext, row.id));
+  let secret: StoredModelSecret;
+  try {
+    secret = parseModelSecret(await secretStore.load(row.ciphertext, row.id));
+  } catch (error) {
+    if (error instanceof SecretStoreUnavailableError) throw error;
+    throw new UnavailableModelForAuthError(MODEL_NOT_CONFIGURED_MESSAGE);
+  }
   const config =
     secret.kind === "openai_compatible"
       ? openAiCompatibleModelConfig(secret, credential, modelId)

@@ -51,9 +51,9 @@ import {
   loadCompatibleModelReferences,
   ModelConfigurationConflictError,
   Prisma,
-  resolveCompatibleReferenceBindings,
   type SpacePrimaryEffort,
   selectSpaceModelPreference,
+  snapshotCompatibleReferenceBindings,
   withModelConfigurationOwnerLock,
   withTransactionRetry,
 } from "@rakazo/db";
@@ -310,16 +310,18 @@ async function loadSpaceGuardState(tx: Prisma.TransactionClient, scope: Scope) {
   const { references, followers } = await loadCompatibleModelReferences(tx, scope.userId, {
     spaceIds: [scope.spaceId],
   });
-  const bindings = await resolveCompatibleReferenceBindings(tx, scope.userId, references);
-  const credentialIds = bindings.map((binding) => binding.credentialId);
+  const snapshot = await snapshotCompatibleReferenceBindings(tx, scope.userId, { references });
   const defaultIndex = references.findIndex((reference) => reference.kind === "default");
   return {
     followers,
-    snapshot: { references, credentialIds },
+    snapshot,
     compatibleDefault:
       defaultIndex < 0
         ? null
-        : { modelId: references[defaultIndex]?.modelId, credentialId: credentialIds[defaultIndex] },
+        : {
+            modelId: references[defaultIndex]?.modelId,
+            credentialId: snapshot.bindings[defaultIndex]?.credentialId ?? null,
+          },
   };
 }
 
@@ -465,12 +467,12 @@ export async function connectOpenAiCompatible(
         tx,
         scope.userId,
       );
-      const bindings = await resolveCompatibleReferenceBindings(tx, scope.userId, references);
+      const snapshot = await snapshotCompatibleReferenceBindings(tx, scope.userId, { references });
       if (previous) {
         const conflict = compatibleConfigurationConflict({
           credentialId: previous.credentialId,
           references,
-          bindings,
+          bindings: snapshot.bindings,
           followers,
           primaryEfforts,
           before: previous.configuration,
@@ -534,7 +536,7 @@ export async function connectOpenAiCompatible(
       await assertCompatibleReferenceBindingsUnchanged(
         tx,
         scope.userId,
-        { references, credentialIds: bindings.map((binding) => binding.credentialId) },
+        snapshot,
         existing ? undefined : excludeSpaceDefault(scope),
       );
       throwIfAborted(signal);
@@ -974,8 +976,7 @@ export async function disconnectModelProvider(
     const existing = await tx.userModelCredential.findMany({ where: { userId, provider } });
     if (provider === OPENAI_COMPATIBLE_PROVIDER_ID && existing.length > 0) {
       const enabled = new Map(existing.map((row) => [row.id, new Set(row.enabledModelIds)]));
-      const { references } = await loadCompatibleModelReferences(tx, userId);
-      const bindings = await resolveCompatibleReferenceBindings(tx, userId, references);
+      const { references, bindings } = await snapshotCompatibleReferenceBindings(tx, userId);
       const blockers = references.filter((reference, index) => {
         const credentialId = bindings[index]?.credentialId;
         return (

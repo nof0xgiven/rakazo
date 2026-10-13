@@ -16,12 +16,36 @@ export function activeBotId(page: Page) {
 }
 
 export async function rpc<T>(page: Page, procedure: string, body: unknown): Promise<T> {
-  const response = await page.request.post(`/rpc/${procedure}`, { data: { json: body } });
-  const parsed = (await response.json()) as { json?: T; error?: { message?: string } };
-  if (!response.ok() || parsed.error) {
-    throw new Error(`${procedure} ${response.status()}: ${parsed.error?.message ?? "failed"}`);
+  const result = await rpcResult<T>(page, procedure, body);
+  if (!result.ok) {
+    throw new Error(`${procedure} ${result.status}: ${result.error?.message ?? "failed"}`);
   }
-  return parsed.json as T;
+  return result.json as T;
+}
+
+export type RpcError = { code?: string; status?: number; message?: string; data?: unknown };
+
+export async function rpcResult<T>(
+  page: Page,
+  procedure: string,
+  body: unknown,
+  options: { spaceId?: string } = {},
+): Promise<{ ok: boolean; status: number; json?: T; error?: RpcError; text: string }> {
+  const response = await page.request.post(`/rpc/${procedure}`, {
+    data: { json: body },
+    ...(options.spaceId ? { headers: { "x-rakazo-space-id": options.spaceId } } : {}),
+  });
+  const text = await response.text();
+  const parsed = JSON.parse(text) as { json?: unknown; error?: RpcError };
+  if (!response.ok() || parsed.error) {
+    return {
+      ok: false,
+      status: response.status(),
+      error: parsed.error ?? (parsed.json as RpcError | undefined),
+      text,
+    };
+  }
+  return { ok: true, status: response.status(), json: parsed.json as T, text };
 }
 
 export async function completeOnboarding(page: Page, testInfo?: TestInfo) {

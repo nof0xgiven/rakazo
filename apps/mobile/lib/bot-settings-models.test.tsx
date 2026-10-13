@@ -119,7 +119,7 @@ vi.mock("@expo/ui/community/menu", () => ({
     children,
   }: {
     title: string;
-    actions: { id: string; title: string; state: string }[];
+    actions: { id: string; title: string; state: string; attributes?: { disabled?: boolean } }[];
     onPressAction: (event: { nativeEvent: { event: string } }) => void;
     children: ReactNode;
   }) =>
@@ -134,6 +134,7 @@ vi.mock("@expo/ui/community/menu", () => ({
             type: "button",
             key: action.id,
             "data-state": action.state,
+            disabled: action.attributes?.disabled === true,
             onClick: () => onPressAction({ nativeEvent: { event: action.id } }),
           },
           action.title,
@@ -259,6 +260,13 @@ describe("bot settings model and reasoning effort", () => {
       "Extra high (unavailable)",
     ]);
     expect(actions("Reasoning effort")[4]!.dataset.state).toBe("on");
+    expect(actions("Reasoning effort").map((action) => action.disabled)).toEqual([
+      false,
+      false,
+      false,
+      false,
+      true,
+    ]);
     await choose("Reasoning effort", "Extra high (unavailable)");
     await save();
     expect(mocks.updates).toEqual([]);

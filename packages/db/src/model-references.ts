@@ -12,6 +12,18 @@ import { chooseModelCredential, lockModelConfigurationOwner } from "./model-cred
 import { withTransactionRetry } from "./transaction-retry.js";
 
 /**
+ * Owner-lock transactions queue behind every model configuration write and
+ * finalization of the same account. Prisma's interactive timeout counts that
+ * queueing, so the default 5 seconds would expire a transaction that is only
+ * waiting its turn.
+ */
+export const MODEL_CONFIGURATION_TRANSACTION_OPTIONS = {
+  isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
+  maxWait: 5_000,
+  timeout: 30_000,
+};
+
+/**
  * Every write that changes model enablement, model references or which
  * credential a reference resolves to runs here. The owner lock is the first
  * statement and the isolation is ReadCommitted so a waiter sees what the
@@ -23,13 +35,10 @@ export async function withModelConfigurationOwnerLock<T>(
   fn: (tx: Prisma.TransactionClient) => Promise<T>,
 ): Promise<T> {
   return withTransactionRetry(() =>
-    prisma.$transaction(
-      async (tx) => {
-        await lockModelConfigurationOwner(tx, userId);
-        return fn(tx);
-      },
-      { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted },
-    ),
+    prisma.$transaction(async (tx) => {
+      await lockModelConfigurationOwner(tx, userId);
+      return fn(tx);
+    }, MODEL_CONFIGURATION_TRANSACTION_OPTIONS),
   );
 }
 
@@ -360,7 +369,7 @@ export async function resolveCompatibleReferenceBindings(
 
 export type CompatibleReferenceBindingSnapshot = {
   references: CompatibleModelReference[];
-  credentialIds: (string | null)[];
+  bindings: CompatibleReferenceBinding[];
 };
 
 export async function snapshotCompatibleReferenceBindings(
@@ -370,8 +379,7 @@ export async function snapshotCompatibleReferenceBindings(
 ): Promise<CompatibleReferenceBindingSnapshot> {
   const references =
     options.references ?? (await loadCompatibleModelReferences(tx, userId, options)).references;
-  const bindings = await resolveCompatibleReferenceBindings(tx, userId, references);
-  return { references, credentialIds: bindings.map((binding) => binding.credentialId) };
+  return { references, bindings: await resolveCompatibleReferenceBindings(tx, userId, references) };
 }
 
 /**
@@ -387,7 +395,7 @@ export async function assertCompatibleReferenceBindingsUnchanged(
   exclude: (reference: CompatibleModelReference) => boolean = () => false,
 ): Promise<void> {
   const checked = snapshot.references.flatMap((reference, index) => {
-    const before = snapshot.credentialIds[index];
+    const before = snapshot.bindings[index]?.credentialId;
     return before && !exclude(reference) ? [{ reference, before }] : [];
   });
   const after = await resolveCompatibleReferenceBindings(

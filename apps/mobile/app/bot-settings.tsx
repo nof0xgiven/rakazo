@@ -181,6 +181,7 @@ export default function BotSettingsScreen() {
                 label: t("{level} (unavailable)", {
                   level: thinkingLevelLabel(effort.unavailable, t),
                 }),
+                disabled: true,
               },
             ]
           : []),

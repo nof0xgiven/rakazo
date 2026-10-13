@@ -61,6 +61,7 @@ export type OpenAiCompatibleModelDraft = {
   rows: OpenAiCompatibleModelRow[];
   /** Initial default for a new connection or onboarding without a usable default. */
   defaultModelId: string | null;
+  pendingDefaultModelId: string | null;
 };
 
 export type OpenAiCompatibleSetupIssue =
@@ -183,6 +184,7 @@ export function createOpenAiCompatibleModelDraft(
     connection,
     rows: connection ? persistedRows(connection) : [],
     defaultModelId: null,
+    pendingDefaultModelId: null,
   };
 }
 
@@ -221,7 +223,7 @@ export function setOpenAiCompatibleEndpoint(
     connection && sameOpenAiCompatibleEndpoint(connection.baseUrl, baseUrl)
       ? persistedRows(connection)
       : [];
-  return { ...draft, baseUrl, rows, defaultModelId: null };
+  return { ...draft, baseUrl, rows, defaultModelId: null, pendingDefaultModelId: null };
 }
 
 function emptyRow(modelId: string): OpenAiCompatibleModelRow {
@@ -267,15 +269,26 @@ function updateRow(
   };
 }
 
-function withDefaultFor(
+function withCheckedDefault(
   draft: OpenAiCompatibleModelDraft,
   modelId: string,
 ): OpenAiCompatibleModelDraft {
+  if (draft.defaultModelId !== null || draft.pendingDefaultModelId !== null) return draft;
   const row = draft.rows.find((candidate) => candidate.modelId === modelId);
-  if (row?.checked && row.config && draft.defaultModelId === null) {
-    return { ...draft, defaultModelId: modelId };
+  if (!row?.checked) return draft;
+  return row.config && !row.setup
+    ? { ...draft, defaultModelId: modelId }
+    : { ...draft, pendingDefaultModelId: modelId };
+}
+
+function withUncheckedDefault(
+  draft: OpenAiCompatibleModelDraft,
+  modelId: string,
+): OpenAiCompatibleModelDraft {
+  if (draft.defaultModelId === modelId) {
+    return { ...draft, defaultModelId: null, pendingDefaultModelId: null };
   }
-  if (!row?.checked && draft.defaultModelId === modelId) return { ...draft, defaultModelId: null };
+  if (draft.pendingDefaultModelId === modelId) return { ...draft, pendingDefaultModelId: null };
   return draft;
 }
 
@@ -296,7 +309,7 @@ export function toggleOpenAiCompatibleModel(
     }
     return { ...row, checked: true, setup: { ...PENDING_OPENAI_COMPATIBLE_MODEL_SETUP } };
   });
-  return withDefaultFor(next, modelId);
+  return checked ? withCheckedDefault(next, modelId) : withUncheckedDefault(next, modelId);
 }
 
 /** Adds a manually described model, then follows the same setup path as checking it. */
@@ -411,10 +424,14 @@ export function applyOpenAiCompatibleModelSetup(
     row.config,
   );
   if (!config) return draft;
-  return withDefaultFor(
-    updateRow(draft, modelId, (current) => ({ ...current, checked: true, config, setup: null })),
-    modelId,
-  );
+  const next = updateRow(draft, modelId, (current) => ({
+    ...current,
+    checked: true,
+    config,
+    setup: null,
+  }));
+  if (next.pendingDefaultModelId !== modelId) return next;
+  return { ...next, defaultModelId: next.defaultModelId ?? modelId, pendingDefaultModelId: null };
 }
 
 /** Cancelling pending setup restores the model to unchecked. */
@@ -422,20 +439,22 @@ export function cancelOpenAiCompatibleModelSetup(
   draft: OpenAiCompatibleModelDraft,
   modelId: string,
 ): OpenAiCompatibleModelDraft {
-  const next = updateRow(draft, modelId, (row) =>
-    row.config ? { ...row, setup: null } : { ...row, checked: false, setup: null },
+  const row = draft.rows.find((candidate) => candidate.modelId === modelId);
+  if (!row) return draft;
+  if (row.config) return updateRow(draft, modelId, (current) => ({ ...current, setup: null }));
+  return withUncheckedDefault(
+    updateRow(draft, modelId, (current) => ({ ...current, checked: false, setup: null })),
+    modelId,
   );
-  return withDefaultFor(next, modelId);
 }
 
 export function applyDetectedOpenAiCompatibleSettings(
   draft: OpenAiCompatibleModelDraft,
   modelId: string,
 ): OpenAiCompatibleModelDraft {
-  const next = updateRow(draft, modelId, (row) =>
+  return updateRow(draft, modelId, (row) =>
     row.suggestion ? { ...row, config: { modelId, ...row.suggestion }, setup: null } : row,
   );
-  return withDefaultFor(next, modelId);
 }
 
 export function filterOpenAiCompatibleModelRows(

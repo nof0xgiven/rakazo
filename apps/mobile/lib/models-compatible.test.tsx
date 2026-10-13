@@ -255,6 +255,31 @@ describe("native OpenAI-compatible model setup", () => {
     expect(byLabel("Save")!.disabled).toBe(false);
   });
 
+  it("clears probe feedback on same-endpoint key edits while keeping models", async () => {
+    mocks.credential = { ...mocks.credential, hasKey: true };
+    mocks.handlers["models/probeOpenAiCompatible"] = () => {
+      throw new Error("Could not reach this model server");
+    };
+    await render();
+    const apiKeyDisclosure = [...container.querySelectorAll("button")].find(
+      (button) => button.textContent === "API key",
+    )!;
+    await act(async () => apiKeyDisclosure.click());
+
+    await click("Find models");
+    expect(container.textContent).toContain("Could not reach this model server");
+    await type("API key", "fake-replacement-key");
+    expect(container.textContent).not.toContain("Could not reach this model server");
+    expect([enabled("model-a"), enabled("model-b")]).toEqual([true, true]);
+
+    await click("Find models");
+    expect(container.textContent).toContain("Could not reach this model server");
+    await click("Remove saved key");
+    expect(container.textContent).not.toContain("Could not reach this model server");
+    expect(byLabel("API key")!.value).toBe("");
+    expect([enabled("model-a"), enabled("model-b")]).toEqual([true, true]);
+  });
+
   it("requires Apply before an unknown model can be saved", async () => {
     mocks.handlers["models/describeOpenAiCompatible"] = () => ({
       models: [{ modelId: "custom-x", capabilities: null }],
@@ -296,6 +321,28 @@ describe("native OpenAI-compatible model setup", () => {
     await click("Cancel changes for custom-x");
     expect(enabled("custom-x")).toBe(false);
     expect(byLabel("Save")!.disabled).toBe(false);
+  });
+
+  it("recovers an enabled model without readable configuration through Advanced and Apply", async () => {
+    mocks.credential = { ...mocks.credential, models: [modelConfig("model-a")] };
+    await render();
+    expect(enabled("model-b")).toBe(true);
+    expect(byLabel("Save")!.disabled).toBe(true);
+
+    await click("Advanced settings for model-b");
+    await click("Apply settings for model-b");
+    expect(byLabel("Save")!.disabled).toBe(false);
+    await click("Save");
+    expect(connectCalls().map((call) => call.input)).toEqual([
+      {
+        provider: "openai-compatible",
+        baseUrl: "http://127.0.0.1:8000/v1",
+        models: [modelConfig("model-a"), modelConfig("model-b")],
+        label: "OpenAI-compatible",
+        credentialId: "cred-1",
+        expectedConfigurationVersion: 3,
+      },
+    ]);
   });
 
   it("shows conflict blockers by space and restores only the blocked model", async () => {

@@ -1,3 +1,4 @@
+import { SecretStoreUnavailableError } from "@rakazo/adapter-kit";
 import type { Actor } from "@rakazo/contracts";
 import type { PrismaClient } from "@rakazo/db";
 import { describe, expect, it, vi } from "vitest";
@@ -1187,5 +1188,33 @@ describe("compatible model runtime", () => {
     await expect(
       load(prismaWith({ enabledModelIds: ["model-a"] }, false), "model-a"),
     ).rejects.toBeInstanceOf(UnavailableModelForAuthError);
+  });
+
+  it("fails terminally for an undecryptable or corrupt secret but keeps store outages retryable", async () => {
+    const prisma = prismaWith({ enabledModelIds: ["model-a"] });
+    const load = (secrets: { load: () => Promise<string> }) =>
+      loadCompatibleModelRuntime(prisma, secrets, "user-1", "credential-1", "model-a");
+    await expect(
+      load({
+        load: async () => {
+          throw new Error("Unsupported state or unable to authenticate data");
+        },
+      }),
+    ).rejects.toThrow(
+      new UnavailableModelForAuthError(
+        "This model's settings are missing. Open model settings to configure it.",
+      ),
+    );
+    await expect(
+      load({ load: async () => JSON.stringify({ kind: "openai_compatible", baseUrl: "" }) }),
+    ).rejects.toBeInstanceOf(UnavailableModelForAuthError);
+    const outage = new SecretStoreUnavailableError(503);
+    await expect(
+      load({
+        load: async () => {
+          throw outage;
+        },
+      }),
+    ).rejects.toBe(outage);
   });
 });

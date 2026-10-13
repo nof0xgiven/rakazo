@@ -206,9 +206,10 @@ describe("finalizeRun", () => {
       where: { id: "intro-run" },
       select: { userId: true },
     });
-    expect(prisma.$transaction).toHaveBeenCalledWith(expect.any(Function), {
-      isolationLevel: "ReadCommitted",
-    });
+    expect(prisma.$transaction).toHaveBeenCalledWith(
+      expect.any(Function),
+      expect.objectContaining({ isolationLevel: "ReadCommitted" }),
+    );
     expect(tx.run.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: expect.objectContaining({ userId: "user-1" }) }),
     );
@@ -2280,9 +2281,10 @@ describe("sendUserMessage", () => {
     await send(["routine-1", "routine-2", "routine-1"]);
 
     expect(order).toEqual(["owner", "thread", "routines"]);
-    expect(transaction).toHaveBeenCalledWith(expect.any(Function), {
-      isolationLevel: "ReadCommitted",
-    });
+    expect(transaction).toHaveBeenCalledWith(
+      expect.any(Function),
+      expect.objectContaining({ isolationLevel: "ReadCommitted" }),
+    );
     expect(tx.routine.findMany).toHaveBeenCalledWith({
       where: {
         id: { in: ["routine-1", "routine-2"] },

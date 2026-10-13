@@ -167,10 +167,19 @@ test("a routine runs on the bot's model until another is picked", async ({ page 
   await rpc(page, "models/connect", {
     provider: "openai-compatible",
     apiKey: "fake-routine-model-key",
-    modelId: "llama-3.3-70b",
     baseUrl: "http://127.0.0.1:8090/v1",
+    modelId: "llama-3.3-70b",
     thinkingLevel: "low",
-    reasoning: true,
+    models: [
+      {
+        modelId: "llama-3.3-70b",
+        thinkingLevels: ["off", "minimal", "low", "medium", "high"],
+        defaultThinkingLevel: null,
+        contextWindow: 32768,
+        maxTokens: 4096,
+        supportsImages: false,
+      },
+    ],
   });
   await page.getByRole("button", { name: /Model check/ }).click();
   await page.getByRole("button", { name: "Advanced", exact: true }).click();

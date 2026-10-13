@@ -185,9 +185,10 @@ describe("commitBotUpdate", () => {
 
     expect(order).toEqual(["owner", "validate", "update"]);
     expect(tx.$queryRaw.mock.calls[0]?.slice(1)).toEqual(["user-1"]);
-    expect(transaction).toHaveBeenCalledWith(expect.any(Function), {
-      isolationLevel: "ReadCommitted",
-    });
+    expect(transaction).toHaveBeenCalledWith(
+      expect.any(Function),
+      expect.objectContaining({ isolationLevel: "ReadCommitted" }),
+    );
     expect(prisma.bot.update).not.toHaveBeenCalled();
     expect(appendEvent).not.toHaveBeenCalled();
     expect(notify).not.toHaveBeenCalled();

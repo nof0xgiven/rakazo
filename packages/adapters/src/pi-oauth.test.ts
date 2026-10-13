@@ -130,6 +130,27 @@ describe("model secrets", () => {
     });
     expect(parseModelSecret(withInvalid)).toEqual(secret);
   });
+  it.each([null, {}, "model-a", 1])(
+    "reads a present non-array models field %j as canonical with no models",
+    (models) => {
+      const parsed = parseModelSecret(
+        JSON.stringify({
+          kind: "openai_compatible",
+          baseUrl: "http://127.0.0.1:8000/v1",
+          apiKey: "fake-key",
+          reasoning: true,
+          models,
+        }),
+      );
+      expect(parsed).toEqual({
+        kind: "openai_compatible",
+        format: "canonical",
+        baseUrl: "http://127.0.0.1:8000/v1",
+        apiKey: "fake-key",
+        models: [],
+      });
+    },
+  );
   it("reads endpoint-wide compatible fields only as a legacy secret it never writes", () => {
     const parsed = parseModelSecret(
       JSON.stringify({

@@ -493,9 +493,10 @@ describe("createRepos.createBot model choice", () => {
     await expect(repos.createBot(actor, profile, { validateModelChoice })).rejects.toBe(stop);
 
     expect(order).toEqual(["owner", "space", "parent", "validate"]);
-    expect(transaction).toHaveBeenCalledWith(expect.any(Function), {
-      isolationLevel: "ReadCommitted",
-    });
+    expect(transaction).toHaveBeenCalledWith(
+      expect.any(Function),
+      expect.objectContaining({ isolationLevel: "ReadCommitted" }),
+    );
     expect(validateModelChoice).toHaveBeenCalledWith(tx, {
       modelProvider: "openai-compatible",
       modelId: "model-a",

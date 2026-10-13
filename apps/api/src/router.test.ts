@@ -3359,9 +3359,10 @@ describe("bot model auth on save", () => {
         where: expect.objectContaining({ id: "secret-api", userId: actor.userId, spaceId: null }),
       }),
     );
-    expect(transaction).toHaveBeenCalledWith(expect.any(Function), {
-      isolationLevel: "ReadCommitted",
-    });
+    expect(transaction).toHaveBeenCalledWith(
+      expect.any(Function),
+      expect.objectContaining({ isolationLevel: "ReadCommitted" }),
+    );
     expect(botUpdate).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({

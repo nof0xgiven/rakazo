@@ -412,12 +412,13 @@ export function parseModelSecret(plaintext: string): StoredModelSecret {
     }
     const apiKey = typeof parsed.apiKey === "string" && parsed.apiKey ? parsed.apiKey : undefined;
     const endpoint = { kind: "openai_compatible" as const, baseUrl: parsed.baseUrl.trim() };
-    if (Array.isArray(parsed.models)) {
+    if (Object.hasOwn(parsed, "models")) {
+      const entries: unknown[] = Array.isArray(parsed.models) ? parsed.models : [];
       return {
         ...endpoint,
         format: "canonical",
         ...(apiKey ? { apiKey } : {}),
-        models: parsed.models.flatMap((entry) => {
+        models: entries.flatMap((entry) => {
           const model = OpenAiCompatibleModelConfigSchema.safeParse(entry);
           return model.success ? [model.data] : [];
         }),

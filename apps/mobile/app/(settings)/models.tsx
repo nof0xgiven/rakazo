@@ -536,9 +536,21 @@ export default function Models() {
     clearFeedback();
   }
 
+  function invalidateKeyLookups() {
+    modelProbe.reset();
+    modelDescription.reset();
+    clearFeedback();
+  }
+
   function updateApiKey(nextApiKey: string) {
     setApiKey(nextApiKey);
-    modelProbe.reset();
+    invalidateKeyLookups();
+  }
+
+  function updateRemoveSavedKey(remove: boolean) {
+    setRemoveSavedKey(remove);
+    if (remove) setApiKey("");
+    invalidateKeyLookups();
   }
 
   function chooseProvider(nextProvider: string) {
@@ -1140,11 +1152,7 @@ export default function Models() {
                 <NativeSwitch
                   accessibilityLabel={t("Remove saved key")}
                   disabled={busy}
-                  onValueChange={(value) => {
-                    setRemoveSavedKey(value);
-                    if (value) setApiKey("");
-                    modelProbe.reset();
-                  }}
+                  onValueChange={updateRemoveSavedKey}
                   value={removeSavedKey}
                 />
               </View>

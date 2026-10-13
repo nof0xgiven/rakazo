@@ -380,9 +380,10 @@ describe("reconcileStuckWork", () => {
       }),
       expect.anything(),
     );
-    expect(client.$transaction).toHaveBeenCalledWith(expect.any(Function), {
-      isolationLevel: "ReadCommitted",
-    });
+    expect(client.$transaction).toHaveBeenCalledWith(
+      expect.any(Function),
+      expect.objectContaining({ isolationLevel: "ReadCommitted" }),
+    );
     expect(client.$queryRaw.mock.calls[0]?.[0].join("")).toContain('FROM "user"');
     expect(client.$queryRaw.mock.calls[0]?.slice(1)).toEqual([run.userId]);
   });

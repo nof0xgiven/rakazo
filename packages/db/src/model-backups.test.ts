@@ -34,9 +34,10 @@ describe("space backup models", () => {
     expect(lock).toHaveBeenNthCalledWith(1, expect.any(Array), scope.userId);
     expect(lock).toHaveBeenNthCalledWith(2, expect.any(Array), scope.spaceId, scope.userId);
     expect(lock.mock.invocationCallOrder[1]).toBeLessThan(remove.mock.invocationCallOrder[0]!);
-    expect(transaction).toHaveBeenCalledWith(expect.any(Function), {
-      isolationLevel: "ReadCommitted",
-    });
+    expect(transaction).toHaveBeenCalledWith(
+      expect.any(Function),
+      expect.objectContaining({ isolationLevel: "ReadCommitted" }),
+    );
   });
 
   it("validates the choices inside the locked transaction before replacing them", async () => {
@@ -83,9 +84,10 @@ describe("space backup models", () => {
       [],
     );
     expect(transaction).toHaveBeenCalledTimes(2);
-    expect(transaction).toHaveBeenLastCalledWith(expect.any(Function), {
-      isolationLevel: "ReadCommitted",
-    });
+    expect(transaction).toHaveBeenLastCalledWith(
+      expect.any(Function),
+      expect.objectContaining({ isolationLevel: "ReadCommitted" }),
+    );
   });
 
   it("reads the persisted order only inside the current user and Space", async () => {
@@ -122,9 +124,10 @@ describe("space backup models", () => {
     ]);
 
     expect(transaction).toHaveBeenCalledTimes(1);
-    expect(transaction).toHaveBeenCalledWith(expect.any(Function), {
-      isolationLevel: "ReadCommitted",
-    });
+    expect(transaction).toHaveBeenCalledWith(
+      expect.any(Function),
+      expect.objectContaining({ isolationLevel: "ReadCommitted" }),
+    );
     expect(deleteMany).toHaveBeenCalledWith({ where: scope });
     expect(createMany).toHaveBeenCalledWith({
       data: [
@@ -146,9 +149,10 @@ describe("space backup models", () => {
 
     await replaceSpaceBackupModels(prisma, { userId: "user-b", spaceId: "space-two" }, []);
 
-    expect(transaction).toHaveBeenCalledWith(expect.any(Function), {
-      isolationLevel: "ReadCommitted",
-    });
+    expect(transaction).toHaveBeenCalledWith(
+      expect.any(Function),
+      expect.objectContaining({ isolationLevel: "ReadCommitted" }),
+    );
     expect(deleteMany).toHaveBeenCalledWith({ where: { userId: "user-b", spaceId: "space-two" } });
     expect(createMany).not.toHaveBeenCalled();
   });
@@ -170,12 +174,16 @@ describe("space backup models", () => {
     await replaceSpaceBackupModels(prisma, scope, [{ provider: "provider-b", modelId: "model-b" }]);
 
     expect(transaction).toHaveBeenCalledTimes(2);
-    expect(transaction).toHaveBeenNthCalledWith(1, expect.any(Function), {
-      isolationLevel: "ReadCommitted",
-    });
-    expect(transaction).toHaveBeenNthCalledWith(2, expect.any(Function), {
-      isolationLevel: "ReadCommitted",
-    });
+    expect(transaction).toHaveBeenNthCalledWith(
+      1,
+      expect.any(Function),
+      expect.objectContaining({ isolationLevel: "ReadCommitted" }),
+    );
+    expect(transaction).toHaveBeenNthCalledWith(
+      2,
+      expect.any(Function),
+      expect.objectContaining({ isolationLevel: "ReadCommitted" }),
+    );
     expect(deleteMany).toHaveBeenCalledTimes(1);
     expect(createMany).toHaveBeenCalledWith({
       data: [{ ...scope, provider: "provider-b", modelId: "model-b", position: 0 }],
@@ -191,8 +199,9 @@ describe("space backup models", () => {
       replaceSpaceBackupModels(prisma, scope, [{ provider: "provider-b", modelId: "model-b" }]),
     ).rejects.toBe(error);
     expect(transaction).toHaveBeenCalledTimes(1);
-    expect(transaction).toHaveBeenCalledWith(expect.any(Function), {
-      isolationLevel: "ReadCommitted",
-    });
+    expect(transaction).toHaveBeenCalledWith(
+      expect.any(Function),
+      expect.objectContaining({ isolationLevel: "ReadCommitted" }),
+    );
   });
 });

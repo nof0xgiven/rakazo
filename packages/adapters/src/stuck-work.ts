@@ -11,8 +11,13 @@ import {
   stuckWorkReminder,
   stuckWorkStoppedNotification,
 } from "@rakazo/core";
-import type { PrismaClient, ThreadEvents } from "@rakazo/db";
-import { appendEventInTransaction, expireStuckRun, Prisma, withTransactionRetry } from "@rakazo/db";
+import type { Prisma, PrismaClient, ThreadEvents } from "@rakazo/db";
+import {
+  appendEventInTransaction,
+  expireStuckRun,
+  MODEL_CONFIGURATION_TRANSACTION_OPTIONS,
+  withTransactionRetry,
+} from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import { ExpoPushProvider } from "./expo-push.js";
 
@@ -323,7 +328,7 @@ async function expireOne(
           updatedAt: run.updatedAt,
           now: deps.now,
         }),
-      { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted },
+      MODEL_CONFIGURATION_TRANSACTION_OPTIONS,
     ),
   );
   if (!expired) return;

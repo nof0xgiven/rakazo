@@ -2526,6 +2526,7 @@ function fallbackAwareModelStream(
   };
   const run = async () => {
     let buffered: AssistantMessageEvent[] = [];
+    let activeReasoning = options?.reasoning;
     while (!signalAborted()) {
       const target = state.getActive();
       lastPartial = undefined;
@@ -2537,9 +2538,7 @@ function fallbackAwareModelStream(
         const thinkingLevel = target.model.reasoning
           ? thinkingLevelFor(
               target.model,
-              target.config.thinkingLevel ??
-                options?.reasoning ??
-                state.request.model.thinkingLevel,
+              target.config.thinkingLevel ?? activeReasoning ?? state.request.model.thinkingLevel,
             )
           : "off";
         const reasoning = thinkingLevel === "off" ? undefined : thinkingLevel;
@@ -2566,6 +2565,7 @@ function fallbackAwareModelStream(
                 await state.onSwitch(next);
                 if (failIfAborted(target)) return;
                 buffered = [];
+                activeReasoning = undefined;
                 switched = true;
                 break;
               }

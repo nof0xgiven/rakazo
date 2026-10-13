@@ -146,6 +146,45 @@ describe("OpenAI-compatible model draft", () => {
     expect(applied.defaultModelId).toBe("unknown");
   });
 
+  it("keeps the first explicitly checked unknown model as the pending default", () => {
+    let draft = mergeDiscoveredOpenAiCompatibleModels(createOpenAiCompatibleModelDraft(), [
+      { modelId: "unknown", capabilities: null },
+      { modelId: "known", capabilities },
+    ]);
+    draft = toggleOpenAiCompatibleModel(draft, "unknown", true);
+    draft = toggleOpenAiCompatibleModel(draft, "known", true);
+    expect(draft.defaultModelId).toBeNull();
+    expect(applyDetectedOpenAiCompatibleSettings(draft, "known").defaultModelId).toBeNull();
+    expect(applyOpenAiCompatibleModelSetup(draft, "unknown").defaultModelId).toBe("unknown");
+    const cancelled = cancelOpenAiCompatibleModelSetup(draft, "unknown");
+    expect(cancelled.defaultModelId).toBeNull();
+    expect(cancelled.pendingDefaultModelId).toBeNull();
+    const chosen = applyOpenAiCompatibleModelSetup(
+      { ...draft, defaultModelId: "known" },
+      "unknown",
+    );
+    expect(chosen.defaultModelId).toBe("known");
+  });
+
+  it("never selects a default from Apply, Cancel or Use detected after the default is unchecked", () => {
+    let draft = mergeDiscoveredOpenAiCompatibleModels(createOpenAiCompatibleModelDraft(), [
+      { modelId: "first", capabilities },
+      { modelId: "second", capabilities },
+    ]);
+    draft = toggleOpenAiCompatibleModel(draft, "first", true);
+    draft = toggleOpenAiCompatibleModel(draft, "second", true);
+    expect(draft.defaultModelId).toBe("first");
+    draft = toggleOpenAiCompatibleModel(draft, "first", false);
+    expect(draft.defaultModelId).toBeNull();
+    const edited = updateOpenAiCompatibleModelSetup(draft, "second", { contextWindow: "65536" });
+    expect(applyOpenAiCompatibleModelSetup(edited, "second").defaultModelId).toBeNull();
+    expect(cancelOpenAiCompatibleModelSetup(edited, "second").defaultModelId).toBeNull();
+    expect(applyDetectedOpenAiCompatibleSettings(draft, "second").defaultModelId).toBeNull();
+    expect(openAiCompatibleDraftBlockers(draft, { requireDefault: true })).toEqual([
+      { kind: "missing_default" },
+    ]);
+  });
+
   it("requires a non-off level when thinking is on and drops a default it no longer supports", () => {
     let draft = addOpenAiCompatibleModel(createOpenAiCompatibleModelDraft(), {
       modelId: "manual",

@@ -131,7 +131,8 @@ export function OpenAiCompatibleModelList({
 
   function advanced(row: OpenAiCompatibleModelRow) {
     const setup: OpenAiCompatibleModelSetup = row.setup ?? openAiCompatibleModelSetup(row.config);
-    const issues = row.setup ? openAiCompatibleSetupIssues(row.setup) : [];
+    const issues = openAiCompatibleSetupIssues(setup);
+    const pending = row.setup !== null || row.config === null;
     const update = (patch: Partial<OpenAiCompatibleModelSetup>) =>
       onChange(updateOpenAiCompatibleModelSetup(draft, row.modelId, patch));
     const defaultLabel = t("Default ({level})", {
@@ -223,7 +224,7 @@ export function OpenAiCompatibleModelList({
               prominence="secondary"
             />
           ) : null}
-          {row.setup ? (
+          {pending ? (
             <>
               <NativeActionButton
                 accessibilityLabel={t("Cancel changes for {model}", { model: row.modelId })}
@@ -261,7 +262,8 @@ export function OpenAiCompatibleModelList({
       />
       <View style={styles.card}>
         {visibleRows.map((row) => {
-          const open = row.checked && (row.setup !== null || expanded.has(row.modelId));
+          const canConfigure = row.checked || row.config !== null;
+          const open = canConfigure && (row.setup !== null || expanded.has(row.modelId));
           return (
             <View key={row.modelId} style={styles.modelBlock}>
               <View style={styles.modelRow}>
@@ -275,7 +277,7 @@ export function OpenAiCompatibleModelList({
                   value={row.checked}
                 />
               </View>
-              {row.checked && row.config && !row.setup ? (
+              {canConfigure && !row.setup ? (
                 <Pressable
                   accessibilityLabel={t("Advanced settings for {model}", { model: row.modelId })}
                   accessibilityRole="button"
