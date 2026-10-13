@@ -1,9 +1,13 @@
+import type { BotMemoryBank } from "@rakazo/contracts";
 import { Alert } from "react-native";
 import { rpc } from "./api";
 import { t } from "./i18n";
 import { errorText } from "./user-error";
 
-export function confirmDeleteBot(bot: { id: string; name: string }, onDeleted: () => void) {
+export function confirmDeleteBot(
+  bot: { id: string; name: string; memoryBank?: BotMemoryBank | null },
+  onDeleted: () => void,
+) {
   const remove = async (deleteMemories: boolean) => {
     try {
       await rpc("bots/remove", { botId: bot.id, deleteMemories });
@@ -12,17 +16,18 @@ export function confirmDeleteBot(bot: { id: string; name: string }, onDeleted: (
       Alert.alert(t("Could not delete bot"), errorText(error, t("Try again.")));
     }
   };
+  const message = t(
+    "Its conversation, files, and routines will be permanently deleted. What should happen to its local notes?",
+  );
 
   Alert.alert(
     t("Delete {name}?", { name: bot.name }),
-    t(
-      "Its conversation, files, and routines will be permanently deleted. What should happen to its memories?",
-    ),
+    bot.memoryBank ? `${message}\n\n${t("Cloud memories stay in Hindsight Cloud.")}` : message,
     [
       { text: t("Cancel"), style: "cancel" },
-      { text: t("Keep memories"), style: "destructive", onPress: () => void remove(false) },
+      { text: t("Keep local notes"), style: "destructive", onPress: () => void remove(false) },
       {
-        text: t("Delete memories too"),
+        text: t("Delete local notes"),
         style: "destructive",
         onPress: () => void remove(true),
       },

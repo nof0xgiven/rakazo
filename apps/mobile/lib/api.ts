@@ -19,6 +19,7 @@ import {
   authCapabilitiesSchema,
   legacyAccountSecurity,
   legacyAuthCapabilitiesSchema,
+  MemoryConnectionErrorDataSchema,
 } from "@rakazo/contracts";
 import type { ThreadHistory } from "@rakazo/core";
 import {
@@ -70,6 +71,12 @@ export const MAX_MOBILE_AUTH_RESPONSE_BYTES = 256 * 1024;
 export const MAX_MOBILE_RPC_RESPONSE_BYTES = 16 * 1024 * 1024;
 /** Inbox bootstrap reads safe to replay without a Space header during auth recovery. */
 const SPACE_AUTH_RECOVERY_SAFE_PROCS = new Set(["spaces/list", "me"]);
+const MEMORY_REASON_PROCS: Record<string, true> = {
+  "memory/connectProvider": true,
+  "memory/banks": true,
+  "memory/bank": true,
+  "memory/createBank": true,
+};
 
 let cachedApiBase: string | undefined;
 const apiBaseListeners = new Set<() => void>();
@@ -203,6 +210,16 @@ export async function selectSpace(id: string) {
 
 export function selectedSpaceId(): string | null {
   return cachedSpaceId || null;
+}
+
+/** Changes whenever the server, signed-in session or Space selection changes, including A → B → A. */
+export function apiScopeKey(): string {
+  return JSON.stringify([
+    cachedApiBase ?? "",
+    currentSessionGeneration(),
+    cachedSpaceId,
+    spaceSelectionGeneration,
+  ]);
 }
 
 /** Keep requests usable after the server deleted the selected Space but native
@@ -897,7 +914,23 @@ export async function rpc<T>(
         if (!selectedSpaceId()) await clearStaleSpaceSelection();
         throw new Error(message);
       }
-      throw Object.defineProperty(new Error(message), "status", { value: res.status });
+      const failure = new Error(message);
+      Object.defineProperty(failure, "status", { value: res.status });
+      const failureBody: unknown = parsed.json;
+      if (
+        failureBody &&
+        typeof failureBody === "object" &&
+        "code" in failureBody &&
+        typeof failureBody.code === "string"
+      ) {
+        Object.defineProperty(failure, "code", { value: failureBody.code });
+        const reason =
+          MEMORY_REASON_PROCS[proc] && failureBody.code === "BAD_REQUEST" && "data" in failureBody
+            ? MemoryConnectionErrorDataSchema.safeParse(failureBody.data).data?.reason
+            : undefined;
+        if (reason) Object.defineProperty(failure, "reason", { value: reason });
+      }
+      throw failure;
     }
     const verifiedUser = parsed.json as { userId?: unknown; spaceId?: unknown } | null;
     if (

@@ -1014,7 +1014,15 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
     {
       text: t("Delete…"),
       destructive: true,
-      onPress: () => confirmDeleteBot({ id: botId ?? "", name: displayName || t("Bot") }, leaveBot),
+      onPress: () =>
+        confirmDeleteBot(
+          {
+            id: botId ?? "",
+            name: displayName || t("Bot"),
+            memoryBank: mentionBots.find((candidate) => candidate.id === botId)?.memoryBank,
+          },
+          leaveBot,
+        ),
     },
   ];
 

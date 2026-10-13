@@ -1,9 +1,16 @@
-import type { ComputerMode, ThinkingLevel } from "@rakazo/contracts";
+import type {
+  ComputerMode,
+  MemoryBank,
+  MemoryScopeValue,
+  SpaceMemoryConfig,
+  ThinkingLevel,
+} from "@rakazo/contracts";
 import {
   BOT_COLORS,
   BOT_DESCRIPTION_MAX_LENGTH,
   BOT_NAME_MAX_LENGTH,
   BOT_TITLE_MAX_LENGTH,
+  MemoryScopeSchema,
   normalizeCreateBotProfile,
 } from "@rakazo/contracts";
 import {
@@ -14,8 +21,9 @@ import {
 } from "@rakazo/core";
 import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import type { Voice } from "expo-speech";
+import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { BotAvatar } from "../components/bot-avatar";
 import { ComputerModePicker } from "../components/computer-mode-picker";
 import { glassHeaderOptions } from "../components/glass-title";
@@ -25,18 +33,46 @@ import { NativeActionButton } from "../components/native-action-button";
 import { NativeSwitch } from "../components/native-switch";
 import { NativeSymbol } from "../components/native-symbol";
 import { Chevron } from "../components/row-accessories";
-import type { MobileBot, MobileMe, MobileModel, MobileModelCredential } from "../lib/api";
-import { rpc } from "../lib/api";
+import type {
+  ApiRequestContext,
+  MobileBot,
+  MobileMe,
+  MobileModel,
+  MobileModelCredential,
+} from "../lib/api";
+import { apiScopeKey, captureApiRequestContext, rpc } from "../lib/api";
 import { deviceVoices, setVoiceForBot, voiceForBot, voiceLabel } from "../lib/bot-voices";
 import { COMPUTER_LIFECYCLE_TIMEOUT_MS } from "../lib/computer";
 import { loadDeviceVoiceEnabled } from "../lib/device-voice";
 import { useI18n } from "../lib/i18n";
-import { native, useMobileTokens } from "../lib/native";
+import {
+  MEMORY_LOOKUP_TIMEOUT_MS,
+  MEMORY_MUTATION_TIMEOUT_MS,
+  memoryErrorText,
+  memoryRequiresServerUpdate,
+  memoryScopeLabel,
+  readMemoryConfig,
+} from "../lib/memory";
+import { registerMemoryBankSelection } from "../lib/memory-bank-selection";
+import { native, useMobileTokens, useThemedStyles } from "../lib/native";
 import { errorText } from "../lib/user-error";
 import { stopVoicePlayback } from "../lib/voice";
 
 type BotSettingsRecord = MobileBot & {
   description?: string;
+  memoryScope?: MemoryScopeValue | null;
+};
+
+type MemoryConfigState =
+  | { status: "loading" }
+  | { status: "error"; message: string }
+  | { status: "ready"; config: SpaceMemoryConfig | null }
+  | { status: "outdated" };
+
+type MemoryBankUpdate = {
+  configId: string;
+  expectedBindingId: string | null;
+  bankId: string | null;
 };
 
 export default function BotSettingsScreen() {
@@ -67,6 +103,15 @@ export default function BotSettingsScreen() {
   const voiceChoice = useRef(0);
   const [voiceError, setVoiceError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const [memory, setMemory] = useState<{ state: MemoryConfigState; scopeKey: string }>(() => ({
+    state: { status: "loading" },
+    scopeKey: apiScopeKey(),
+  }));
+  const [memoryBankDraft, setMemoryBankDraft] = useState<MemoryBank | null | undefined>();
+  const [memoryScopeDraft, setMemoryScopeDraft] = useState<MemoryScopeValue | null>(null);
+  const memoryLoad = useRef(0);
+  const memoryConfigId = useRef<string | null>(null);
+  const memoryRegistration = useRef<{ unregister: () => void } | null>(null);
 
   useEffect(() => {
     if (!botId) return;
@@ -85,6 +130,7 @@ export default function BotSettingsScreen() {
         );
         setThinkingLevel(next.thinkingLevel ?? "");
         setAutoSpeak(next.autoSpeak);
+        setMemoryScopeDraft(next.memoryScope ?? null);
       })
       .catch((err) => setError(errorText(err, t("Could not load bot"))));
   }, [botId]);
@@ -107,6 +153,43 @@ export default function BotSettingsScreen() {
         setModelMetaError(errorText(err, t("Could not load model settings")));
       });
   }, [t]);
+
+  const loadMemoryConfig = useCallback(async () => {
+    const load = ++memoryLoad.current;
+    const scopeKey = apiScopeKey();
+    let state: MemoryConfigState;
+    try {
+      const requestContext = await captureApiRequestContext();
+      if (load !== memoryLoad.current || apiScopeKey() !== scopeKey) return;
+      const config = readMemoryConfig(
+        await rpc<unknown>(
+          "memory/providerConfig",
+          {},
+          { timeoutMs: MEMORY_LOOKUP_TIMEOUT_MS, requestContext },
+        ),
+      );
+      state = config === "outdated" ? { status: "outdated" } : { status: "ready", config };
+    } catch (err) {
+      state = memoryRequiresServerUpdate(err)
+        ? { status: "outdated" }
+        : { status: "error", message: memoryErrorText(err, t("Could not load memory settings.")) };
+    }
+    if (load !== memoryLoad.current || apiScopeKey() !== scopeKey) return;
+    if (state.status !== "error") {
+      const configId = state.status === "ready" ? (state.config?.id ?? null) : null;
+      if (configId !== memoryConfigId.current) setMemoryBankDraft(undefined);
+      memoryConfigId.current = configId;
+    }
+    setMemory({ state, scopeKey });
+  }, [t]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void loadMemoryConfig();
+    }, [loadMemoryConfig]),
+  );
+
+  useEffect(() => () => memoryRegistration.current?.unregister(), []);
 
   const connectedOptions = useMemo(
     () => connectedModelChoices(credentials, catalog),
@@ -267,11 +350,96 @@ export default function BotSettingsScreen() {
     }
   }
 
-  async function save() {
+  const memoryConfig = memory.state.status === "ready" ? memory.state.config : null;
+  const memoryOutdated =
+    memory.state.status === "outdated" || (bot !== null && !("memoryBank" in bot));
+  const committedMemoryBank = bot?.memoryBank ?? null;
+  const shownMemoryBank = memoryBankDraft === undefined ? committedMemoryBank : memoryBankDraft;
+  const memoryBankChanged =
+    memoryBankDraft !== undefined &&
+    (memoryBankDraft?.bankId ?? null) !== (committedMemoryBank?.bankId ?? null);
+  const memoryScopeEditable =
+    !memoryOutdated &&
+    memoryConfig !== null &&
+    !memoryConfig.capabilities.banks &&
+    memoryConfig.capabilities.sharedScope;
+
+  function openMemoryBank(config: SpaceMemoryConfig) {
+    if (!botId) return;
+    const scopeKey = apiScopeKey();
+    if (scopeKey !== memory.scopeKey) {
+      void loadMemoryConfig();
+      return;
+    }
+    const configId = config.id;
+    memoryRegistration.current?.unregister();
+    const registration = registerMemoryBankSelection({
+      botId,
+      configId,
+      scopeKey,
+      selectedBankId: shownMemoryBank?.bankId ?? null,
+      deliver: (bank) => {
+        if (memoryConfigId.current === configId) setMemoryBankDraft(bank);
+      },
+    });
+    memoryRegistration.current = registration;
+    router.push({
+      pathname: "/memory-bank",
+      params: { token: registration.token, botId, configId, scopeKey },
+    });
+  }
+
+  function save() {
+    if (!botId || !bot || pending) return;
+    if (!memoryBankChanged) {
+      void persist(undefined);
+      return;
+    }
+    if (memory.state.status === "error") {
+      setError(memory.state.message);
+      return;
+    }
+    if (memoryOutdated || !memoryConfig?.capabilities.banks || memory.scopeKey !== apiScopeKey()) {
+      setMemoryBankDraft(undefined);
+      setError(t("The memory connection changed. Choose a bank again."));
+      return;
+    }
+    const memoryBank: MemoryBankUpdate = {
+      configId: memoryConfig.id,
+      expectedBindingId: committedMemoryBank?.id ?? null,
+      bankId: memoryBankDraft?.bankId ?? null,
+    };
+    if (!committedMemoryBank) {
+      void persist(memoryBank);
+      return;
+    }
+    Alert.alert(
+      t("Change memory bank?"),
+      t("Existing memories stay in their current bank; processing already started may finish."),
+      [
+        { text: t("Cancel"), style: "cancel" },
+        { text: t("Continue"), onPress: () => void persist(memoryBank) },
+      ],
+    );
+  }
+
+  async function persist(memoryBank: MemoryBankUpdate | undefined) {
     if (!botId || !bot || pending) return;
     setPending(true);
     setError(null);
+    const memoryScopeKey = memory.scopeKey;
+    const memoryConnectionChanged = () => {
+      if (apiScopeKey() === memoryScopeKey && memoryConfigId.current === memoryBank?.configId) {
+        return false;
+      }
+      setMemoryBankDraft(undefined);
+      setError(t("The memory connection changed. Choose a bank again."));
+      return true;
+    };
+    let memoryContext: ApiRequestContext | undefined;
+    let memoryBankSent = false;
     try {
+      if (memoryBank && memoryConnectionChanged()) return;
       const profile = normalizeCreateBotProfile({ name, title, description });
       const selected = selectedModel;
       const input: {
@@ -285,6 +453,8 @@ export default function BotSettingsScreen() {
         modelId?: string | null;
         thinkingLevel?: ThinkingLevel | null;
         autoSpeak?: boolean;
+        memoryScope?: MemoryScopeValue | null;
+        memoryBank?: MemoryBankUpdate;
       } = { botId };
       if (profile.name !== bot.name) input.name = profile.name;
       if (profile.title !== bot.title) input.title = profile.title;
@@ -308,6 +478,10 @@ export default function BotSettingsScreen() {
           : null;
       }
       if (autoSpeak !== bot.autoSpeak) input.autoSpeak = autoSpeak;
+      if (memoryScopeEditable && memoryScopeDraft !== (bot.memoryScope ?? null)) {
+        input.memoryScope = memoryScopeDraft;
+      }
+      if (memoryBank) input.memoryBank = memoryBank;
       if (computerMode !== bot.computerMode) {
         await rpc(
           "bots/setComputer",
@@ -317,11 +491,33 @@ export default function BotSettingsScreen() {
       }
       // Use key presence so clearing title/description to "" still persists.
       if (Object.keys(input).length > 1) {
-        await rpc("bots/update", input);
+        if (memoryBank) {
+          memoryContext = await captureApiRequestContext();
+          if (memoryConnectionChanged()) return;
+        }
+        memoryBankSent = memoryContext !== undefined;
+        await rpc(
+          "bots/update",
+          input,
+          memoryContext
+            ? { timeoutMs: MEMORY_MUTATION_TIMEOUT_MS, requestContext: memoryContext }
+            : {},
+        );
       }
       router.back();
     } catch (err) {
-      setError(errorText(err, t("Could not save bot")));
+      if (memoryBankSent) {
+        setMemoryBankDraft(undefined);
+        void rpc<BotSettingsRecord>("bots/get", { botId })
+          .then((next) => {
+            if (apiScopeKey() === memoryScopeKey) setBot(next);
+          })
+          .catch(() => undefined);
+        void loadMemoryConfig();
+        setError(memoryErrorText(err, t("Could not save bot")));
+      } else {
+        setError(errorText(err, t("Could not save bot")));
+      }
     } finally {
       setPending(false);
     }
@@ -372,6 +568,55 @@ export default function BotSettingsScreen() {
       )}
     </View>
   );
+
+  function memoryControl(): ReactNode {
+    const state = memory.state;
+    if (state.status === "ready" && state.config === null) return null;
+    if (memoryOutdated) {
+      return (
+        <MemorySettingRow
+          label={t("Memory")}
+          value={t("Memory settings require a server update.")}
+        />
+      );
+    }
+    if (state.status === "error") {
+      return (
+        <MemorySettingRow
+          label={t("Memory")}
+          onPress={() => void loadMemoryConfig()}
+          value={t("Could not load memory settings.")}
+        />
+      );
+    }
+    if (state.status !== "ready" || !state.config) return null;
+    const config = state.config;
+    if (config.capabilities.banks) {
+      return (
+        <MemorySettingRow
+          chevron
+          disabled={pending}
+          label={t("Memory")}
+          onPress={() => openMemoryBank(config)}
+          value={shownMemoryBank?.name ?? t("Built-in")}
+        />
+      );
+    }
+    if (!config.capabilities.sharedScope) return null;
+    return (
+      <MenuPicker
+        choices={[
+          { key: "", label: memoryScopeLabel(null) },
+          { key: "isolated", label: memoryScopeLabel("isolated") },
+          { key: "shared", label: memoryScopeLabel("shared") },
+        ]}
+        label={t("Memory scope")}
+        onChange={(key) => setMemoryScopeDraft(MemoryScopeSchema.safeParse(key).data ?? null)}
+        value={memoryScopeDraft ?? ""}
+      />
+    );
+  }
+  const memoryRow = memoryControl();
 
   return (
     <>
@@ -539,13 +784,25 @@ export default function BotSettingsScreen() {
                 {modelMetaError}
               </Text>
             ) : null}
+            {memoryRow ? (
+              <View
+                style={{
+                  marginTop: 12,
+                  borderRadius: 14,
+                  backgroundColor: native.fill,
+                  overflow: "hidden",
+                }}
+              >
+                {memoryRow}
+              </View>
+            ) : null}
           </View>
         ) : null}
         {error ? <Text style={{ color: tokens.destructive, marginTop: 16 }}>{error}</Text> : null}
         <NativeActionButton
           disabled={!name.trim() || pending || !bot}
           label={pending ? t("Saving…") : t("Save")}
-          onPress={() => void save()}
+          onPress={save}
           style={{ marginTop: 24 }}
         />
       </ScrollView>
@@ -570,6 +827,76 @@ function thinkingLevelLabel(level: ThinkingLevel, t: (message: string) => string
   if (level === "minimal") return t("Minimal");
   if (level === "max") return t("Max");
   return `${level.slice(0, 1).toUpperCase()}${level.slice(1)}`;
+}
+
+function MemorySettingRow({
+  label,
+  value,
+  chevron = false,
+  disabled = false,
+  onPress,
+}: {
+  label: string;
+  value: string;
+  chevron?: boolean;
+  disabled?: boolean;
+  onPress?: () => void;
+}) {
+  const memoryStyles = useThemedStyles(createMemoryRowStyles);
+  const content = (
+    <>
+      <Text style={memoryStyles.label}>{label}</Text>
+      <Text numberOfLines={1} style={memoryStyles.value}>
+        {value}
+      </Text>
+      {chevron ? <Chevron /> : null}
+    </>
+  );
+  if (!onPress) {
+    return (
+      <View
+        accessibilityLabel={label}
+        accessibilityValue={{ text: value }}
+        accessible
+        style={memoryStyles.row}
+      >
+        {content}
+      </View>
+    );
+  }
+  return (
+    <Pressable
+      accessibilityLabel={label}
+      accessibilityRole="button"
+      accessibilityState={{ disabled }}
+      accessibilityValue={{ text: value }}
+      disabled={disabled}
+      onPress={onPress}
+      style={({ pressed }) => [
+        memoryStyles.row,
+        pressed && memoryStyles.pressed,
+        disabled && memoryStyles.disabled,
+      ]}
+    >
+      {content}
+    </Pressable>
+  );
+}
+
+function createMemoryRowStyles() {
+  return StyleSheet.create({
+    row: {
+      minHeight: 52,
+      paddingHorizontal: 16,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
+    },
+    label: { color: native.label, fontSize: 16 },
+    value: { flex: 1, color: native.secondaryLabel, textAlign: "right", fontSize: 16 },
+    pressed: { backgroundColor: native.fillPressed },
+    disabled: { opacity: 0.45 },
+  });
 }
 
 const styles = StyleSheet.create({

@@ -30,6 +30,7 @@ function bot(id = "bot-1"): Bot {
     instructions: "",
     parentBotId: null,
     memoryScope: null,
+    memoryBank: null,
     createdAt: "2026-01-01T00:00:00.000Z",
     voiceId: null,
     teamChatAmbientEnabled: false,

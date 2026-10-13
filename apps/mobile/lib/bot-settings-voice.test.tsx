@@ -41,10 +41,13 @@ vi.mock("./device-voice", () => ({ loadDeviceVoiceEnabled: async () => true }));
 vi.mock("./voice", () => ({ stopVoicePlayback: mocks.stopVoicePlayback }));
 vi.mock("expo-speech", () => ({ stop: mocks.stop, speak: mocks.speak }));
 vi.mock("./api", () => ({
+  apiScopeKey: () => "scope-fixture",
+  captureApiRequestContext: async () => ({ apiBase: "http://fixture", headers: {} }),
   rpc: async (procedure: string) => {
     if (procedure === "bots/get")
       return { id: "bot-fixture", name: "Fixture", title: "", computerMode: "team" };
     if (procedure === "me") return {};
+    if (procedure === "memory/providerConfig") return null;
     return [];
   },
 }));
