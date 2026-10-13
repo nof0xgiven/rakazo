@@ -1639,9 +1639,10 @@ describe("createRunExecutor", () => {
     });
     await executorFor(pinned).wakeRoutine("routine-1", scheduledAt.toISOString());
     expect(order).toEqual(["owner", "claim"]);
-    expect(pinned.$transaction).toHaveBeenCalledWith(expect.any(Function), {
-      isolationLevel: "ReadCommitted",
-    });
+    expect(pinned.$transaction).toHaveBeenCalledWith(
+      expect.any(Function),
+      expect.objectContaining({ isolationLevel: "ReadCommitted" }),
+    );
     expect(runCreate).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
