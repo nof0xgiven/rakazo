@@ -57,7 +57,7 @@ const modelA = {
   modelId: "fixture-a",
   thinkingLevels: ["off", "low", "high", "xhigh"],
   defaultThinkingLevel: null,
-  contextWindow: 128_000,
+  contextWindow: 160_000,
   maxTokens: 4096,
   supportsImages: false,
 } satisfies OpenAiCompatibleModelConfig;
@@ -65,7 +65,7 @@ const modelB = {
   modelId: "fixture-b",
   thinkingLevels: ["low", "medium"],
   defaultThinkingLevel: null,
-  contextWindow: 64_000,
+  contextWindow: 160_000,
   maxTokens: 4096,
   supportsImages: false,
 } satisfies OpenAiCompatibleModelConfig;
@@ -73,7 +73,7 @@ const modelPlain = {
   modelId: "fixture-plain",
   thinkingLevels: ["off"],
   defaultThinkingLevel: null,
-  contextWindow: 32_768,
+  contextWindow: 160_000,
   maxTokens: 4096,
   supportsImages: false,
 } satisfies OpenAiCompatibleModelConfig;
