@@ -158,18 +158,27 @@ test("pages more than 50 banks, searches on the server, and reports denied creat
   const chooser = bankChooser(page);
   const list = chooser.getByTestId("memory-bank-list");
   await expect(list.getByText("Could not reach the server", { exact: true })).toBeVisible();
-  await list.getByRole("button", { name: "Retry", exact: true }).click();
+  const search = chooser.getByLabel("Search banks");
+  await search.focus();
+  await page.keyboard.press("Tab");
+  await expect(list.getByRole("button", { name: "Retry", exact: true })).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(chooser).toBeVisible();
 
   const rows = list.getByRole("option");
   await expect(rows).toHaveCount(51);
   await expect(list.getByRole("option", { name: /fixture-bank-050/ })).toBeVisible();
   await expect(list.getByRole("option", { name: /fixture-bank-051/ })).toHaveCount(0);
-  await list.getByRole("button", { name: "Load more", exact: true }).click();
+  await search.focus();
+  await page.keyboard.press("Tab");
+  await expect(list.getByRole("button", { name: "Load more", exact: true })).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(chooser).toBeVisible();
   await expect(rows).toHaveCount(61);
   await expect(list.getByRole("option", { name: /fixture-bank-060/ })).toBeVisible();
   await expect(list.getByRole("button", { name: "Load more", exact: true })).toHaveCount(0);
 
-  await chooser.getByLabel("Search banks").fill("fixture-bank-057");
+  await search.fill("fixture-bank-057");
   await expect(rows).toHaveCount(2);
   await expect(list.getByRole("option", { name: /fixture-bank-057/ })).toBeVisible();
   await captureScreenshot(page, testInfo, "hindsight-bank-search");

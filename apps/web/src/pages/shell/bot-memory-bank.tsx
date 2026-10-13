@@ -332,22 +332,22 @@ function BankChooserDialog({
 
         {mode === "list" ? (
           <>
-            <Command
-              shouldFilter={false}
-              label={forbidden ? undefined : t`Search banks`}
-              tabIndex={forbidden ? 0 : -1}
-              className="rounded-none border-0 bg-transparent p-0"
-            >
-              {!forbidden ? (
-                <CommandInput
-                  placeholder={t`Search banks`}
-                  value={query}
-                  onValueChange={setQuery}
-                  autoFocus
-                />
-              ) : null}
-              <div className="mt-2" data-testid="memory-bank-list">
-                <CommandList label={t`Memory bank`} className="p-0">
+            <div data-testid="memory-bank-list">
+              <Command
+                shouldFilter={false}
+                label={forbidden ? undefined : t`Search banks`}
+                tabIndex={forbidden ? 0 : -1}
+                className="rounded-none border-0 bg-transparent p-0"
+              >
+                {!forbidden ? (
+                  <CommandInput
+                    placeholder={t`Search banks`}
+                    value={query}
+                    onValueChange={setQuery}
+                    autoFocus
+                  />
+                ) : null}
+                <CommandList label={t`Memory bank`} className="mt-2 p-0">
                   <BankRow
                     value="builtin"
                     label={t`Built-in`}
@@ -365,50 +365,50 @@ function BankChooserDialog({
                     />
                   ))}
                 </CommandList>
-                {list.loading ? (
-                  <p className="px-3 py-2 text-[13px] text-muted-foreground">
-                    <Trans>Loading…</Trans>
-                  </p>
-                ) : null}
-                {list.loaded && !list.loading && !list.failure && list.banks.length === 0 ? (
-                  <p className="px-3 py-2 text-[13px] text-muted-foreground">
-                    {searching ? <Trans>No banks found.</Trans> : <Trans>No banks yet.</Trans>}
-                  </p>
-                ) : null}
-                {list.failure ? (
-                  <div className="flex items-center justify-between gap-3 px-3 py-2 text-[13px] text-muted-foreground">
-                    <span>{list.failure.text}</span>
-                    {!forbidden ? (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          const failure = list.failure;
-                          if (failure) void loadPage(debouncedQuery, failure.offset);
-                        }}
-                      >
-                        <Trans>Retry</Trans>
-                      </Button>
-                    ) : null}
-                  </div>
-                ) : null}
-                {!forbidden && !list.loading && !list.failure && list.nextOffset !== null ? (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="mt-1"
-                    onClick={() => {
-                      const offset = list.nextOffset;
-                      if (offset !== null) void loadPage(debouncedQuery, offset);
-                    }}
-                  >
-                    <Trans>Load more</Trans>
-                  </Button>
-                ) : null}
-              </div>
-            </Command>
+              </Command>
+              {list.loading ? (
+                <p className="px-3 py-2 text-[13px] text-muted-foreground">
+                  <Trans>Loading…</Trans>
+                </p>
+              ) : null}
+              {list.loaded && !list.loading && !list.failure && list.banks.length === 0 ? (
+                <p className="px-3 py-2 text-[13px] text-muted-foreground">
+                  {searching ? <Trans>No banks found.</Trans> : <Trans>No banks yet.</Trans>}
+                </p>
+              ) : null}
+              {list.failure ? (
+                <div className="flex items-center justify-between gap-3 px-3 py-2 text-[13px] text-muted-foreground">
+                  <span>{list.failure.text}</span>
+                  {!forbidden ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        const failure = list.failure;
+                        if (failure) void loadPage(debouncedQuery, failure.offset);
+                      }}
+                    >
+                      <Trans>Retry</Trans>
+                    </Button>
+                  ) : null}
+                </div>
+              ) : null}
+              {!forbidden && !list.loading && !list.failure && list.nextOffset !== null ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="mt-1"
+                  onClick={() => {
+                    const offset = list.nextOffset;
+                    if (offset !== null) void loadPage(debouncedQuery, offset);
+                  }}
+                >
+                  <Trans>Load more</Trans>
+                </Button>
+              ) : null}
+            </div>
             <div className="flex gap-2">
               <Button type="button" variant="ghost" size="sm" onClick={() => setMode("id")}>
                 <Trans>Use bank ID</Trans>
