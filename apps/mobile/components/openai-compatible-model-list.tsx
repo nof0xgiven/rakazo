@@ -236,6 +236,7 @@ export function OpenAiCompatibleModelList({
               <NativeActionButton
                 accessibilityLabel={t("Apply settings for {model}", { model: row.modelId })}
                 disabled={busy || issues.length > 0}
+                fill={false}
                 label={t("Apply")}
                 onPress={() => onChange(applyOpenAiCompatibleModelSetup(draft, row.modelId))}
               />

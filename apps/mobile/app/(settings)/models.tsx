@@ -1584,7 +1584,7 @@ export default function Models() {
 
   const connectedStatusRow = credential ? (
     <View style={styles.statusRow}>
-      <View style={styles.providerCopy}>
+      <View style={[styles.providerCopy, styles.statusCopy]}>
         <Text style={styles.providerName}>
           {t("Connected · {label}", { label: credential.label })}
         </Text>
@@ -2031,9 +2031,13 @@ function createModelsStyles() {
     },
     statusRow: {
       flexDirection: "row",
+      flexWrap: "wrap",
       alignItems: "center",
       gap: 12,
       marginTop: 8,
+    },
+    statusCopy: {
+      flexBasis: 160,
     },
     maintenanceSection: {
       marginTop: 16,

@@ -1,5 +1,5 @@
 import { MenuView } from "@expo/ui/community/menu";
-import type { ReactNode } from "react";
+import { type ReactNode, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { native, useResolvedAppearance, useThemedStyles } from "../lib/native";
 import { NativeSymbol } from "./native-symbol";
@@ -57,28 +57,33 @@ export function MenuPicker({
   divider?: boolean;
 }) {
   const styles = useThemedStyles(createStyles);
+  const [width, setWidth] = useState<number | null>(null);
   const current = choices.find((choice) => choice.key === value)?.label ?? choices[0]?.label ?? "";
   return (
-    <MenuPickerMenu choices={choices} label={label} onChange={onChange} value={value}>
-      <View
-        accessibilityLabel={label}
-        accessibilityRole="button"
-        accessibilityValue={{ text: current }}
-        accessible
-        style={[styles.row, divider && styles.divider]}
-      >
-        <Text style={styles.label}>{label}</Text>
-        <Text numberOfLines={1} style={styles.value}>
-          {current}
-        </Text>
-        <NativeSymbol
-          android="chevron-expand"
-          color={native.tertiaryLabel}
-          ios="chevron.up.chevron.down"
-          size={13}
-        />
-      </View>
-    </MenuPickerMenu>
+    <View onLayout={(event) => setWidth(event.nativeEvent.layout.width)}>
+      <MenuPickerMenu choices={choices} label={label} onChange={onChange} value={value}>
+        <View
+          accessibilityLabel={label}
+          accessibilityRole="button"
+          accessibilityValue={{ text: current }}
+          accessible
+          style={[styles.row, divider && styles.divider, width === null ? null : { width }]}
+        >
+          <Text style={styles.label}>{label}</Text>
+          <View style={styles.valueGroup}>
+            <Text numberOfLines={1} style={styles.value}>
+              {current}
+            </Text>
+            <NativeSymbol
+              android="chevron-expand"
+              color={native.tertiaryLabel}
+              ios="chevron.up.chevron.down"
+              size={13}
+            />
+          </View>
+        </View>
+      </MenuPickerMenu>
+    </View>
   );
 }
 
@@ -87,7 +92,9 @@ function createStyles() {
     row: {
       minHeight: 52,
       paddingHorizontal: 16,
+      paddingVertical: 10,
       flexDirection: "row",
+      flexWrap: "wrap",
       alignItems: "center",
       gap: 8,
     },
@@ -96,11 +103,21 @@ function createStyles() {
       borderTopColor: native.separator,
     },
     label: {
+      flexShrink: 1,
       color: native.label,
       fontSize: 16,
     },
+    valueGroup: {
+      flexGrow: 1,
+      flexShrink: 1,
+      flexBasis: 120,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "flex-end",
+      gap: 8,
+    },
     value: {
-      flex: 1,
+      flexShrink: 1,
       color: native.secondaryLabel,
       textAlign: "right",
       fontSize: 16,
