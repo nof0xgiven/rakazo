@@ -132,6 +132,15 @@ Connect. Users can add an HTTPS MCP server, Treg endpoint, or OpenAPI JSON docum
 **Integrations** without enabling either managed catalog. Connector credentials are encrypted on the
 server and are never returned by the API.
 
+Memory providers are optional. Without one, bots keep their built-in Markdown notes. A Space owner
+can connect one external provider at a time in Memory settings; for Hindsight Cloud that is an API
+key, and each bot then chooses or creates a bank under **Advanced → Memory**. Bound bots recall from
+their bank before replying and queue each completed exchange for storage, which Hindsight Cloud
+processes in the background. Bots in the Space can use any bank the key can access, so prefer a key
+restricted to the intended banks. If recall fails, the bot replies without recalled memory; after a
+disconnect, bots return to built-in notes. Clearing a conversation, deleting a bot, or disconnecting
+leaves Cloud memories in place; delete them in Hindsight Cloud.
+
 Treg is usage-metered. Self-hosters supply their own Treg token; operators embedding Treg in a
 hosted product should review [Treg's integration terms](https://treg.to/integrate.md), which require
 a written agreement for hosted resale.
