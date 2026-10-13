@@ -671,7 +671,7 @@ msgstr ""
 #: src/pages/RoutineEditor.tsx
 #: src/pages/shell/bot-memory-bank.tsx
 msgid "Back"
-msgstr ""
+msgstr "Geri"
 
 #: src/pages/Auth.tsx
 msgid "Back to sign in"
@@ -821,6 +821,7 @@ msgstr "Sunucuya ulaşılamıyor."
 #: src/components/teach/TeachComputerOverlay.tsx
 #: src/pages/Artifacts.tsx
 #: src/pages/KnowledgeSection.tsx
+#: src/pages/MemorySettingsOverlay.tsx
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
 #: src/pages/PluginsOverlay.tsx
@@ -935,7 +936,7 @@ msgstr ""
 #: src/pages/HostComputerPrompt.tsx
 #: src/pages/shell/bot-memory-bank.tsx
 msgid "Checking…"
-msgstr ""
+msgstr "Kontrol ediliyor…"
 
 #: src/components/SoftwareUpdateSection.tsx
 msgid "Checkout has local changes. Clean it before updating."
@@ -2024,9 +2025,10 @@ msgstr ""
 msgid "Disconnect"
 msgstr "Bağlantıyı kes"
 
+#: src/pages/MemorySettingsOverlay.tsx
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "Disconnect {disconnectName}?"
-msgstr ""
+msgstr "{disconnectName} bağlantısı kesilsin mi?"
 
 #. placeholder {0}: selected.providerName ?? selected.provider
 #: src/pages/ModelSettingsOverlay.tsx
@@ -2675,7 +2677,7 @@ msgstr "Önceki mesajları yükle"
 #: src/pages/Artifacts.tsx
 #: src/pages/shell/bot-memory-bank.tsx
 msgid "Load more"
-msgstr ""
+msgstr "Daha fazla yükle"
 
 #: src/pages/RoutineRunHistory.tsx
 msgid "Load older runs"
@@ -4476,10 +4478,6 @@ msgstr ""
 #: src/lib/model-connection-preflight.ts
 msgid "The connection timed out."
 msgstr "Bağlantı zaman aşımına uğradı."
-
-#: src/lib/memory-provider.ts
-msgid "The memory connection changed. Choose a bank again."
-msgstr "Hafıza bağlantısı değişti. Yeniden bir banka seçin."
 
 #: src/lib/model-connection-preflight.ts
 msgid "The provider is rate-limiting requests."

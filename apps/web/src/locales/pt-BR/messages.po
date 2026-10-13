@@ -671,7 +671,7 @@ msgstr ""
 #: src/pages/RoutineEditor.tsx
 #: src/pages/shell/bot-memory-bank.tsx
 msgid "Back"
-msgstr ""
+msgstr "Voltar"
 
 #: src/pages/Auth.tsx
 msgid "Back to sign in"
@@ -821,6 +821,7 @@ msgstr "Não é possível acessar o servidor."
 #: src/components/teach/TeachComputerOverlay.tsx
 #: src/pages/Artifacts.tsx
 #: src/pages/KnowledgeSection.tsx
+#: src/pages/MemorySettingsOverlay.tsx
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
 #: src/pages/PluginsOverlay.tsx
@@ -935,7 +936,7 @@ msgstr ""
 #: src/pages/HostComputerPrompt.tsx
 #: src/pages/shell/bot-memory-bank.tsx
 msgid "Checking…"
-msgstr ""
+msgstr "Verificando…"
 
 #: src/components/SoftwareUpdateSection.tsx
 msgid "Checkout has local changes. Clean it before updating."
@@ -2024,9 +2025,10 @@ msgstr ""
 msgid "Disconnect"
 msgstr "Desconectar"
 
+#: src/pages/MemorySettingsOverlay.tsx
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "Disconnect {disconnectName}?"
-msgstr ""
+msgstr "Desconectar {disconnectName}?"
 
 #. placeholder {0}: selected.providerName ?? selected.provider
 #: src/pages/ModelSettingsOverlay.tsx
@@ -2675,7 +2677,7 @@ msgstr "Carregar mensagens anteriores..."
 #: src/pages/Artifacts.tsx
 #: src/pages/shell/bot-memory-bank.tsx
 msgid "Load more"
-msgstr ""
+msgstr "Carregar mais"
 
 #: src/pages/RoutineRunHistory.tsx
 msgid "Load older runs"
@@ -4476,10 +4478,6 @@ msgstr ""
 #: src/lib/model-connection-preflight.ts
 msgid "The connection timed out."
 msgstr "O tempo da conexão se esgotou."
-
-#: src/lib/memory-provider.ts
-msgid "The memory connection changed. Choose a bank again."
-msgstr "A conexão de memória mudou. Escolha um banco novamente."
 
 #: src/lib/model-connection-preflight.ts
 msgid "The provider is rate-limiting requests."

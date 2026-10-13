@@ -45,7 +45,7 @@ export function memoryFailureText(reason: MemoryConnectionFailureReason): string
     case "invalid_response":
       return t`Hindsight Cloud returned an unexpected response.`;
     case "binding_retired":
-      return t`The memory connection changed. Choose a bank again.`;
+      return t`Memory settings changed. Review and try again.`;
     case "bank_id_required":
     case "bank_list_forbidden":
       return t`This key can't list banks. Use bank ID.`;

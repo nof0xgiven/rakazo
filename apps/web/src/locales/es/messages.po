@@ -821,6 +821,7 @@ msgstr "No se puede alcanzar el servidor."
 #: src/components/teach/TeachComputerOverlay.tsx
 #: src/pages/Artifacts.tsx
 #: src/pages/KnowledgeSection.tsx
+#: src/pages/MemorySettingsOverlay.tsx
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
 #: src/pages/PluginsOverlay.tsx
@@ -2024,9 +2025,10 @@ msgstr ""
 msgid "Disconnect"
 msgstr "Desconectar"
 
+#: src/pages/MemorySettingsOverlay.tsx
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "Disconnect {disconnectName}?"
-msgstr ""
+msgstr "¿Desconectar {disconnectName}?"
 
 #. placeholder {0}: selected.providerName ?? selected.provider
 #: src/pages/ModelSettingsOverlay.tsx
@@ -2675,7 +2677,7 @@ msgstr "Cargar mensajes anteriores"
 #: src/pages/Artifacts.tsx
 #: src/pages/shell/bot-memory-bank.tsx
 msgid "Load more"
-msgstr ""
+msgstr "Cargar más"
 
 #: src/pages/RoutineRunHistory.tsx
 msgid "Load older runs"
@@ -4476,10 +4478,6 @@ msgstr "La API no volvió. Actualiza esta página."
 #: src/lib/model-connection-preflight.ts
 msgid "The connection timed out."
 msgstr "Se agotó el tiempo de conexión."
-
-#: src/lib/memory-provider.ts
-msgid "The memory connection changed. Choose a bank again."
-msgstr "La conexión de memoria cambió. Vuelve a elegir un banco."
 
 #: src/lib/model-connection-preflight.ts
 msgid "The provider is rate-limiting requests."

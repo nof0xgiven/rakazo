@@ -1,6 +1,14 @@
 import { Trans, useLingui } from "@lingui/react/macro";
 import type { SpaceMemoryConfig } from "@rakazo/contracts";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
   Button,
   Dialog,
   DialogClose,
@@ -59,6 +67,48 @@ function ScopePicker({
   );
 }
 
+function ConfirmBankDisconnect({
+  name,
+  onCancel,
+  onConfirm,
+}: {
+  name: string;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const disconnectName = name;
+  return (
+    <AlertDialog
+      open
+      onOpenChange={(open) => {
+        if (!open) onCancel();
+      }}
+    >
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>
+            <Trans>Disconnect {disconnectName}?</Trans>
+          </AlertDialogTitle>
+          <AlertDialogDescription>
+            <Trans>
+              Banks stay in Hindsight Cloud. Pending memory work stops; processing already started
+              may finish.
+            </Trans>
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>
+            <Trans>Cancel</Trans>
+          </AlertDialogCancel>
+          <AlertDialogAction variant="destructive" onClick={onConfirm}>
+            <Trans>Disconnect</Trans>
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
 export function MemorySettingsOverlay({
   onClose,
   state,
@@ -86,6 +136,10 @@ export function MemorySettingsOverlay({
     config?.defaultMemoryScope ?? "isolated",
   );
   const [pending, setPending] = useState<"connect" | "disconnect" | "scope" | null>(null);
+  const [confirmDisconnect, setConfirmDisconnect] = useState<{
+    configId: string;
+    name: string;
+  } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -229,18 +283,30 @@ export function MemorySettingsOverlay({
               variant="outline"
               size="sm"
               disabled={busy}
-              onClick={() => void disconnect(config.id)}
+              onClick={() => {
+                if (config.capabilities.banks) {
+                  setConfirmDisconnect({
+                    configId: config.id,
+                    name: registration?.name ?? config.provider,
+                  });
+                  return;
+                }
+                void disconnect(config.id);
+              }}
               className="mt-3"
             >
               {pending === "disconnect" ? <Trans>Disconnecting…</Trans> : <Trans>Disconnect</Trans>}
             </Button>
-            {config.capabilities.banks ? (
-              <p className="mt-2 text-[12.5px] text-muted-foreground">
-                <Trans>
-                  Banks stay in Hindsight Cloud. Pending memory work stops; processing already
-                  started may finish.
-                </Trans>
-              </p>
+            {confirmDisconnect ? (
+              <ConfirmBankDisconnect
+                name={confirmDisconnect.name}
+                onCancel={() => setConfirmDisconnect(null)}
+                onConfirm={() => {
+                  const { configId } = confirmDisconnect;
+                  setConfirmDisconnect(null);
+                  void disconnect(configId);
+                }}
+              />
             ) : null}
           </div>
         ) : registration ? (

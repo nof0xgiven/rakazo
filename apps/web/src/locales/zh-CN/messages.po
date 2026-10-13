@@ -821,6 +821,7 @@ msgstr "无法连接服务器。"
 #: src/components/teach/TeachComputerOverlay.tsx
 #: src/pages/Artifacts.tsx
 #: src/pages/KnowledgeSection.tsx
+#: src/pages/MemorySettingsOverlay.tsx
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
 #: src/pages/PluginsOverlay.tsx
@@ -2024,9 +2025,10 @@ msgstr ""
 msgid "Disconnect"
 msgstr "断开"
 
+#: src/pages/MemorySettingsOverlay.tsx
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "Disconnect {disconnectName}?"
-msgstr ""
+msgstr "断开 {disconnectName}？"
 
 #. placeholder {0}: selected.providerName ?? selected.provider
 #: src/pages/ModelSettingsOverlay.tsx
@@ -2675,7 +2677,7 @@ msgstr "加载更早的消息"
 #: src/pages/Artifacts.tsx
 #: src/pages/shell/bot-memory-bank.tsx
 msgid "Load more"
-msgstr ""
+msgstr "加载更多"
 
 #: src/pages/RoutineRunHistory.tsx
 msgid "Load older runs"
@@ -4476,10 +4478,6 @@ msgstr "API 未恢复。请刷新此页面。"
 #: src/lib/model-connection-preflight.ts
 msgid "The connection timed out."
 msgstr "连接超时。"
-
-#: src/lib/memory-provider.ts
-msgid "The memory connection changed. Choose a bank again."
-msgstr "记忆连接已更改。请重新选择记忆库。"
 
 #: src/lib/model-connection-preflight.ts
 msgid "The provider is rate-limiting requests."

@@ -11,6 +11,10 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
   Button,
+  Command,
+  CommandInput,
+  CommandItem,
+  CommandList,
   Dialog,
   DialogContent,
   DialogDescription,
@@ -19,7 +23,6 @@ import {
   DialogTitle,
   Input,
 } from "@rakazo/ui-web";
-import { Check } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import { isConflictError, memoryErrorText, memoryFailureReason } from "../../lib/memory-provider";
 import { rpc } from "../../lib/rpc";
@@ -67,7 +70,8 @@ export function BotMemoryBankField({
     setChooserOpen(false);
     const nextId = bank?.bankId ?? null;
     if (nextId === (current?.bankId ?? null)) return;
-    if (committed && committed.bankId !== nextId) {
+    const replacing = saving ? current : committed;
+    if (replacing && replacing.bankId !== nextId) {
       setConfirmBank({ bank });
       return;
     }
@@ -247,7 +251,8 @@ function BankChooserDialog({
       });
     } catch (error) {
       if (generation !== listGeneration.current) return;
-      setList((current) => ({ ...current, loading: false, failure: failureState(error, offset) }));
+      const failure = failureState(error, offset);
+      setList((current) => ({ ...current, loading: false, failure }));
     }
   }
 
@@ -327,74 +332,83 @@ function BankChooserDialog({
 
         {mode === "list" ? (
           <>
-            {!forbidden ? (
-              <Input
-                aria-label={t`Search banks`}
-                placeholder={t`Search banks`}
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                spellCheck={false}
-                autoFocus
-              />
-            ) : null}
-            <div className="rk-scroll max-h-72 overflow-y-auto" data-testid="memory-bank-list">
-              <BankRow
-                label={t`Built-in`}
-                selected={selectedBankId === null}
-                onClick={() => onSelect(null)}
-              />
-              {list.banks.map((bank) => (
-                <BankRow
-                  key={bank.bankId}
-                  label={bank.name}
-                  detail={bank.name !== bank.bankId ? bank.bankId : undefined}
-                  selected={bank.bankId === selectedBankId}
-                  onClick={() => onSelect(bank)}
+            <Command
+              shouldFilter={false}
+              label={forbidden ? undefined : t`Search banks`}
+              tabIndex={forbidden ? 0 : -1}
+              className="rounded-none border-0 bg-transparent p-0"
+            >
+              {!forbidden ? (
+                <CommandInput
+                  placeholder={t`Search banks`}
+                  value={query}
+                  onValueChange={setQuery}
+                  autoFocus
                 />
-              ))}
-              {list.loading ? (
-                <p className="px-3 py-2 text-[13px] text-muted-foreground">
-                  <Trans>Loading…</Trans>
-                </p>
               ) : null}
-              {list.loaded && !list.loading && !list.failure && list.banks.length === 0 ? (
-                <p className="px-3 py-2 text-[13px] text-muted-foreground">
-                  {searching ? <Trans>No banks found.</Trans> : <Trans>No banks yet.</Trans>}
-                </p>
-              ) : null}
-              {list.failure ? (
-                <div className="flex items-center justify-between gap-3 px-3 py-2 text-[13px] text-muted-foreground">
-                  <span>{list.failure.text}</span>
-                  {!forbidden ? (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => {
-                        const failure = list.failure;
-                        if (failure) void loadPage(debouncedQuery, failure.offset);
-                      }}
-                    >
-                      <Trans>Retry</Trans>
-                    </Button>
-                  ) : null}
-                </div>
-              ) : null}
-              {!forbidden && !list.loading && !list.failure && list.nextOffset !== null ? (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="mt-1"
-                  onClick={() => {
-                    const offset = list.nextOffset;
-                    if (offset !== null) void loadPage(debouncedQuery, offset);
-                  }}
-                >
-                  <Trans>Load more</Trans>
-                </Button>
-              ) : null}
-            </div>
+              <div className="mt-2" data-testid="memory-bank-list">
+                <CommandList label={t`Memory bank`} className="p-0">
+                  <BankRow
+                    value="builtin"
+                    label={t`Built-in`}
+                    selected={selectedBankId === null}
+                    onSelect={() => onSelect(null)}
+                  />
+                  {list.banks.map((bank) => (
+                    <BankRow
+                      key={bank.bankId}
+                      value={`bank:${bank.bankId}`}
+                      label={bank.name}
+                      detail={bank.name !== bank.bankId ? bank.bankId : undefined}
+                      selected={bank.bankId === selectedBankId}
+                      onSelect={() => onSelect(bank)}
+                    />
+                  ))}
+                </CommandList>
+                {list.loading ? (
+                  <p className="px-3 py-2 text-[13px] text-muted-foreground">
+                    <Trans>Loading…</Trans>
+                  </p>
+                ) : null}
+                {list.loaded && !list.loading && !list.failure && list.banks.length === 0 ? (
+                  <p className="px-3 py-2 text-[13px] text-muted-foreground">
+                    {searching ? <Trans>No banks found.</Trans> : <Trans>No banks yet.</Trans>}
+                  </p>
+                ) : null}
+                {list.failure ? (
+                  <div className="flex items-center justify-between gap-3 px-3 py-2 text-[13px] text-muted-foreground">
+                    <span>{list.failure.text}</span>
+                    {!forbidden ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          const failure = list.failure;
+                          if (failure) void loadPage(debouncedQuery, failure.offset);
+                        }}
+                      >
+                        <Trans>Retry</Trans>
+                      </Button>
+                    ) : null}
+                  </div>
+                ) : null}
+                {!forbidden && !list.loading && !list.failure && list.nextOffset !== null ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="mt-1"
+                    onClick={() => {
+                      const offset = list.nextOffset;
+                      if (offset !== null) void loadPage(debouncedQuery, offset);
+                    }}
+                  >
+                    <Trans>Load more</Trans>
+                  </Button>
+                ) : null}
+              </div>
+            </Command>
             <div className="flex gap-2">
               <Button type="button" variant="ghost" size="sm" onClick={() => setMode("id")}>
                 <Trans>Use bank ID</Trans>
@@ -494,24 +508,27 @@ function BankChooserDialog({
 }
 
 function BankRow({
+  value,
   label,
   detail,
   selected,
-  onClick,
+  onSelect,
 }: {
+  value: string;
   label: string;
   detail?: string;
   selected: boolean;
-  onClick: () => void;
+  onSelect: () => void;
 }) {
   return (
-    <button
-      type="button"
-      aria-pressed={selected}
-      onClick={onClick}
-      className="flex w-full items-center justify-between gap-3 rounded-md px-3 py-2 text-start hover:bg-accent focus-visible:bg-accent focus-visible:outline-none"
+    <CommandItem
+      value={value}
+      aria-checked={selected}
+      data-checked={selected}
+      onSelect={onSelect}
+      className="gap-3 px-3 py-2"
     >
-      <span className="min-w-0">
+      <span className="min-w-0 flex-1">
         <span className="block truncate text-[14px] text-foreground">{label}</span>
         {detail ? (
           <span className="block truncate font-mono text-[12px] text-muted-foreground">
@@ -519,7 +536,6 @@ function BankRow({
           </span>
         ) : null}
       </span>
-      {selected ? <Check className="size-4 shrink-0 text-foreground" aria-hidden="true" /> : null}
-    </button>
+    </CommandItem>
   );
 }

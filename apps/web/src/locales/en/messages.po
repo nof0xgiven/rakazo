@@ -821,6 +821,7 @@ msgstr "Can't reach the server."
 #: src/components/teach/TeachComputerOverlay.tsx
 #: src/pages/Artifacts.tsx
 #: src/pages/KnowledgeSection.tsx
+#: src/pages/MemorySettingsOverlay.tsx
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
 #: src/pages/PluginsOverlay.tsx
@@ -2024,6 +2025,7 @@ msgstr "Disabled tools"
 msgid "Disconnect"
 msgstr "Disconnect"
 
+#: src/pages/MemorySettingsOverlay.tsx
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "Disconnect {disconnectName}?"
 msgstr "Disconnect {disconnectName}?"
@@ -4476,10 +4478,6 @@ msgstr "The API did not come back. Refresh this page."
 #: src/lib/model-connection-preflight.ts
 msgid "The connection timed out."
 msgstr "The connection timed out."
-
-#: src/lib/memory-provider.ts
-msgid "The memory connection changed. Choose a bank again."
-msgstr "The memory connection changed. Choose a bank again."
 
 #: src/lib/model-connection-preflight.ts
 msgid "The provider is rate-limiting requests."

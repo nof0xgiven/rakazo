@@ -65,6 +65,36 @@ vi.mock("@rakazo/ui-web", () => {
     }) => <button type="button" {...props} />,
     Dialog: Passthrough,
     DialogContent: Block,
+    Command: Block,
+    CommandInput: ({
+      onValueChange,
+      ...props
+    }: ComponentProps<"input"> & { onValueChange?: (value: string) => void }) => (
+      <input {...props} onChange={(event) => onValueChange?.(event.target.value)} />
+    ),
+    CommandList: ({ children, label }: { children?: ReactNode; label?: string }) => (
+      <div role="listbox" aria-label={label}>
+        {children}
+      </div>
+    ),
+    CommandItem: ({
+      children,
+      value: _value,
+      onSelect,
+      ...props
+    }: ComponentProps<"div"> & { value?: string; onSelect?: (value: string) => void }) => (
+      <div
+        role="option"
+        tabIndex={-1}
+        {...props}
+        onClick={() => onSelect?.("")}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") onSelect?.("");
+        }}
+      >
+        {children}
+      </div>
+    ),
     DialogHeader: Block,
     DialogTitle: Block,
     DialogDescription: Block,
@@ -149,8 +179,8 @@ async function flush() {
 }
 
 function bankRow(name: string) {
-  return [...container.querySelectorAll('[data-testid="memory-bank-list"] button')].find(
-    (button) => button.querySelector("span span")?.textContent === name,
+  return [...container.querySelectorAll('[data-testid="memory-bank-list"] [role="option"]')].find(
+    (option) => option.querySelector("span span")?.textContent === name,
   );
 }
 

@@ -73,12 +73,7 @@ test("connects Hindsight Cloud and binds existing, created, and direct-ID banks"
   await expect(memory.getByText("Connected", { exact: true })).toBeVisible();
   await expect(memory.getByText("Hindsight Cloud", { exact: true })).toBeVisible();
   await expect(memory.getByLabel("API key")).toHaveCount(0);
-  await expect(
-    memory.getByText(
-      "Banks stay in Hindsight Cloud. Pending memory work stops; processing already started may finish.",
-      { exact: true },
-    ),
-  ).toBeVisible();
+  await expect(memory.getByText(/^Banks stay in Hindsight Cloud\./)).toHaveCount(0);
   await captureScreenshot(page, testInfo, "hindsight-connected");
   const config = await memoryConfig(page);
   expect(config).toMatchObject({
@@ -95,10 +90,10 @@ test("connects Hindsight Cloud and binds existing, created, and direct-ID banks"
   await expect(
     chooser.getByText("Bots using the same bank share memory.", { exact: true }),
   ).toBeVisible();
-  await expect(chooser.getByRole("button", { name: /Team notes/ })).toBeVisible();
-  await expect(chooser.getByRole("button", { name: "raw-bank-id", exact: true })).toBeVisible();
+  await expect(chooser.getByRole("option", { name: /Team notes/ })).toBeVisible();
+  await expect(chooser.getByRole("option", { name: "raw-bank-id", exact: true })).toBeVisible();
   await captureScreenshot(page, testInfo, "hindsight-bank-picker");
-  await chooser.getByRole("button", { name: /Team notes/ }).click();
+  await chooser.getByRole("option", { name: /Team notes/ }).click();
   await expect(chooser).toHaveCount(0);
   await expectBoundBank(field, "Team notes", "team-notes");
   const firstBinding = await botMemoryBank(page, chiefId);
@@ -138,7 +133,7 @@ test("connects Hindsight Cloud and binds existing, created, and direct-ID banks"
   });
 
   chooser = await openBankChooser(field);
-  await chooser.getByRole("button", { name: "Built-in", exact: true }).click();
+  await chooser.getByRole("option", { name: "Built-in", exact: true }).click();
   await confirmBankChange(page);
   await expectBoundBank(field, "Built-in");
   expect(await botMemoryBank(page, chiefId)).toBeNull();
@@ -165,18 +160,18 @@ test("pages more than 50 banks, searches on the server, and reports denied creat
   await expect(list.getByText("Could not reach the server", { exact: true })).toBeVisible();
   await list.getByRole("button", { name: "Retry", exact: true }).click();
 
-  const rows = list.locator("button[aria-pressed]");
+  const rows = list.getByRole("option");
   await expect(rows).toHaveCount(51);
-  await expect(list.getByRole("button", { name: /fixture-bank-050/ })).toBeVisible();
-  await expect(list.getByRole("button", { name: /fixture-bank-051/ })).toHaveCount(0);
+  await expect(list.getByRole("option", { name: /fixture-bank-050/ })).toBeVisible();
+  await expect(list.getByRole("option", { name: /fixture-bank-051/ })).toHaveCount(0);
   await list.getByRole("button", { name: "Load more", exact: true }).click();
   await expect(rows).toHaveCount(61);
-  await expect(list.getByRole("button", { name: /fixture-bank-060/ })).toBeVisible();
+  await expect(list.getByRole("option", { name: /fixture-bank-060/ })).toBeVisible();
   await expect(list.getByRole("button", { name: "Load more", exact: true })).toHaveCount(0);
 
   await chooser.getByLabel("Search banks").fill("fixture-bank-057");
   await expect(rows).toHaveCount(2);
-  await expect(list.getByRole("button", { name: /fixture-bank-057/ })).toBeVisible();
+  await expect(list.getByRole("option", { name: /fixture-bank-057/ })).toBeVisible();
   await captureScreenshot(page, testInfo, "hindsight-bank-search");
   await chooser.getByLabel("Search banks").fill("no-such-bank");
   await expect(list.getByText("No banks found.", { exact: true })).toBeVisible();
@@ -274,7 +269,7 @@ test("failed saves, stale connections, and busy creation keep the committed bank
   const field = await openBotMemory(page, "Chief");
 
   let chooser = await openBankChooser(field);
-  await chooser.getByRole("button", { name: /Alpha/ }).click();
+  await chooser.getByRole("option", { name: /Alpha/ }).click();
   await expect(
     settings.getByText("Hindsight Cloud is temporarily unavailable.", { exact: true }),
   ).toBeVisible();
@@ -283,12 +278,12 @@ test("failed saves, stale connections, and busy creation keep the committed bank
   await captureScreenshot(page, testInfo, "hindsight-bank-save-failed");
 
   chooser = await openBankChooser(field);
-  await chooser.getByRole("button", { name: /Alpha/ }).click();
+  await chooser.getByRole("option", { name: /Alpha/ }).click();
   await expectBoundBank(field, "Alpha", "alpha");
 
   const stale = await memoryConfig(page);
   chooser = await openBankChooser(field);
-  await expect(chooser.getByRole("button", { name: /Beta/ })).toBeVisible();
+  await expect(chooser.getByRole("option", { name: /Beta/ })).toBeVisible();
   await rpc(page, "memory/disconnectProvider", { configId: stale!.id });
   const replacement = await rpc<{ id: string }>(page, "memory/connectProvider", {
     provider: "hindsight",
@@ -298,7 +293,7 @@ test("failed saves, stale connections, and busy creation keep the committed bank
     expectedConfigId: null,
   });
   expect(replacement.id).not.toBe(stale!.id);
-  await chooser.getByRole("button", { name: /Beta/ }).click();
+  await chooser.getByRole("option", { name: /Beta/ }).click();
   await confirmBankChange(page);
   await expect(
     settings.getByText("Memory settings changed. Review and try again.", { exact: true }),
@@ -308,7 +303,7 @@ test("failed saves, stale connections, and busy creation keep the committed bank
   await captureScreenshot(page, testInfo, "hindsight-stale-connection");
 
   chooser = await openBankChooser(field);
-  await chooser.getByRole("button", { name: /Beta/ }).click();
+  await chooser.getByRole("option", { name: /Beta/ }).click();
   await expectBoundBank(field, "Beta", "beta");
   expect(await botMemoryBank(page, chiefId)).toMatchObject({
     bankId: "beta",
@@ -359,13 +354,13 @@ test("shared banks and bound-bot deletion keep Cloud memories", async ({ page },
   await expect(
     chooser.getByText("Bots using the same bank share memory.", { exact: true }),
   ).toBeVisible();
-  await chooser.getByRole("button", { name: /Shared notes/ }).click();
+  await chooser.getByRole("option", { name: /Shared notes/ }).click();
   await expectBoundBank(field, "Shared notes", "shared-notes");
 
   const scoutId = await createNamedBot(page, "Scout");
   field = await openBotMemory(page, "Scout");
   chooser = await openBankChooser(field);
-  await chooser.getByRole("button", { name: /Shared notes/ }).click();
+  await chooser.getByRole("option", { name: /Shared notes/ }).click();
   await expectBoundBank(field, "Shared notes", "shared-notes");
   const [chiefBank, scoutBank] = await Promise.all([
     botMemoryBank(page, chiefId),
@@ -406,6 +401,16 @@ test("shared banks and bound-bot deletion keep Cloud memories", async ({ page },
 
   const memory = await openMemorySettings(page);
   await memory.getByRole("button", { name: "Disconnect", exact: true }).click();
+  const disconnectDialog = page.getByRole("alertdialog", { name: "Disconnect Hindsight Cloud?" });
+  await expect(
+    disconnectDialog.getByText(
+      "Banks stay in Hindsight Cloud. Pending memory work stops; processing already started may finish.",
+      { exact: true },
+    ),
+  ).toBeVisible();
+  await captureScreenshot(page, testInfo, "hindsight-disconnect-confirm");
+  await disconnectDialog.getByRole("button", { name: "Disconnect", exact: true }).click();
+  await expect(disconnectDialog).toHaveCount(0);
   await expect(memory.getByLabel("Provider")).toBeVisible();
   expect(await memoryConfig(page)).toBeNull();
   expect(await botMemoryBank(page, chiefId)).toBeNull();
