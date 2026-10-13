@@ -285,6 +285,7 @@ export const ZH_MESSAGES: Record<string, string> = {
   "Delete account": "删除账户",
   "Delete group": "删除群组",
   "Delete local notes": "删除本地笔记",
+  "Delete memories too": "同时删除记忆",
   "Delete space": "删除空间",
   "Delete {name}?": "要删除 {name} 吗？",
   "Delete this group? Bots and their solo threads are kept.":
@@ -344,11 +345,14 @@ export const ZH_MESSAGES: Record<string, string> = {
   "Its conversation, files, and routines will be permanently deleted. What should happen to its local notes?":
     "它的对话、文件和例行任务将被永久删除。本地笔记要如何处理？",
   "Cloud memories stay in Hindsight Cloud.": "云端记忆会保留在 Hindsight Cloud 中。",
+  "Its conversation, files, and routines will be permanently deleted. What should happen to its memories?":
+    "它的对话、文件和例行任务将被永久删除。记忆要如何处理？",
   "It could not be opened. Try again from the sidebar.": "无法打开。请从侧边栏重试。",
   "Jump to latest": "跳到最新",
   "Jump to latest, new messages": "跳到最新，有新消息",
   "just now": "刚刚",
   "Keep local notes": "保留本地笔记",
+  "Keep memories": "保留记忆",
   Language: "语言",
   "Live update settings": "实时更新设置",
   "Live working status": "实时工作状态",
@@ -781,9 +785,6 @@ export const ZH_MESSAGES: Record<string, string> = {
   "Disconnect memory?": "要断开记忆连接吗？",
   "Banks stay in Hindsight Cloud. Pending memory work stops; processing already started may finish.":
     "记忆库会保留在 Hindsight Cloud 中。待处理的记忆任务会停止；已开始的处理可能仍会完成。",
-  "Pending memory work stops; processing already started may finish.":
-    "待处理的记忆任务会停止；已开始的处理可能仍会完成。",
-  "Disconnect to connect Hindsight Cloud.": "请先断开当前连接，再连接 Hindsight Cloud。",
   "Memory bank": "记忆库",
   "Search banks": "搜索记忆库",
   "Could not load banks.": "无法加载记忆库。",

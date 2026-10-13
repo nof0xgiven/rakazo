@@ -208,7 +208,7 @@ export default function MemorySettings() {
         ? t(
             "Banks stay in Hindsight Cloud. Pending memory work stops; processing already started may finish.",
           )
-        : t("Pending memory work stops; processing already started may finish."),
+        : undefined,
       [
         { text: t("Cancel"), style: "cancel" },
         {
@@ -357,10 +357,7 @@ function ConnectedMemory({
   const hindsight = config.provider === HINDSIGHT_PROVIDER_ID || config.capabilities.banks;
   return (
     <>
-      <SettingsGroup
-        label={t("Connected")}
-        footer={!hindsight && owner ? t("Disconnect to connect Hindsight Cloud.") : undefined}
-      >
+      <SettingsGroup label={t("Connected")}>
         <SettingsRow title={memoryProviderLabel(config)} />
         {config.capabilities.sharedScope && owner ? (
           <View style={busy && styles.inactive}>

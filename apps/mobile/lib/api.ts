@@ -212,7 +212,6 @@ export function selectedSpaceId(): string | null {
   return cachedSpaceId || null;
 }
 
-/** Changes whenever the server, signed-in session or Space selection changes, including A → B → A. */
 export function apiScopeKey(): string {
   return JSON.stringify([
     cachedApiBase ?? "",

@@ -302,6 +302,7 @@ export const RU_MESSAGES: Record<string, string> = {
   "Delete group": "Удалить группу",
   "Delete space": "Удалить пространство",
   "Delete local notes": "Удалить локальные заметки",
+  "Delete memories too": "Удалить также память",
   "Delete {name}?": "Удалить {name}?",
   "Delete this group? Bots and their solo threads are kept.":
     "Удалить эту группу? Боты и их отдельные диалоги сохранятся.",
@@ -362,12 +363,15 @@ export const RU_MESSAGES: Record<string, string> = {
   "Its conversation, files, and routines will be permanently deleted. What should happen to its local notes?":
     "Его диалог, файлы и задачи будут удалены навсегда. Что сделать с его локальными заметками?",
   "Cloud memories stay in Hindsight Cloud.": "Облачные воспоминания остаются в Hindsight Cloud.",
+  "Its conversation, files, and routines will be permanently deleted. What should happen to its memories?":
+    "Его диалог, файлы и задачи будут удалены навсегда. Что сделать с его памятью?",
   "It could not be opened. Try again from the sidebar.":
     "Не удалось открыть. Повторите попытку из боковой панели.",
   "Jump to latest": "Перейти к последнему",
   "Jump to latest, new messages": "Перейти к последнему, новые сообщения",
   "just now": "только что",
   "Keep local notes": "Сохранить локальные заметки",
+  "Keep memories": "Сохранить память",
   Language: "Язык",
   "Live update settings": "Настройки обновлений в реальном времени",
   "Live working status": "Статус работы в реальном времени",
@@ -806,10 +810,6 @@ export const RU_MESSAGES: Record<string, string> = {
   "Disconnect memory?": "Отключить память?",
   "Banks stay in Hindsight Cloud. Pending memory work stops; processing already started may finish.":
     "Банки остаются в Hindsight Cloud. Ожидающая работа с памятью останавливается; уже начатая обработка может завершиться.",
-  "Pending memory work stops; processing already started may finish.":
-    "Ожидающая работа с памятью останавливается; уже начатая обработка может завершиться.",
-  "Disconnect to connect Hindsight Cloud.":
-    "Отключите текущее подключение, чтобы подключить Hindsight Cloud.",
   "Memory bank": "Банк памяти",
   "Search banks": "Поиск банков",
   "Could not load banks.": "Не удалось загрузить банки.",

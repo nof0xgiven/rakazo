@@ -16,18 +16,26 @@ export function confirmDeleteBot(
       Alert.alert(t("Could not delete bot"), errorText(error, t("Try again.")));
     }
   };
-  const message = t(
-    "Its conversation, files, and routines will be permanently deleted. What should happen to its local notes?",
-  );
+  const cloud = Boolean(bot.memoryBank);
 
   Alert.alert(
     t("Delete {name}?", { name: bot.name }),
-    bot.memoryBank ? `${message}\n\n${t("Cloud memories stay in Hindsight Cloud.")}` : message,
+    cloud
+      ? `${t(
+          "Its conversation, files, and routines will be permanently deleted. What should happen to its local notes?",
+        )}\n\n${t("Cloud memories stay in Hindsight Cloud.")}`
+      : t(
+          "Its conversation, files, and routines will be permanently deleted. What should happen to its memories?",
+        ),
     [
       { text: t("Cancel"), style: "cancel" },
-      { text: t("Keep local notes"), style: "destructive", onPress: () => void remove(false) },
       {
-        text: t("Delete local notes"),
+        text: cloud ? t("Keep local notes") : t("Keep memories"),
+        style: "destructive",
+        onPress: () => void remove(false),
+      },
+      {
+        text: cloud ? t("Delete local notes") : t("Delete memories too"),
         style: "destructive",
         onPress: () => void remove(true),
       },

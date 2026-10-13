@@ -659,6 +659,10 @@ export const DE_MESSAGES: Record<string, string> = {
     "Unterhaltung, Dateien und Routinen werden endgültig gelöscht. Was soll mit den lokalen Notizen geschehen?",
   "Keep local notes": "Lokale Notizen behalten",
   "Cloud memories stay in Hindsight Cloud.": "Cloud-Erinnerungen bleiben in Hindsight Cloud.",
+  "Delete memories too": "Erinnerungen ebenfalls löschen",
+  "Its conversation, files, and routines will be permanently deleted. What should happen to its memories?":
+    "Unterhaltung, Dateien und Routinen werden endgültig gelöscht. Was soll mit den Erinnerungen geschehen?",
+  "Keep memories": "Erinnerungen behalten",
   // lib/computer.ts
   Asleep: "Im Ruhezustand",
   "Booting live desktop…": "Live-Desktop wird gestartet…",
@@ -804,10 +808,6 @@ export const DE_MESSAGES: Record<string, string> = {
   "Disconnect memory?": "Gedächtnis trennen?",
   "Banks stay in Hindsight Cloud. Pending memory work stops; processing already started may finish.":
     "Banken bleiben in Hindsight Cloud. Ausstehende Gedächtnisarbeit wird gestoppt; bereits begonnene Verarbeitung kann noch abgeschlossen werden.",
-  "Pending memory work stops; processing already started may finish.":
-    "Ausstehende Gedächtnisarbeit wird gestoppt; bereits begonnene Verarbeitung kann noch abgeschlossen werden.",
-  "Disconnect to connect Hindsight Cloud.":
-    "Trenne die aktuelle Verbindung, um Hindsight Cloud zu verbinden.",
   "Memory bank": "Gedächtnisbank",
   "Search banks": "Banken suchen",
   "Could not load banks.": "Banken konnten nicht geladen werden.",
