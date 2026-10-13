@@ -35,6 +35,13 @@ interface MeRow {
   spaceId: string;
 }
 
+interface CredentialRow {
+  id: string;
+  provider: string;
+  enabledModelIds?: string[];
+  configurationVersion?: number;
+}
+
 export async function seedIosScreenshotFixture(input: {
   apiUrl: string;
   databaseUrl: string;
@@ -107,6 +114,8 @@ export async function seedIosScreenshotFixture(input: {
     });
   }
 
+  await ensureCompatibleModels(input.apiUrl, populated.headers);
+
   const me = await rpc<MeRow>(input.apiUrl, populated.headers, "me");
   const db = createDb(input.databaseUrl, { applicationName: "ios-screenshots" });
   try {
@@ -143,6 +152,44 @@ async function ensureBot(
     ...profile,
     instructions: profile.description,
     notifyOnFinish: true,
+  });
+}
+
+const FIXTURE_COMPATIBLE_MODELS = [
+  {
+    modelId: "fixture-reasoner",
+    thinkingLevels: ["off", "low", "high"],
+    defaultThinkingLevel: null,
+    contextWindow: 32768,
+    maxTokens: 4096,
+    supportsImages: false,
+  },
+  {
+    modelId: "fixture-writer",
+    thinkingLevels: ["off"],
+    defaultThinkingLevel: null,
+    contextWindow: 32768,
+    maxTokens: 4096,
+    supportsImages: false,
+  },
+];
+
+async function ensureCompatibleModels(apiUrl: string, headers: Record<string, string>) {
+  const credentials = await rpc<CredentialRow[]>(apiUrl, headers, "models/credentials");
+  const existing = credentials.find((credential) => credential.provider === "openai-compatible");
+  const wanted = FIXTURE_COMPATIBLE_MODELS.map((model) => model.modelId);
+  if (wanted.every((modelId) => existing?.enabledModelIds?.includes(modelId))) return;
+  await rpc(apiUrl, headers, "models/connect", {
+    provider: "openai-compatible",
+    label: "OpenAI-compatible",
+    baseUrl: "http://127.0.0.1:9/v1",
+    models: FIXTURE_COMPATIBLE_MODELS,
+    ...(existing
+      ? {
+          credentialId: existing.id,
+          expectedConfigurationVersion: existing.configurationVersion ?? 0,
+        }
+      : { modelId: "fixture-reasoner" }),
   });
 }
 

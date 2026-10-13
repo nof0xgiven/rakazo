@@ -1,30 +1,37 @@
-import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
-import type { ModelConnectInput, ModelCredential, ThinkingLevel } from "@rakazo/contracts";
+import type {
+  ModelConnectInput,
+  ModelCredential,
+  OpenAiCompatibleModelConfig,
+} from "@rakazo/contracts";
 import {
   CLOUDFLARE_AI_GATEWAY_CONFIG_MESSAGE,
-  OPENAI_COMPATIBLE_PROVIDER_ID as CONTRACT_OPENAI_COMPAT,
   cloudflareGatewayRouting,
   isCloudflareAiGatewayProvider,
+  MAX_OPENAI_COMPATIBLE_ENABLED_MODELS,
   modelOutputLeavesInputRoom,
+  OPENAI_COMPATIBLE_MODEL_ID_MAX_LENGTH,
+  OPENAI_COMPATIBLE_PROVIDER_ID,
+  ThinkingLevelSchema,
 } from "@rakazo/contracts";
-import { modelIdSupportsImages, updateModelImageCapabilities } from "./model-vision.js";
+import { sameOpenAiCompatibleEndpoint } from "./openai-compatible-discovery.js";
+import { openAiCompatibleModelConfigs } from "./openai-compatible-models.js";
 import { modelCredentialAuthKind } from "./pi-catalog-availability.js";
 import {
   CHATGPT_OAUTH_PROVIDER,
+  type OpenAiCompatibleStoredSecret,
   parseModelSecret,
   type StoredModelSecret,
   serializeModelSecret,
 } from "./pi-oauth.js";
-import {
-  OPENAI_COMPATIBLE_PROVIDER_ID,
-  openAiCompatibleModel,
-  prepareOpenAiCompatibleConnect,
-} from "./pi-openai-compatible-provider.js";
+import { prepareOpenAiCompatibleConnect } from "./pi-openai-compatible-provider.js";
 
 export type BuildModelConnectOptions = {
-  /** Skip writing visionModelIds when prior plaintext was unavailable during key replacement. */
-  omitVisionModelIds?: boolean;
+  /** Allowlist of the OpenAI-compatible connection being edited; omitted when creating one. */
+  previousEnabledModelIds?: readonly string[];
 };
+
+export const UNREADABLE_COMPATIBLE_CONNECTION_MESSAGE =
+  "The saved connection can't be read. Enter its API key again, or remove the saved key.";
 
 export function buildModelConnectPlaintext(
   input: ModelConnectInput,
@@ -32,6 +39,9 @@ export function buildModelConnectPlaintext(
   options?: BuildModelConnectOptions,
 ): string {
   const previous = tryParseModelSecret(previousPlaintext);
+  if (input.provider === OPENAI_COMPATIBLE_PROVIDER_ID) {
+    return buildOpenAiCompatiblePlaintext(input, previous, options?.previousEnabledModelIds);
+  }
   const inherited = previous?.kind === "api_key" ? previous : undefined;
   const cacheCapabilities = input.cacheCapabilities ?? inherited?.cacheCapabilities;
   const contextWindow = input.contextWindow ?? inherited?.contextWindow;
@@ -39,68 +49,6 @@ export function buildModelConnectPlaintext(
     ...(cacheCapabilities !== undefined ? { cacheCapabilities } : {}),
     ...(contextWindow !== undefined ? { contextWindow } : {}),
   };
-  if (input.provider === OPENAI_COMPATIBLE_PROVIDER_ID) {
-    const prepared = prepareOpenAiCompatibleConnect(input);
-    const sameEndpoint =
-      previous?.kind === "openai_compatible" && previous.baseUrl === prepared.baseUrl;
-    const compatiblePrevious = sameEndpoint ? previous : undefined;
-    if (input.apiKey === undefined && sameEndpoint) {
-      // Revalidate the inherited key too: public endpoints must still use HTTPS.
-      prepared.apiKey = prepareOpenAiCompatibleConnect({
-        ...input,
-        apiKey: previous.apiKey,
-      }).apiKey;
-    }
-    const previousVisionModelIds = sameEndpoint ? previous.visionModelIds : undefined;
-    const maxImagesPerPrompt =
-      input.maxImagesPerPrompt === null
-        ? undefined
-        : (input.maxImagesPerPrompt ?? (sameEndpoint ? previous.maxImagesPerPrompt : undefined));
-    const thinkingLevel =
-      input.thinkingLevel !== undefined
-        ? input.thinkingLevel
-        : sameEndpoint
-          ? previous.thinkingLevel
-          : undefined;
-    const maxTokens = connectMaxTokens(
-      input.maxTokens,
-      sameEndpoint ? previous.maxTokens : undefined,
-    );
-    const contextWindow =
-      input.contextWindow !== undefined
-        ? input.contextWindow
-        : sameEndpoint
-          ? previous.contextWindow
-          : undefined;
-    if (!modelOutputLeavesInputRoom(maxTokens, contextWindow)) {
-      throw new Error("Maximum output tokens must leave room for input");
-    }
-    const visionModelIds = updateModelImageCapabilities(
-      previousVisionModelIds,
-      prepared.modelId,
-      input.supportsImages,
-    );
-    const includeVisionModelIds =
-      !options?.omitVisionModelIds &&
-      (input.supportsImages !== undefined || previousVisionModelIds !== undefined);
-    const compatibleCacheCapabilities =
-      input.cacheCapabilities ?? compatiblePrevious?.cacheCapabilities;
-    const secret: StoredModelSecret = {
-      kind: "openai_compatible",
-      baseUrl: prepared.baseUrl,
-      ...(compatibleCacheCapabilities !== undefined
-        ? { cacheCapabilities: compatibleCacheCapabilities }
-        : {}),
-      ...(input.reasoning !== undefined ? { reasoning: input.reasoning } : {}),
-      ...(thinkingLevel !== undefined ? { thinkingLevel } : {}),
-      ...(maxTokens !== undefined ? { maxTokens } : {}),
-      ...(contextWindow !== undefined ? { contextWindow } : {}),
-      ...(prepared.apiKey ? { apiKey: prepared.apiKey } : {}),
-      ...(includeVisionModelIds ? { visionModelIds } : {}),
-      ...(maxImagesPerPrompt !== undefined ? { maxImagesPerPrompt } : {}),
-    };
-    return serializeModelSecret(secret);
-  }
   const apiKey = input.apiKey?.trim();
   // The Codex transport authenticates with the OAuth JWT from ChatGPT sign-in,
   // which carries the chatgpt account id it requires. A plain API key can never
@@ -109,7 +57,10 @@ export function buildModelConnectPlaintext(
   if (input.provider === CHATGPT_OAUTH_PROVIDER && apiKey) {
     throw new Error(CHATGPT_SUBSCRIPTION_REQUIRED_MESSAGE);
   }
-  const maxTokens = connectMaxTokens(input.maxTokens, previous?.maxTokens);
+  const maxTokens = connectMaxTokens(
+    input.maxTokens,
+    previous && previous.kind !== "openai_compatible" ? previous.maxTokens : undefined,
+  );
   if (!modelOutputLeavesInputRoom(maxTokens, contextWindow)) {
     throw new Error("Maximum output tokens must leave room for input");
   }
@@ -152,6 +103,55 @@ export function buildModelConnectPlaintext(
 const CHATGPT_SUBSCRIPTION_REQUIRED_MESSAGE =
   "ChatGPT subscription sign-in is required for this provider.";
 
+/**
+ * Writes only the canonical `{kind, baseUrl, apiKey?, models}` shape. An
+ * omitted key is inherited from the same normalized endpoint only; a changed
+ * endpoint inherits neither key nor model settings, and an unreadable previous
+ * secret needs an explicit key (or `""` for keyless). Ids not already enabled
+ * on the same endpoint are new and bounded; the enabled-model cap only blocks
+ * additions so a larger legacy set can be kept or reduced.
+ */
+function buildOpenAiCompatiblePlaintext(
+  input: ModelConnectInput,
+  previous: StoredModelSecret | undefined,
+  previousEnabledModelIds: readonly string[] | undefined,
+): string {
+  const models: OpenAiCompatibleModelConfig[] = input.models ?? [];
+  if (models.length === 0) throw new Error("Choose at least one model");
+  const prepared = prepareOpenAiCompatibleConnect({ baseUrl: input.baseUrl, apiKey: input.apiKey });
+  const editing = previousEnabledModelIds !== undefined;
+  const saved: OpenAiCompatibleStoredSecret | undefined =
+    previous?.kind === "openai_compatible" ? previous : undefined;
+  if (editing && !saved && input.apiKey === undefined) {
+    throw new Error(UNREADABLE_COMPATIBLE_CONNECTION_MESSAGE);
+  }
+  const sameEndpoint =
+    saved !== undefined && sameOpenAiCompatibleEndpoint(saved.baseUrl, prepared.baseUrl);
+  let apiKey = prepared.apiKey;
+  if (input.apiKey === undefined && sameEndpoint && saved.apiKey) {
+    // Revalidate the inherited key: a public endpoint must still use HTTPS.
+    apiKey = prepareOpenAiCompatibleConnect({
+      baseUrl: prepared.baseUrl,
+      apiKey: saved.apiKey,
+    }).apiKey;
+  }
+  const retained = new Set(editing && (sameEndpoint || !saved) ? previousEnabledModelIds : []);
+  const added = models.filter((model) => !retained.has(model.modelId));
+  if (added.some((model) => model.modelId.length > OPENAI_COMPATIBLE_MODEL_ID_MAX_LENGTH)) {
+    throw new Error(`Model id must be at most ${OPENAI_COMPATIBLE_MODEL_ID_MAX_LENGTH} characters`);
+  }
+  if (added.length > 0 && models.length > MAX_OPENAI_COMPATIBLE_ENABLED_MODELS) {
+    throw new Error(`Enable at most ${MAX_OPENAI_COMPATIBLE_ENABLED_MODELS} models`);
+  }
+  return serializeModelSecret({
+    kind: "openai_compatible",
+    format: "canonical",
+    baseUrl: prepared.baseUrl,
+    ...(apiKey ? { apiKey } : {}),
+    models,
+  });
+}
+
 /** Inherited fields come from the previous secret; a corrupt one counts as absent. */
 function tryParseModelSecret(plaintext?: string): StoredModelSecret | undefined {
   if (!plaintext) return undefined;
@@ -188,16 +188,10 @@ function cloudflareRoutingForConnect(
   return routing;
 }
 
-/**
- * Whether the stored secret contains an API key. OAuth sign-in and a keyless
- * OpenAI-compatible server are connections without one. An unreadable secret
- * is not reported as a key — the client must not invent a stored-key state.
- */
-function storedModelSecretHasApiKey(plaintext: string | undefined): boolean {
-  if (!plaintext) return false;
-  const parsed = parseModelSecret(plaintext);
-  if (parsed.kind === "api_key") return parsed.key.trim().length > 0;
-  if (parsed.kind === "openai_compatible") return Boolean(parsed.apiKey?.trim());
+/** An unreadable secret is never reported as holding a key. */
+function storedModelSecretHasApiKey(parsed: StoredModelSecret | undefined): boolean {
+  if (parsed?.kind === "api_key") return parsed.key.trim().length > 0;
+  if (parsed?.kind === "openai_compatible") return Boolean(parsed.apiKey?.trim());
   return false;
 }
 
@@ -211,6 +205,11 @@ function connectMaxTokens(
   return previous;
 }
 
+/**
+ * `modelId`/`thinkingLevel`/`isDefault` describe the current space preference
+ * only. Compatible connections report their allowlist and version even when
+ * the secret is unreadable, with no invented model settings or key state.
+ */
 export function modelCredentialDto(
   row: {
     id: string;
@@ -220,28 +219,31 @@ export function modelCredentialDto(
     defaultModel?: string | null;
     thinkingLevel?: string | null;
     supportsImages?: boolean;
+    enabledModelIds?: readonly string[];
+    modelConfigurationVersion?: number;
   },
   plaintext?: string,
 ): ModelCredential {
+  const parsed = tryParseModelSecret(plaintext);
+  const thinkingLevel = ThinkingLevelSchema.safeParse(row.thinkingLevel);
   const credential: ModelCredential = {
     id: row.id,
     provider: row.provider,
     label: row.label,
-    hasKey: storedModelSecretHasApiKey(plaintext),
+    hasKey: storedModelSecretHasApiKey(parsed),
     isDefault: row.isDefault,
     ...(row.defaultModel ? { modelId: row.defaultModel } : {}),
-    // Space-scoped effort stored beside the preference's modelId; the
-    // openai-compatible secret may still contribute below when unset.
-    ...(row.thinkingLevel ? { thinkingLevel: row.thinkingLevel as ThinkingLevel } : {}),
+    ...(thinkingLevel.success ? { thinkingLevel: thinkingLevel.data } : {}),
   };
-  if (row.provider !== CONTRACT_OPENAI_COMPAT) {
-    if (!plaintext) return credential;
-    const parsed = parseModelSecret(plaintext);
+  if (row.provider !== OPENAI_COMPATIBLE_PROVIDER_ID) {
+    if (!parsed) return credential;
     return {
       ...credential,
       authKind: modelCredentialAuthKind(parsed),
-      ...(parsed.maxTokens !== undefined ? { maxTokens: parsed.maxTokens } : {}),
-      ...(parsed.kind !== "oauth"
+      ...(parsed.kind !== "openai_compatible" && parsed.maxTokens !== undefined
+        ? { maxTokens: parsed.maxTokens }
+        : {}),
+      ...(parsed.kind === "api_key"
         ? {
             cacheCapabilities: parsed.cacheCapabilities,
             contextWindow: parsed.contextWindow,
@@ -251,36 +253,24 @@ export function modelCredentialDto(
       ...(parsed.kind === "api_key" && parsed.gatewayId ? { gatewayId: parsed.gatewayId } : {}),
     };
   }
-  const compatibleCredential = {
+  const enabledModelIds = [...(row.enabledModelIds ?? [])];
+  const compatible: ModelCredential = {
     ...credential,
-    supportsImages: row.supportsImages ?? false,
+    enabledModelIds,
+    configurationVersion: row.modelConfigurationVersion ?? 0,
+    models: [],
   };
-  if (!plaintext) return compatibleCredential;
-  const parsed = parseModelSecret(plaintext);
+  if (!parsed) return compatible;
   if (parsed.kind !== "openai_compatible") {
-    return { ...compatibleCredential, authKind: modelCredentialAuthKind(parsed) };
+    return { ...compatible, authKind: modelCredentialAuthKind(parsed) };
   }
   return {
-    ...compatibleCredential,
+    ...compatible,
     authKind: "openai_compatible",
-    supportsImages:
-      parsed.visionModelIds !== undefined
-        ? modelIdSupportsImages(parsed.visionModelIds, row.defaultModel)
-        : compatibleCredential.supportsImages,
     baseUrl: parsed.baseUrl,
-    reasoning: parsed.reasoning ?? false,
-    ...(credential.thinkingLevel !== undefined || parsed.thinkingLevel !== undefined
-      ? { thinkingLevel: credential.thinkingLevel ?? parsed.thinkingLevel }
-      : {}),
-    ...(parsed.maxTokens !== undefined ? { maxTokens: parsed.maxTokens } : {}),
-    ...(parsed.contextWindow !== undefined ? { contextWindow: parsed.contextWindow } : {}),
-    cacheCapabilities: parsed.cacheCapabilities,
-    ...(parsed.maxImagesPerPrompt !== undefined
-      ? { maxImagesPerPrompt: parsed.maxImagesPerPrompt }
-      : {}),
-    thinkingLevels: getSupportedThinkingLevels(
-      openAiCompatibleModel(row.defaultModel ?? "custom", parsed.baseUrl, parsed.reasoning),
-    ) as ThinkingLevel[],
-    modelId: row.defaultModel ?? undefined,
+    models: openAiCompatibleModelConfigs(parsed, {
+      enabledModelIds,
+      supportsImages: row.supportsImages ?? false,
+    }),
   };
 }

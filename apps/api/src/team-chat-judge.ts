@@ -8,7 +8,9 @@ import type {
 } from "@rakazo/adapter-kit";
 import {
   formatCurrentTimeInstruction,
+  loadCompatibleModelRuntime,
   matchesFailedOAuthSecret,
+  OPENAI_COMPATIBLE_PROVIDER_ID,
   resolveModelAuth,
   serializeModelSecret,
   toOAuthCredential,
@@ -206,11 +208,15 @@ export class ModelTeamChatEngagementJudge implements TeamChatEngagementJudge {
     const requestedProvider = this.deps.providerOverride ?? bot.modelProvider;
     const requestedModel = this.deps.modelOverride ?? bot.modelId;
     const overrideCredential = requestedProvider
-      ? await findModelCredential(this.deps.prisma, scope, requestedProvider)
+      ? await findModelCredential(this.deps.prisma, scope, requestedProvider, requestedModel)
       : null;
     const explicitJudgeOverride = Boolean(this.deps.providerOverride && this.deps.modelOverride);
+    // An explicit OpenAI-compatible choice never falls back to the space default.
+    const compatibleOverride = requestedProvider === OPENAI_COMPATIBLE_PROVIDER_ID;
     const useOverride = Boolean(
-      requestedProvider && requestedModel && (explicitJudgeOverride || overrideCredential),
+      requestedProvider &&
+        requestedModel &&
+        (explicitJudgeOverride || overrideCredential || compatibleOverride),
     );
     const credential = useOverride ? overrideCredential : defaultCredential;
     const provider =
@@ -224,6 +230,37 @@ export class ModelTeamChatEngagementJudge implements TeamChatEngagementJudge {
       settings?.defaultModelId ??
       this.deps.deploymentModel;
     if (!provider || !modelId) return null;
+    const thinkingLevel =
+      credential?.defaultModel === modelId
+        ? (credential.thinkingLevel as AgentRunModel["thinkingLevel"])
+        : null;
+
+    if (provider === OPENAI_COMPATIBLE_PROVIDER_ID) {
+      if (!credential) return null;
+      const runtime = await loadCompatibleModelRuntime(
+        this.deps.prisma,
+        this.deps.secrets,
+        bot.userId,
+        credential.id,
+        modelId,
+      );
+      return {
+        model: {
+          provider,
+          id: modelId,
+          apiKey: runtime.apiKey,
+          baseUrl: runtime.baseUrl,
+          cacheCapabilities: runtime.cacheCapabilities,
+          contextWindow: runtime.contextWindow,
+          maxTokens: runtime.maxTokens,
+          reasoning: runtime.reasoning,
+          thinkingLevels: runtime.thinkingLevels,
+          thinkingLevel: thinkingLevel ?? runtime.defaultThinkingLevel,
+          acceptsImages: runtime.acceptsImages,
+          maxImagesPerPrompt: runtime.maxImagesPerPrompt,
+        },
+      };
+    }
 
     if (!credential) {
       const apiKey =
@@ -274,19 +311,14 @@ export class ModelTeamChatEngagementJudge implements TeamChatEngagementJudge {
     const plaintext = await this.deps.secrets.load(secret.ciphertext, secret.id);
     const auth = await resolveModelAuth(plaintext, provider, { persist, retire });
     const parsed = auth.secret;
+    if (parsed.kind === "openai_compatible") return null;
     const limit = parsed.maxTokens !== undefined ? { maxTokens: parsed.maxTokens } : {};
-    const context =
-      parsed.kind === "oauth"
-        ? {}
-        : {
-            cacheCapabilities: parsed.cacheCapabilities,
-            contextWindow: parsed.contextWindow,
-          };
     if (parsed.kind === "oauth") {
       return {
         model: {
           provider,
           id: modelId,
+          thinkingLevel,
           ...limit,
           oauth: {
             credential: { ...parsed.credential },
@@ -304,25 +336,15 @@ export class ModelTeamChatEngagementJudge implements TeamChatEngagementJudge {
         },
       };
     }
-    if (parsed.kind === "openai_compatible") {
-      return {
-        model: {
-          provider,
-          id: modelId,
-          apiKey: parsed.apiKey,
-          baseUrl: parsed.baseUrl,
-          ...limit,
-          ...context,
-        },
-      };
-    }
     return {
       model: {
         provider,
         id: modelId,
         apiKey: auth.apiKey,
+        thinkingLevel,
         ...limit,
-        ...context,
+        cacheCapabilities: parsed.cacheCapabilities,
+        contextWindow: parsed.contextWindow,
       },
     };
   }

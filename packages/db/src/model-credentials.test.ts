@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { PrismaClient } from "./client.js";
+import type { Prisma, PrismaClient } from "./client.js";
 import {
   chooseModelCredential,
   defaultModelCredentialCandidates,
@@ -8,6 +8,13 @@ import {
   newestModelCredentialOrder,
   selectSpaceModelPreference,
 } from "./model-credentials.js";
+import {
+  assertCompatibleReferenceBindingsUnchanged,
+  loadCompatibleModelReferences,
+  ModelConfigurationConflictError,
+  resolveCompatibleReferenceBindings,
+  snapshotCompatibleReferenceBindings,
+} from "./model-references.js";
 
 describe("findDefaultModelCredential", () => {
   it("resolves the default from the active space preference", async () => {
@@ -340,6 +347,40 @@ describe("chooseModelCredential", () => {
       }),
     ).toEqual({ source: "credential", credential: newest });
   });
+
+  it("offers only the chooser's credential for an OpenAI-compatible default", () => {
+    const compatible = (id: string, iso: string) => ({
+      ...credential(id, iso),
+      provider: "openai-compatible",
+    });
+    const older = compatible("older", "2026-01-01T00:00:00.000Z");
+    const newer = compatible("newer", "2026-02-01T00:00:00.000Z");
+    expect(
+      defaultModelCredentialCandidates({
+        provider: "openai-compatible",
+        modelId: "unsaved-model",
+        preferences: [],
+        credentials: [older, newer],
+      }).map((item) => item.id),
+    ).toEqual(["newer"]);
+    expect(
+      defaultModelCredentialCandidates({
+        provider: "openai-compatible",
+        modelId: "unsaved-model",
+        preferences: [
+          {
+            id: "pref-older",
+            modelId: "other-model",
+            thinkingLevel: null,
+            isDefault: true,
+            updatedAt: older.updatedAt,
+            credential: older,
+          },
+        ],
+        credentials: [older, newer],
+      }).map((item) => item.id),
+    ).toEqual(["older"]);
+  });
 });
 
 describe("selectSpaceModelPreference", () => {
@@ -394,4 +435,135 @@ describe("selectSpaceModelPreference", () => {
       );
     },
   );
+});
+
+describe("compatible model references", () => {
+  const at = (iso: string) => new Date(iso);
+  const credentialA = {
+    id: "cred-a",
+    userId: "user",
+    provider: "openai-compatible",
+    updatedAt: at("2026-01-01T00:00:00.000Z"),
+    createdAt: at("2026-01-01T00:00:00.000Z"),
+  };
+  const credentialB = { ...credentialA, id: "cred-b", updatedAt: at("2026-02-01T00:00:00.000Z") };
+
+  function referenceClient() {
+    const preferences = [
+      {
+        id: "pref-a",
+        spaceId: "space-1",
+        modelId: "shared-model",
+        thinkingLevel: "high",
+        isDefault: true,
+        updatedAt: at("2026-01-02T00:00:00.000Z"),
+        credential: credentialA,
+      },
+      {
+        id: "pref-b",
+        spaceId: "space-1",
+        modelId: "shared-model",
+        thinkingLevel: null,
+        isDefault: false,
+        updatedAt: at("2026-02-02T00:00:00.000Z"),
+        credential: credentialB,
+      },
+    ];
+    const tx = {
+      spaceMember: {
+        findMany: vi.fn().mockResolvedValue([{ spaceId: "space-1", space: { name: "Home" } }]),
+      },
+      spaceModelPreference: {
+        findMany: vi.fn(async (args: { where: { isDefault?: boolean } }) =>
+          args.where.isDefault
+            ? preferences.filter((preference) => preference.isDefault)
+            : preferences,
+        ),
+      },
+      userModelCredential: { findMany: vi.fn().mockResolvedValue([credentialA, credentialB]) },
+      bot: {
+        findMany: vi.fn(async (args: { where: { modelProvider?: string } }) =>
+          args.where.modelProvider
+            ? [
+                {
+                  id: "bot-explicit",
+                  spaceId: "space-1",
+                  name: "Researcher",
+                  modelId: "shared-model",
+                  thinkingLevel: "xhigh",
+                },
+              ]
+            : [{ id: "bot-follower", spaceId: "space-1", name: "Helper", thinkingLevel: "low" }],
+        ),
+      },
+      routine: { findMany: vi.fn().mockResolvedValue([]) },
+      spaceBackupModel: {
+        findMany: vi.fn().mockResolvedValue([{ spaceId: "space-1", modelId: "shared-model" }]),
+      },
+      run: { findMany: vi.fn().mockResolvedValue([]) },
+      steeringMessage: { findMany: vi.fn().mockResolvedValue([]) },
+    };
+    return { tx: tx as unknown as Prisma.TransactionClient, preferences };
+  }
+
+  it("collects owner references with their effective credential and exact-model effort", async () => {
+    const { tx } = referenceClient();
+    const { references, followers, primaryEfforts } = await loadCompatibleModelReferences(
+      tx,
+      "user",
+    );
+    expect(primaryEfforts).toEqual([
+      { spaceId: "space-1", thinkingLevel: "low" },
+      { spaceId: "space-1", thinkingLevel: "high" },
+    ]);
+    expect(references.map((reference) => [reference.kind, reference.id])).toEqual([
+      ["default", "pref-a"],
+      ["bot", "bot-explicit"],
+      ["backup", "shared-model"],
+    ]);
+    expect(references[0]).toMatchObject({ name: "Home", spaceName: "Home", thinkingLevel: "high" });
+    expect(followers).toEqual([
+      {
+        spaceId: "space-1",
+        spaceName: "Home",
+        id: "bot-follower",
+        name: "Helper",
+        thinkingLevel: "low",
+      },
+    ]);
+    await expect(resolveCompatibleReferenceBindings(tx, "user", references)).resolves.toEqual([
+      { credentialId: "cred-a", preferenceThinkingLevel: "high" },
+      { credentialId: "cred-a", preferenceThinkingLevel: "high" },
+      { credentialId: "cred-a", preferenceThinkingLevel: "high" },
+    ]);
+  });
+
+  it("rejects a write that silently moves an explicit reference to another credential", async () => {
+    const { tx, preferences } = referenceClient();
+    const snapshot = await snapshotCompatibleReferenceBindings(tx, "user");
+    const [defaultPreference] = preferences;
+    if (defaultPreference) defaultPreference.isDefault = false;
+    const rebinding = assertCompatibleReferenceBindingsUnchanged(
+      tx,
+      "user",
+      snapshot,
+      (reference) => reference.kind === "default",
+    );
+    await expect(rebinding).rejects.toBeInstanceOf(ModelConfigurationConflictError);
+    await expect(rebinding).rejects.toMatchObject({
+      reason: "model_connection_in_use",
+      usages: [
+        expect.objectContaining({ kind: "bot", id: "bot-explicit" }),
+        expect.objectContaining({ kind: "backup", id: "shared-model" }),
+      ],
+    });
+  });
+
+  it("accepts a write that keeps every explicit reference on its credential", async () => {
+    const { tx } = referenceClient();
+    const snapshot = await snapshotCompatibleReferenceBindings(tx, "user");
+    await expect(
+      assertCompatibleReferenceBindingsUnchanged(tx, "user", snapshot),
+    ).resolves.toBeUndefined();
+  });
 });

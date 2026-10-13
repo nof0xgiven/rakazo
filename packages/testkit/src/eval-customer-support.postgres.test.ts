@@ -2,6 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { compatibleConnection } from "./compatible-connection.js";
 import { EVAL_CASES } from "./evals/cases.js";
 import { runTrial } from "./evals/runner.js";
 import { EvalSandboxProvider } from "./evals/sandbox.js";
@@ -72,14 +73,11 @@ describe.skipIf(!databaseAvailable)("offline Slack customer-support eval", () =>
       const { createApp } = await import("../../../apps/api/src/app.ts");
       const scenario = EVAL_CASES.find((candidate) => candidate.id === "slack-customer-update")!;
       const result = await runTrial(scenario, 1, {
-        connection: {
-          provider: model.model.provider,
-          modelId: model.model.id,
+        connection: compatibleConnection({
           baseUrl: model.baseUrl,
+          modelId: model.model.id,
           apiKey: fixtureKey,
-          contextWindow: 160_000,
-          maxTokens: 4096,
-        },
+        }),
         timeoutMs: 20_000,
         maxToolCalls: 8,
         createApp: (composio, messaging) => {

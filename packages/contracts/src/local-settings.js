@@ -9,6 +9,7 @@ const procedures = new Set([
   "models/credentials",
   "models/connect",
   "models/probeOpenAiCompatible",
+  "models/describeOpenAiCompatible",
   "models/beginOAuth",
   "models/submitOAuthCode",
   "models/completeOAuth",

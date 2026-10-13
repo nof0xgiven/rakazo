@@ -133,7 +133,11 @@ pnpm test:evals --live --provider openrouter --model <model-id> \
 ```
 
 `--connection <private-json-file>` also accepts the shared `models/connect`
-shape, including a generic compatible endpoint. Never commit that file. Use
+shape, including a generic compatible endpoint with its per-model `models`
+configuration and initial `modelId`. Never commit that file.
+`--provider openai-compatible --base-url` builds a single nonreasoning model from
+`--model`, `--context-window` (default 32768), `--max-output-tokens` and
+`--cache-capabilities`. Use
 `--case <case-id>` to select a regression. Each run provisions isolated Postgres
 and synthetic services; it does not use production application data. Each trial
 uses fresh accounts and services. The runner disables its routines and cancels

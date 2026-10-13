@@ -1,6 +1,8 @@
+import type * as Db from "@rakazo/db";
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("@rakazo/db", () => ({
+vi.mock("@rakazo/db", async (importOriginal) => ({
+  ...(await importOriginal<typeof Db>()),
   appendEventInTransaction: vi.fn(),
 }));
 
@@ -138,5 +140,91 @@ describe("commitBotUpdate", () => {
     expect(notify).not.toHaveBeenCalled();
     expect(appendEvent).not.toHaveBeenCalled();
     expect(update).toHaveBeenCalledOnce();
+  });
+
+  it("writes a model-only save in the owner-locked transaction after validating it", async () => {
+    const order: string[] = [];
+    const updated = { id: "bot-1", name: "Chief", title: "", description: "" };
+    const tx = {
+      $queryRaw: vi.fn(async (_query: TemplateStringsArray, ..._values: unknown[]) => {
+        order.push("owner");
+        return [{ id: "user-1" }];
+      }),
+      bot: {
+        update: vi.fn(async () => {
+          order.push("update");
+          return updated;
+        }),
+      },
+    };
+    const transaction = vi.fn(async (run: (client: typeof tx) => Promise<unknown>) => run(tx));
+    const prisma = { $transaction: transaction, bot: { update: vi.fn() } };
+    const appendEvent = vi.fn();
+    const notify = vi.fn();
+    const validateModelChoice = vi.fn(async (client: unknown) => {
+      expect(client).toBe(tx);
+      order.push("validate");
+    });
+
+    await expect(
+      commitBotUpdate(
+        {
+          prisma: prisma as never,
+          notify,
+          spaceId: "space-1",
+          threadId: "thread-1",
+          botId: "bot-1",
+          data: { modelProvider: "openai-compatible", modelId: "model-b", thinkingLevel: null },
+          emitBotUpdated: false,
+          validateModelChoice,
+          modelOwnerUserId: "user-1",
+        },
+        appendEvent,
+      ),
+    ).resolves.toEqual(updated);
+
+    expect(order).toEqual(["owner", "validate", "update"]);
+    expect(tx.$queryRaw.mock.calls[0]?.slice(1)).toEqual(["user-1"]);
+    expect(transaction).toHaveBeenCalledWith(
+      expect.any(Function),
+      expect.objectContaining({ isolationLevel: "ReadCommitted" }),
+    );
+    expect(prisma.bot.update).not.toHaveBeenCalled();
+    expect(appendEvent).not.toHaveBeenCalled();
+    expect(notify).not.toHaveBeenCalled();
+  });
+
+  it("writes nothing when the model choice fails validation inside the lock", async () => {
+    const tx = {
+      $queryRaw: vi.fn(async () => [{ id: "user-1" }]),
+      bot: { update: vi.fn() },
+    };
+    const prisma = {
+      $transaction: vi.fn(async (run: (client: typeof tx) => Promise<unknown>) => run(tx)),
+      bot: { update: vi.fn() },
+    };
+    const appendEvent = vi.fn();
+    const disabled = new Error("This model is not enabled for the connection.");
+
+    await expect(
+      commitBotUpdate(
+        {
+          prisma: prisma as never,
+          notify: vi.fn(),
+          spaceId: "space-1",
+          threadId: "thread-1",
+          botId: "bot-1",
+          data: { name: "Renamed", thinkingLevel: "high" },
+          emitBotUpdated: true,
+          validateModelChoice: async () => {
+            throw disabled;
+          },
+          modelOwnerUserId: "user-1",
+        },
+        appendEvent,
+      ),
+    ).rejects.toBe(disabled);
+    expect(tx.bot.update).not.toHaveBeenCalled();
+    expect(appendEvent).not.toHaveBeenCalled();
   });
 });

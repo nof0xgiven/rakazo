@@ -1,11 +1,20 @@
-import { appendEventInTransaction, type Prisma, type PrismaClient } from "@rakazo/db";
+import {
+  appendEventInTransaction,
+  type Prisma,
+  type PrismaClient,
+  withModelConfigurationOwnerLock,
+} from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 
 type AppendEvent = typeof appendEventInTransaction;
 
+const botUpdateSelect = { id: true, name: true, title: true, description: true } as const;
+
 /**
  * Persist a bot row. When profile labels change, write `bot.updated` in the same
  * transaction so clients never observe a successful rename without a durable event.
+ * A model or effort change runs under the model-configuration owner lock and is
+ * validated inside it, so it cannot reference a model that was just disabled.
  * Realtime notify stays best-effort after commit.
  */
 export async function commitBotUpdate(
@@ -17,23 +26,28 @@ export async function commitBotUpdate(
     botId: string;
     data: Prisma.BotUncheckedUpdateInput;
     emitBotUpdated: boolean;
+    validateModelChoice?: (tx: Prisma.TransactionClient) => Promise<void>;
+    modelOwnerUserId?: string;
   },
   appendEvent: AppendEvent = appendEventInTransaction,
 ): Promise<{ id: string; name: string; title: string; description: string }> {
-  if (!options.emitBotUpdated) {
+  const validateModelChoice = options.validateModelChoice;
+  if (!options.emitBotUpdated && !validateModelChoice) {
     return options.prisma.bot.update({
       where: { id: options.botId },
       data: options.data,
-      select: { id: true, name: true, title: true, description: true },
+      select: botUpdateSelect,
     });
   }
 
-  const committed = await options.prisma.$transaction(async (tx) => {
+  const write = async (tx: Prisma.TransactionClient) => {
+    await validateModelChoice?.(tx);
     const updated = await tx.bot.update({
       where: { id: options.botId },
       data: options.data,
-      select: { id: true, name: true, title: true, description: true },
+      select: botUpdateSelect,
     });
+    if (!options.emitBotUpdated) return { updated, seq: null };
     const event = await appendEvent(tx, {
       spaceId: options.spaceId,
       threadId: options.threadId,
@@ -47,11 +61,21 @@ export async function commitBotUpdate(
       },
     });
     return { updated, seq: event.seq };
-  });
+  };
+  const ownerUserId = options.modelOwnerUserId;
+  if (validateModelChoice && !ownerUserId) {
+    throw new Error("A model change needs its configuration owner");
+  }
+  const committed =
+    validateModelChoice && ownerUserId
+      ? await withModelConfigurationOwnerLock(options.prisma, ownerUserId, write)
+      : await options.prisma.$transaction(write);
 
-  await options.notify(options.threadId, committed.seq).catch((error) => {
-    getLogger().error("bot.updated realtime notification", error);
-  });
+  if (committed.seq !== null) {
+    await options.notify(options.threadId, committed.seq).catch((error) => {
+      getLogger().error("bot.updated realtime notification", error);
+    });
+  }
   return committed.updated;
 }
 

@@ -1,5 +1,7 @@
 // @vitest-environment jsdom
 
+import { i18n } from "@lingui/core";
+import type { ThinkingLevel } from "@rakazo/contracts";
 import type { ComponentProps, ReactNode } from "react";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
@@ -14,6 +16,7 @@ const models = vi.hoisted(() => ({
   disconnect: vi.fn(),
   setDefault: vi.fn(),
   probeOpenAiCompatible: vi.fn(),
+  describeOpenAiCompatible: vi.fn(),
   beginOAuth: vi.fn(),
   cancelOAuth: vi.fn(),
   completeOAuth: vi.fn(),
@@ -44,9 +47,11 @@ vi.mock("@lingui/react/macro", () => {
       value === 1 ? one : other,
   };
 });
-vi.mock("@rakazo/ui-web", () => {
+vi.mock("@rakazo/ui-web", async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>();
   const Pass = ({ children }: { children?: ReactNode }) => <div>{children}</div>;
   return {
+    OpenAiCompatibleModelEditor: actual.OpenAiCompatibleModelEditor,
     AlertDialog: ({ open, children }: { open?: boolean; children?: ReactNode }) =>
       open ? <div>{children}</div> : null,
     AlertDialogAction: ({
@@ -91,7 +96,6 @@ vi.mock("@rakazo/ui-web", () => {
     DialogHeader: Pass,
     DialogTitle: Pass,
     Input: (props: ComponentProps<"input">) => <input {...props} />,
-    ModelThinkingOptions: () => null,
     NativeSelect: (props: ComponentProps<"select">) => <select {...props} />,
     NativeSelectOption: (props: ComponentProps<"option">) => <option {...props} />,
   };
@@ -195,6 +199,12 @@ async function renderSettings() {
 }
 
 beforeEach(() => {
+  i18n.load("en", {});
+  i18n.activate("en");
+  models.probeOpenAiCompatible.mockReset();
+  models.describeOpenAiCompatible.mockReset();
+  models.setDefault.mockReset().mockResolvedValue({ ok: true });
+  models.connect.mockReset();
   vi.mocked(rpc.me).mockResolvedValue(account("deepseek", "deepseek-chat"));
   models.list.mockResolvedValue([deepseekEntry]);
   models.credentials.mockResolvedValue([]);
@@ -373,5 +383,398 @@ it("shows a stored OpenAI-compatible key and stays empty when none is saved", as
     expect(input.placeholder).toBe("Optional");
   } finally {
     await empty.unmount();
+  }
+});
+
+const ENDPOINT = "http://127.0.0.1:8000/v1";
+const knownCapabilities = {
+  thinkingLevels: ["off", "low", "high"] as ThinkingLevel[],
+  defaultThinkingLevel: null,
+  contextWindow: 128_000,
+  maxTokens: 4096,
+  supportsImages: true,
+};
+
+function compatibleModelConfig(modelId: string, levels: ThinkingLevel[] = ["low", "medium"]) {
+  return { modelId, ...knownCapabilities, thinkingLevels: levels };
+}
+
+function compatibleCredential(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "cred-compatible",
+    provider: "openai-compatible",
+    label: "Local",
+    hasKey: true,
+    isDefault: true,
+    baseUrl: ENDPOINT,
+    modelId: "model-a",
+    enabledModelIds: ["model-a", "model-b"],
+    models: [compatibleModelConfig("model-a"), compatibleModelConfig("model-b")],
+    configurationVersion: 3,
+    ...overrides,
+  };
+}
+
+function catalogRow(id: string) {
+  return { ...compatibleEntry, id, label: id, placeholder: undefined };
+}
+
+function usage(modelId: string, spaceName: string) {
+  return {
+    kind: "bot" as const,
+    spaceId: `space-${spaceName}`,
+    spaceName,
+    id: `bot-${modelId}`,
+    name: `Bot ${modelId}`,
+    modelId,
+    thinkingLevel: null,
+  };
+}
+
+function conflictError(data: unknown) {
+  return Object.assign(new Error("Conflict"), { code: "CONFLICT", status: 409, data });
+}
+
+function modelRow(container: HTMLElement, modelId: string) {
+  const row = [...container.querySelectorAll("li")].find((entry) =>
+    [...entry.querySelectorAll("label")].some((label) => label.textContent === modelId),
+  );
+  if (!row) throw new Error(`Missing model row: ${modelId}`);
+  return row;
+}
+
+function modelCheckbox(container: HTMLElement, modelId: string) {
+  const checkbox = modelRow(container, modelId).querySelector('[role="checkbox"]');
+  if (!(checkbox instanceof HTMLElement)) throw new Error(`Missing checkbox: ${modelId}`);
+  return checkbox;
+}
+
+function isChecked(container: HTMLElement, modelId: string) {
+  return modelCheckbox(container, modelId).getAttribute("aria-checked") === "true";
+}
+
+function visibleModelIds(container: HTMLElement) {
+  return [...container.querySelectorAll("li label")]
+    .map((label) => label.textContent ?? "")
+    .filter((text) => text.startsWith("model-") || text === "mystery");
+}
+
+function inputByLabel(container: HTMLElement, label: string) {
+  const input = [...container.querySelectorAll("input")].find(
+    (entry) => entry.getAttribute("aria-label") === label,
+  );
+  if (!(input instanceof HTMLInputElement)) throw new Error(`Missing input: ${label}`);
+  return input;
+}
+
+function saveButton(container: HTMLElement) {
+  const found = buttons(container, "Save").find((entry) => entry.textContent === "Save");
+  if (!found) throw new Error("Missing Save");
+  return found;
+}
+
+async function click(element: HTMLElement) {
+  await act(async () => {
+    element.click();
+  });
+  await act(async () => {
+    await Promise.resolve();
+  });
+}
+
+async function chooseOption(select: HTMLSelectElement, value: string) {
+  await act(async () => {
+    select.value = value;
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+}
+
+function setUpCompatible() {
+  vi.mocked(rpc.me).mockResolvedValue(account("openai-compatible", "model-a"));
+  models.list.mockResolvedValue([catalogRow("model-a"), catalogRow("model-b")]);
+  models.credentials.mockResolvedValue([compatibleCredential()]);
+}
+
+it("keeps model checks through search, a failed probe and the post-save reload", async () => {
+  setUpCompatible();
+  const view = await renderSettings();
+  try {
+    expect(isChecked(view.container, "model-a")).toBe(true);
+    expect(isChecked(view.container, "model-b")).toBe(true);
+    await click(modelCheckbox(view.container, "model-b"));
+
+    models.probeOpenAiCompatible.mockRejectedValueOnce(new Error("connection refused"));
+    await click(buttons(view.container, "Find models")[0]!);
+    expect(view.container.textContent).toContain("connection refused");
+    expect(isChecked(view.container, "model-a")).toBe(true);
+    expect(isChecked(view.container, "model-b")).toBe(false);
+
+    models.probeOpenAiCompatible.mockResolvedValueOnce({
+      models: [
+        { modelId: "model-a", capabilities: null },
+        { modelId: "model-c", capabilities: knownCapabilities },
+      ],
+    });
+    await click(buttons(view.container, "Find models")[0]!);
+    expect(models.probeOpenAiCompatible).toHaveBeenLastCalledWith({
+      baseUrl: ENDPOINT,
+      credentialId: "cred-compatible",
+    });
+    expect(isChecked(view.container, "model-c")).toBe(false);
+
+    await typeInto(inputByLabel(view.container, "Search models"), "model-c");
+    expect(visibleModelIds(view.container)).toEqual(["model-c"]);
+    await click(modelCheckbox(view.container, "model-c"));
+    await typeInto(inputByLabel(view.container, "Search models"), "");
+    expect(visibleModelIds(view.container)).toEqual(["model-a", "model-b", "model-c"]);
+    expect(isChecked(view.container, "model-b")).toBe(false);
+
+    models.connect.mockResolvedValueOnce(compatibleCredential());
+    models.credentials.mockResolvedValue([
+      compatibleCredential({
+        enabledModelIds: ["model-a", "model-c"],
+        models: [compatibleModelConfig("model-a"), { modelId: "model-c", ...knownCapabilities }],
+        configurationVersion: 4,
+      }),
+    ]);
+    await click(saveButton(view.container));
+    expect(models.connect).toHaveBeenCalledExactlyOnceWith({
+      provider: "openai-compatible",
+      baseUrl: ENDPOINT,
+      credentialId: "cred-compatible",
+      expectedConfigurationVersion: 3,
+      label: "OpenAI-compatible",
+      models: [compatibleModelConfig("model-a"), { modelId: "model-c", ...knownCapabilities }],
+    });
+    expect(isChecked(view.container, "model-a")).toBe(true);
+    expect(isChecked(view.container, "model-b")).toBe(false);
+    expect(isChecked(view.container, "model-c")).toBe(true);
+    expect(models.probeOpenAiCompatible).toHaveBeenCalledTimes(2);
+  } finally {
+    await view.unmount();
+  }
+});
+
+it("requires Apply before an unknown model can be saved", async () => {
+  setUpCompatible();
+  models.probeOpenAiCompatible.mockResolvedValue({
+    models: [{ modelId: "mystery", capabilities: null }],
+  });
+  const view = await renderSettings();
+  try {
+    await click(buttons(view.container, "Find models")[0]!);
+    await click(modelCheckbox(view.container, "mystery"));
+    expect(view.container.textContent).toContain("Needs setup");
+    expect(saveButton(view.container).disabled).toBe(true);
+
+    await click(buttons(modelRow(view.container, "mystery"), "Cancel")[0]!);
+    expect(isChecked(view.container, "mystery")).toBe(false);
+
+    await click(modelCheckbox(view.container, "mystery"));
+    await click(buttons(modelRow(view.container, "mystery"), "Apply")[0]!);
+    expect(saveButton(view.container).disabled).toBe(false);
+    await click(saveButton(view.container));
+    expect(models.connect.mock.calls[0]?.[0].models).toContainEqual({
+      modelId: "mystery",
+      thinkingLevels: ["off"],
+      defaultThinkingLevel: null,
+      contextWindow: 32_768,
+      maxTokens: 4096,
+      supportsImages: false,
+    });
+  } finally {
+    await view.unmount();
+  }
+});
+
+it("describes an Other model id locally and accepts its detected settings", async () => {
+  setUpCompatible();
+  models.describeOpenAiCompatible.mockResolvedValue({
+    models: [{ modelId: "vendor/known", capabilities: knownCapabilities }],
+  });
+  const view = await renderSettings();
+  try {
+    await click(buttons(view.container, "Other model…")[0]!);
+    const field = [...view.container.querySelectorAll("label")]
+      .find((label) => label.textContent?.startsWith("Model id"))
+      ?.querySelector("input");
+    await typeInto(field as HTMLInputElement, " vendor/known ");
+    await click(buttons(view.container, "Add").find((entry) => entry.textContent === "Add")!);
+    expect(models.describeOpenAiCompatible).toHaveBeenCalledWith({
+      baseUrl: ENDPOINT,
+      credentialId: "cred-compatible",
+      modelIds: ["vendor/known"],
+    });
+    expect(
+      modelRow(view.container, "vendor/known")
+        .querySelector('[role="checkbox"]')
+        ?.getAttribute("aria-checked"),
+    ).toBe("true");
+    expect(saveButton(view.container).disabled).toBe(false);
+    expect(models.probeOpenAiCompatible).not.toHaveBeenCalled();
+  } finally {
+    await view.unmount();
+  }
+});
+
+it("restores only blocked saved rows after a same-endpoint removal conflict", async () => {
+  setUpCompatible();
+  models.probeOpenAiCompatible.mockResolvedValue({
+    models: [{ modelId: "model-c", capabilities: knownCapabilities }],
+  });
+  const view = await renderSettings();
+  try {
+    await click(buttons(view.container, "Find models")[0]!);
+    await click(modelCheckbox(view.container, "model-c"));
+    await click(modelCheckbox(view.container, "model-a"));
+    await click(modelCheckbox(view.container, "model-b"));
+    await typeInto(compatibleKeyField(view.container), "sk-new-key-1234");
+    models.connect.mockRejectedValueOnce(
+      conflictError({
+        reason: "models_in_use",
+        usages: [usage("model-b", "Home"), { ...usage("model-b", "Work"), kind: "default" }],
+      }),
+    );
+    await click(saveButton(view.container));
+    expect(isChecked(view.container, "model-a")).toBe(false);
+    expect(isChecked(view.container, "model-b")).toBe(true);
+    expect(isChecked(view.container, "model-c")).toBe(true);
+    expect(compatibleKeyField(view.container).value).toBe("sk-new-key-1234");
+    const alert = [...view.container.querySelectorAll('[role="alert"]')].find((entry) =>
+      entry.textContent?.includes("Reassign models before disabling them."),
+    );
+    expect(alert?.textContent).toContain("Home");
+    expect(alert?.textContent).toContain("Work");
+    expect(alert?.textContent).toContain("Bot model-b");
+    expect(saveButton(view.container).disabled).toBe(false);
+  } finally {
+    await view.unmount();
+  }
+});
+
+it("reloads persisted settings after a stale save without retrying", async () => {
+  setUpCompatible();
+  const view = await renderSettings();
+  try {
+    await click(modelCheckbox(view.container, "model-b"));
+    await typeInto(compatibleKeyField(view.container), "sk-new-key-1234");
+    models.connect.mockRejectedValueOnce(conflictError({ reason: "model_configuration_changed" }));
+    await click(saveButton(view.container));
+    expect(view.container.textContent).toContain("Model settings changed; reload before saving.");
+    expect(saveButton(view.container).disabled).toBe(true);
+
+    models.credentials.mockResolvedValue([
+      compatibleCredential({
+        enabledModelIds: ["model-a", "model-b", "model-d"],
+        models: [
+          compatibleModelConfig("model-a"),
+          compatibleModelConfig("model-b"),
+          compatibleModelConfig("model-d"),
+        ],
+        configurationVersion: 4,
+      }),
+    ]);
+    await click(buttons(view.container, "Reload")[0]!);
+    expect(models.connect).toHaveBeenCalledTimes(1);
+    expect(isChecked(view.container, "model-b")).toBe(true);
+    expect(isChecked(view.container, "model-d")).toBe(true);
+    expect(compatibleKeyField(view.container).value).toBe("");
+    expect(view.container.textContent).not.toContain("reload before saving");
+
+    models.connect.mockResolvedValueOnce(compatibleCredential());
+    await click(saveButton(view.container));
+    expect(models.connect).toHaveBeenLastCalledWith(
+      expect.objectContaining({ expectedConfigurationVersion: 4 }),
+    );
+    expect(models.connect.mock.calls[1]?.[0]).not.toHaveProperty("apiKey");
+  } finally {
+    await view.unmount();
+  }
+});
+
+it("sends an empty key only after Remove saved key", async () => {
+  setUpCompatible();
+  const view = await renderSettings();
+  try {
+    await click(buttons(view.container, "Remove saved key")[0]!);
+    expect(compatibleKeyField(view.container).disabled).toBe(true);
+    await click(saveButton(view.container));
+    expect(models.connect.mock.calls[0]?.[0]).toMatchObject({ apiKey: "" });
+  } finally {
+    await view.unmount();
+  }
+});
+
+it("offers only checked, configured models as a new connection's default", async () => {
+  vi.mocked(rpc.me).mockResolvedValue(account("openai-compatible", ""));
+  models.list.mockResolvedValue([compatibleEntry]);
+  models.credentials.mockResolvedValue([]);
+  models.probeOpenAiCompatible.mockResolvedValue({
+    models: [
+      { modelId: "model-known", capabilities: knownCapabilities },
+      { modelId: "model-unknown", capabilities: null },
+      { modelId: "model-unused", capabilities: knownCapabilities },
+    ],
+  });
+  const view = await renderSettings();
+  try {
+    await typeInto(inputByLabel(view.container, "OpenAI-compatible server URL"), ENDPOINT);
+    await click(buttons(view.container, "Find models")[0]!);
+    expect(models.probeOpenAiCompatible).toHaveBeenCalledWith({ baseUrl: ENDPOINT });
+    await click(modelCheckbox(view.container, "model-known"));
+    await click(modelCheckbox(view.container, "model-unknown"));
+    const select = [...view.container.querySelectorAll("label")]
+      .find((label) => label.textContent?.startsWith("Default model"))
+      ?.querySelector("select") as HTMLSelectElement;
+    expect([...select.options].map((option) => option.value)).toEqual(["", "model-known"]);
+    expect(select.value).toBe("model-known");
+
+    await click(buttons(modelRow(view.container, "model-unknown"), "Apply")[0]!);
+    expect([...select.options].map((option) => option.value)).toEqual([
+      "",
+      "model-known",
+      "model-unknown",
+    ]);
+    await chooseOption(select, "model-unknown");
+    await click(saveButton(view.container));
+    expect(models.connect.mock.calls[0]?.[0]).toMatchObject({
+      baseUrl: ENDPOINT,
+      modelId: "model-unknown",
+    });
+    expect(models.connect.mock.calls[0]?.[0]).not.toHaveProperty("credentialId");
+  } finally {
+    await view.unmount();
+  }
+});
+
+it("sets an existing connection's default only from persisted models and shows blockers", async () => {
+  setUpCompatible();
+  models.probeOpenAiCompatible.mockResolvedValue({
+    models: [{ modelId: "model-c", capabilities: knownCapabilities }],
+  });
+  const view = await renderSettings();
+  try {
+    await click(buttons(view.container, "Find models")[0]!);
+    await click(modelCheckbox(view.container, "model-c"));
+    const select = view.container.querySelector("#compatible-default-model") as HTMLSelectElement;
+    expect([...select.options].map((option) => option.value)).toEqual(["", "model-a", "model-b"]);
+    await chooseOption(select, "model-b");
+    models.setDefault.mockRejectedValueOnce(
+      conflictError({
+        reason: "model_effort_in_use",
+        usages: [{ ...usage("model-b", "Home"), thinkingLevel: "xhigh" }],
+      }),
+    );
+    await click(buttons(view.container, "Use this model")[0]!);
+    expect(models.setDefault).toHaveBeenCalledWith({
+      provider: "openai-compatible",
+      modelId: "model-b",
+    });
+    expect(view.container.textContent).toContain(
+      "Change bot reasoning effort before changing the default model.",
+    );
+    expect(isChecked(view.container, "model-c")).toBe(true);
+  } finally {
+    await view.unmount();
   }
 });

@@ -6,6 +6,7 @@ import type { AgentRunRequest } from "@rakazo/adapter-kit";
 export interface ModelEmulatorRequest {
   model: string;
   stream: boolean;
+  reasoning_effort?: unknown;
   messages: Array<{
     role: string;
     content?: unknown;
@@ -13,6 +14,27 @@ export interface ModelEmulatorRequest {
     tool_calls?: Array<{ id: string; type: string; function: { name: string; arguments: string } }>;
   }>;
   tools?: Array<{ type: string; function: { name: string; parameters: unknown } }>;
+}
+
+export interface ModelEmulatorListedModel {
+  id: string;
+  owned_by?: string;
+}
+
+export interface ModelEmulatorCompletion {
+  model: string;
+  hasReasoningEffort: boolean;
+  reasoningEffort: unknown;
+}
+
+export interface ModelEmulator {
+  baseUrl: string;
+  model: AgentRunRequest["model"];
+  requests: ModelEmulatorRequest[];
+  completions: ModelEmulatorCompletion[];
+  listRequests: Array<{ authorization: string | undefined }>;
+  assertComplete(): void;
+  close(): Promise<void>;
 }
 
 export type ModelEmulatorResponse =
@@ -32,6 +54,8 @@ export type ModelEmulatorResponse =
   | { type: "hold"; text?: string; onOpen?: () => void; onClose?: () => void };
 
 export interface ModelEmulatorStep {
+  /** Model id this completion must be routed to; any listed model when omitted. */
+  model?: string;
   /** Synthetic endpoint usage, including explicit zero and omitted breakdown fields. */
   usage?: {
     prompt_tokens: number;
@@ -51,18 +75,51 @@ export interface ModelEmulatorStep {
  * stay real. This tests execution, not whether a model can choose these actions.
  * Always call assertComplete: a runtime can consume a provider failure without
  * propagating the original fixture assertion.
+ *
+ * With `models`, `GET /v1/models` lists them and completions may route to any
+ * of them. Listing never consumes a completion step. A configured `apiKey` is
+ * required on every request, including listings.
  */
 export async function startModelEmulator(options: {
   steps: ModelEmulatorStep[];
   modelId?: string;
   apiKey?: string;
-}) {
-  const modelId = options.modelId ?? "offline-fixture";
+  models?: ModelEmulatorListedModel[];
+}): Promise<ModelEmulator> {
+  const listed = options.models;
+  const modelId = options.modelId ?? listed?.[0]?.id ?? "offline-fixture";
+  const routable = new Set(listed ? listed.map((entry) => entry.id) : [modelId]);
+  if (!routable.has(modelId)) throw new Error("modelId must be one of the listed models");
   const requests: ModelEmulatorRequest[] = [];
+  const completions: ModelEmulatorCompletion[] = [];
+  const listRequests: Array<{ authorization: string | undefined }> = [];
   const failures: Error[] = [];
   let stepIndex = 0;
   const server = createServer((request, response) => {
     void (async () => {
+      if (listed && request.method === "GET" && request.url === "/v1/models") {
+        listRequests.push({ authorization: request.headers.authorization });
+        if (options.apiKey) {
+          assert.equal(
+            request.headers.authorization,
+            `Bearer ${options.apiKey}`,
+            "Model listing used the wrong API key",
+          );
+        }
+        request.resume();
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(
+          JSON.stringify({
+            object: "list",
+            data: listed.map((entry) => ({
+              id: entry.id,
+              object: "model",
+              ...(entry.owned_by !== undefined ? { owned_by: entry.owned_by } : {}),
+            })),
+          }),
+        );
+        return;
+      }
       assert.equal(request.method, "POST", "Expected a model POST request");
       assert.equal(request.url, "/v1/chat/completions", "Unexpected model endpoint");
       assert.equal(request.headers.authorization, `Bearer ${options.apiKey ?? "local"}`);
@@ -75,11 +132,17 @@ export async function startModelEmulator(options: {
       }
       const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as ModelEmulatorRequest;
       requests.push(body);
-      assert.equal(body.model, modelId, "Model routing changed");
+      completions.push({
+        model: body.model,
+        hasReasoningEffort: Object.hasOwn(body, "reasoning_effort"),
+        reasoningEffort: body.reasoning_effort,
+      });
+      assert.ok(routable.has(body.model), "Model routing changed");
       assert.equal(body.stream, true, "Expected streaming model request");
       assert.ok(Array.isArray(body.messages), "Expected model messages");
       const step = options.steps[stepIndex++];
       assert.ok(step, `Unexpected model request ${stepIndex}`);
+      if (step.model !== undefined) assert.equal(body.model, step.model, "Model routing changed");
       await step.expect(body);
       const reply = typeof step.response === "function" ? step.response(body) : step.response;
       if (reply.type === "error") {
@@ -98,7 +161,7 @@ export async function startModelEmulator(options: {
             id: `fixture-${stepIndex}`,
             object: "chat.completion.chunk",
             created: 0,
-            model: modelId,
+            model: body.model,
             choices: [{ index: 0, delta, finish_reason: finishReason }],
           })}\n\n`,
         );
@@ -168,6 +231,8 @@ export async function startModelEmulator(options: {
     baseUrl,
     model,
     requests,
+    completions,
+    listRequests,
     assertComplete() {
       if (failures.length)
         throw new AggregateError(failures, failures.map((error) => error.message).join("\n"));

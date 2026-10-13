@@ -24,6 +24,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { RouterDeps } from "./router.js";
 import { createRouter, enqueueBotIntroRun, HEARTBEAT_MS, SESSION_RECHECK_MS } from "./router.js";
 
+/** Owner lock plus an actor with no compatible model references. */
+function modelConfigurationClient() {
+  return {
+    $queryRaw: vi.fn().mockResolvedValue([{ id: "user-1" }]),
+    spaceMember: { findMany: vi.fn().mockResolvedValue([]) },
+  };
+}
+
 describe("account preferences", () => {
   function preferencesDeps(avatarStyle: string) {
     const update = vi.fn().mockResolvedValue({});
@@ -1934,6 +1942,7 @@ describe("model credential persistence", () => {
       upsert,
     };
     const tx = {
+      ...modelConfigurationClient(),
       userModelCredential,
       secret: { create: vi.fn().mockResolvedValue({}) },
       spaceModelPreference,
@@ -2598,6 +2607,7 @@ describe("codex live catalog", () => {
     };
     const upsert = vi.fn(async () => ({ id: "pref-spark" }));
     const tx = {
+      ...modelConfigurationClient(),
       userModelCredential: { findMany: vi.fn().mockResolvedValue([oauthCredential]) },
       spaceModelPreference: {
         findMany: vi.fn().mockResolvedValue([]),
@@ -2654,6 +2664,7 @@ describe("codex live catalog", () => {
       updatedAt: stamp,
     };
     const tx = {
+      ...modelConfigurationClient(),
       userModelCredential: { findMany: vi.fn().mockResolvedValue([oauthCredential]) },
       spaceModelPreference: {
         findMany: vi.fn().mockResolvedValue([]),
@@ -2707,6 +2718,7 @@ describe("codex live catalog", () => {
       };
       const upsert = vi.fn(async () => ({ id: "pref-spark" }));
       const tx = {
+        ...modelConfigurationClient(),
         userModelCredential: { findMany: vi.fn().mockResolvedValue([oauthCredential]) },
         spaceModelPreference: {
           findMany: vi.fn().mockResolvedValue([]),
@@ -2852,6 +2864,7 @@ describe("model set default auth", () => {
     });
     const upsert = vi.fn(async () => ({ id: "pref-spark" }));
     const tx = {
+      ...modelConfigurationClient(),
       userModelCredential: {
         findMany: vi.fn().mockResolvedValue([oauthCredential, apiCredential]),
       },
@@ -2954,6 +2967,7 @@ describe("model set default auth", () => {
     const upsert = vi.fn(async () => ({ id: "pref-luna" }));
     const updateMany = vi.fn(async () => ({ count: 1 }));
     const tx = {
+      ...modelConfigurationClient(),
       userModelCredential: {
         findMany: vi.fn().mockResolvedValue([oauthCredential, apiCredential]),
       },
@@ -3046,6 +3060,7 @@ describe("model set default auth", () => {
     };
     const upsert = vi.fn(async () => ({ id: "pref-luna" }));
     const tx = {
+      ...modelConfigurationClient(),
       userModelCredential: {
         findMany: vi.fn().mockResolvedValue([oauthCredential, apiCredential]),
       },
@@ -3216,7 +3231,8 @@ describe("bot model auth on save", () => {
       description: bot.description,
     }));
     const tx = {
-      bot: { update: botUpdate },
+      ...modelConfigurationClient(),
+      bot: { update: botUpdate, findFirst: vi.fn(async () => bot) },
       thread: { update: vi.fn(async () => ({ nextEventSeq: 2 })) },
       event: { create: vi.fn(async () => ({ seq: 1 })) },
     };
@@ -3249,6 +3265,7 @@ describe("bot model auth on save", () => {
       preferenceFindFirst,
       secretFindFirst,
       botUpdate,
+      transaction: prisma.$transaction,
       handler: new RPCHandler(createRouter(deps)),
     };
   }
@@ -3272,11 +3289,10 @@ describe("bot model auth on save", () => {
     });
     expect(preferenceFindFirst).not.toHaveBeenCalled();
     expect(secretFindFirst).not.toHaveBeenCalled();
-    expect(botUpdate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({ name: "Ada renamed", modelId: spark }),
-      }),
-    );
+    const [update] = botUpdate.mock.calls.at(0) as unknown as [{ data: Record<string, unknown> }];
+    expect(update.data).toMatchObject({ name: "Ada renamed" });
+    expect(update.data).not.toHaveProperty("modelId");
+    expect(update.data).not.toHaveProperty("thinkingLevel");
   });
 
   it("rejects setting Codex Spark on the space's ChatGPT subscription credential", async () => {
@@ -3318,7 +3334,7 @@ describe("bot model auth on save", () => {
   it("accepts Spark when the preference that owns that model is an API key", async () => {
     const apiCredential = credentialRow("cred-api", "secret-api");
     const oauthCredential = credentialRow("cred-oauth", "secret-oauth");
-    const { secretFindFirst, handler } = saveDeps({
+    const { secretFindFirst, botUpdate, transaction, handler } = saveDeps({
       modelId: luna,
       preferences: (args) => {
         if (args.where.modelId === spark) {
@@ -3341,6 +3357,19 @@ describe("bot model auth on save", () => {
     expect(secretFindFirst).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({ id: "secret-api", userId: actor.userId, spaceId: null }),
+      }),
+    );
+    expect(transaction).toHaveBeenCalledWith(
+      expect.any(Function),
+      expect.objectContaining({ isolationLevel: "ReadCommitted" }),
+    );
+    expect(botUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          modelProvider: "openai-codex",
+          modelId: spark,
+          thinkingLevel: null,
+        }),
       }),
     );
   });
@@ -3476,36 +3505,68 @@ describe("routines.update", () => {
       },
     );
     const enqueue = vi.fn(async () => undefined);
+    const preferences = { findMany: vi.fn(async () => []) };
+    const credentials = {
+      findMany: vi.fn(async () => [
+        {
+          id: "credential-1",
+          userId: actor.userId,
+          provider: "openai-compatible",
+          label: "Local",
+          secretId: "secret-1",
+          supportsImages: false,
+          enabledModelIds: ["old-model", "new-model"],
+          modelConfigurationVersion: 1,
+          createdAt: new Date(0),
+          updatedAt: new Date(0),
+        },
+      ]),
+    };
+    const routineApi = {
+      findFirst: vi.fn(async (args: { where: { bot?: { archivedAt: null } } }) =>
+        botArchived && args.where.bot?.archivedAt === null ? null : savedRoutine,
+      ),
+      update,
+    };
+    const tx = {
+      ...modelConfigurationClient(),
+      spaceModelPreference: preferences,
+      userModelCredential: credentials,
+      routine: routineApi,
+    };
     const prisma = {
-      spaceModelPreference: {
-        findMany: vi.fn(async () => []),
-        findFirst: vi.fn(async () => ({ id: "preference-1" })),
-      },
-      userModelCredential: {
-        findMany: vi.fn(async () => [
-          {
-            id: "credential-1",
-            provider: "openai-compatible",
-            apiKey: "fake-key",
-            userId: actor.userId,
-          },
-        ]),
-      },
-      routine: {
-        findFirst: vi.fn(async (args: { where: { bot?: { archivedAt: null } } }) =>
-          botArchived && args.where.bot?.archivedAt === null ? null : savedRoutine,
-        ),
-        update,
-      },
+      spaceModelPreference: preferences,
+      userModelCredential: credentials,
+      secret: { findFirst: vi.fn(async () => ({ id: "secret-1", ciphertext: "cipher-1" })) },
+      routine: routineApi,
       bot: {
         findFirst: vi.fn(async () =>
           botArchived ? null : { id: "bot-1", thread: { id: "thread-1" }, computer: null },
         ),
       },
+      $transaction: vi.fn(async (fn: (client: typeof tx) => unknown) => fn(tx)),
+    };
+    const modelConfig = (modelId: string) => ({
+      modelId,
+      thinkingLevels: ["off", "low", "high"],
+      defaultThinkingLevel: null,
+      contextWindow: 32768,
+      maxTokens: 4096,
+      supportsImages: false,
+    });
+    const secrets = {
+      load: vi.fn(async () =>
+        JSON.stringify({
+          kind: "openai_compatible",
+          baseUrl: "http://127.0.0.1:9/v1",
+          models: [modelConfig("old-model"), modelConfig("new-model")],
+        }),
+      ),
     };
     const handler = new RPCHandler(
       createRouter({
         prisma,
+        secrets,
         env: { sandboxProvider: "fake" },
         events: { append: vi.fn(async () => undefined) },
         jobs: { enqueue, cancel: vi.fn(async () => undefined) },
@@ -3527,7 +3588,13 @@ describe("routines.update", () => {
         }),
         { prefix: "/rpc", context: { actor } },
       );
-    return { update, enqueue, call, findFirst: prisma.routine.findFirst };
+    return {
+      update,
+      enqueue,
+      call,
+      findFirst: prisma.routine.findFirst,
+      transaction: prisma.$transaction,
+    };
   }
 
   it("refuses to re-arm a routine on an archived bot without writing", async () => {

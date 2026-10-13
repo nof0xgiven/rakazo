@@ -195,9 +195,6 @@ export async function wakeMessageRoutines(
       id: true,
       name: true,
       prompt: true,
-      modelProvider: true,
-      modelId: true,
-      thinkingLevel: true,
     },
     orderBy: { updatedAt: "desc" },
   });

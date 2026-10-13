@@ -2,6 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { compatibleConnection } from "./compatible-connection.js";
 import { historyFixture } from "./evals/history-fixtures.js";
 import { runTrial } from "./evals/runner.js";
 import { startModelEmulator } from "./model-emulator.js";
@@ -48,14 +49,12 @@ describe.skipIf(!enabled)("short original product history", () => {
           },
           1,
           {
-            connection: {
-              provider: model.model.provider,
-              modelId: model.model.id,
+            connection: compatibleConnection({
               baseUrl: model.baseUrl,
+              modelId: model.model.id,
               apiKey: fixtureKey,
               contextWindow: 1_000_000,
-              maxTokens: 4096,
-            },
+            }),
             timeoutMs: 30_000,
             maxToolCalls: 0,
             createApp: (composio) =>

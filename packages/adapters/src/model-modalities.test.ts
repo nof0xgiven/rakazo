@@ -106,6 +106,29 @@ describe("operator-declared vision modalities", () => {
     });
   });
 
+  it("lets a saved model's explicit text-only setting beat the same id's declaration", async () => {
+    await withEnv({ [VISION_ENV]: "gpt4o-vision" }, async () => {
+      const { builtinModels } = await import("@earendil-works/pi-ai/providers/all");
+      const { registerOpenAiCompatibleRuntime } = await import(
+        "./pi-openai-compatible-provider.js"
+      );
+      const { modelAcceptsImageInput } = await import("./model-vision.js");
+      const models = registerOpenAiCompatibleRuntime(builtinModels(), {
+        modelId: "gpt4o-vision",
+        baseUrl: "http://127.0.0.1:4000/v1",
+        thinkingLevels: ["off"],
+        acceptsImages: false,
+      });
+      expect(models.getModel(OPENAI_COMPATIBLE_PROVIDER_ID, "gpt4o-vision")?.input).toEqual([
+        "text",
+      ]);
+      expect(modelAcceptsImageInput(OPENAI_COMPATIBLE_PROVIDER_ID, "gpt4o-vision", false)).toBe(
+        false,
+      );
+      expect(modelAcceptsImageInput(OPENAI_COMPATIBLE_PROVIDER_ID, "gpt4o-vision")).toBe(true);
+    });
+  });
+
   it("applies the same declaration to the local provider", async () => {
     await withEnv(
       { RAKAZO_LOCAL_MODELS: "qwen3-vl,qwen3-text", [LOCAL_VISION_ENV]: "qwen3-vl" },

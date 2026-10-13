@@ -427,3 +427,99 @@ describe("createRepos.reorderBots", () => {
     expect(update).not.toHaveBeenCalled();
   });
 });
+
+describe("createRepos.createBot model choice", () => {
+  const parent = {
+    modelProvider: "openai-compatible",
+    modelId: "model-a",
+    thinkingLevel: "high",
+    disabledBuiltinTools: [],
+  };
+
+  function createRepo() {
+    const order: string[] = [];
+    const tx = {
+      $queryRaw: vi.fn(async (query: unknown, ...values: unknown[]) => {
+        order.push(Array.isArray(query) && values[0] === actor.userId ? "owner" : "space");
+        return [{ id: actor.userId }];
+      }),
+      spaceMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          organizationId: "org-1",
+          space: { deletingAt: null },
+        }),
+      },
+      bot: {
+        findFirst: vi.fn(async () => {
+          order.push("parent");
+          return parent;
+        }),
+        create: vi.fn(),
+      },
+    };
+    const transaction = vi.fn(async (run: (client: typeof tx) => Promise<unknown>) => run(tx));
+    const prisma = {
+      bot: { count: vi.fn().mockResolvedValue(0) },
+      deploymentSettings: { findUnique: vi.fn().mockResolvedValue(null) },
+      $transaction: transaction,
+    };
+    const stop = new Error("stop after validation");
+    const validateModelChoice = vi.fn(async () => {
+      order.push("validate");
+      throw stop;
+    });
+    return {
+      repos: createRepos(prisma as unknown as PrismaClient),
+      tx,
+      transaction,
+      order,
+      stop,
+      validateModelChoice,
+    };
+  }
+
+  const profile = {
+    name: "Child",
+    title: "",
+    description: "",
+    instructions: "",
+    notifyOnFinish: true,
+    parentBotId: "bot-parent",
+  };
+
+  it("inherits the parent's model and effort under the owner lock before content creation", async () => {
+    const { repos, tx, transaction, order, stop, validateModelChoice } = createRepo();
+
+    await expect(repos.createBot(actor, profile, { validateModelChoice })).rejects.toBe(stop);
+
+    expect(order).toEqual(["owner", "space", "parent", "validate"]);
+    expect(transaction).toHaveBeenCalledWith(
+      expect.any(Function),
+      expect.objectContaining({ isolationLevel: "ReadCommitted" }),
+    );
+    expect(validateModelChoice).toHaveBeenCalledWith(tx, {
+      modelProvider: "openai-compatible",
+      modelId: "model-a",
+      thinkingLevel: "high",
+    });
+    expect(tx.bot.create).not.toHaveBeenCalled();
+  });
+
+  it("does not give an explicitly chosen model the parent's effort", async () => {
+    const { repos, tx, stop, validateModelChoice } = createRepo();
+
+    await expect(
+      repos.createBot(
+        actor,
+        { ...profile, modelProvider: "openai-compatible", modelId: "model-b" },
+        { validateModelChoice },
+      ),
+    ).rejects.toBe(stop);
+
+    expect(validateModelChoice).toHaveBeenCalledWith(tx, {
+      modelProvider: "openai-compatible",
+      modelId: "model-b",
+      thinkingLevel: null,
+    });
+  });
+});

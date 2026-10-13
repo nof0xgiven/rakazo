@@ -8,7 +8,12 @@ import {
   type ProviderStreams,
 } from "@earendil-works/pi-ai";
 import { openAICompletionsApi } from "@earendil-works/pi-ai/api/openai-completions.lazy";
-import { DEFAULT_MODEL_CONTEXT_WINDOW, DEFAULT_MODEL_MAX_TOKENS } from "@rakazo/contracts";
+import type { ThinkingLevel } from "@rakazo/contracts";
+import {
+  DEFAULT_MODEL_CONTEXT_WINDOW,
+  DEFAULT_MODEL_MAX_TOKENS,
+  thinkingLevelsReason,
+} from "@rakazo/contracts";
 import { Agent } from "undici";
 import { declaredVisionModelIds, inputModalities } from "./model-modalities.js";
 import {
@@ -18,6 +23,10 @@ import {
   isPrivateAddress,
   type ResolveHostname,
 } from "./network-address.js";
+import {
+  compatibleThinkingLevelMap,
+  deploymentCompatibleThinkingLevels,
+} from "./openai-compatible-models.js";
 import {
   assertAllowedOpenAiCompatibleRequestUrl,
   assertAllowedOpenAiCompatibleUrl,
@@ -58,14 +67,19 @@ const OPENAI_COMPAT_BASE = "http://127.0.0.1:1/v1";
 const resolveHostname: ResolveHostname = (hostname) =>
   lookup(hostname, { all: true, verbatim: true });
 
+export type OpenAiCompatibleRuntimeCapabilities = {
+  thinkingLevels: readonly ThinkingLevel[];
+  acceptsImages?: boolean;
+  maxTokens?: number;
+  contextWindow?: number;
+};
+
 export function openAiCompatibleModel(
   id: string,
   baseUrl: string,
-  reasoning = false,
-  acceptsImages = false,
-  maxTokens = DEFAULT_MODEL_MAX_TOKENS,
-  contextWindow = DEFAULT_MODEL_CONTEXT_WINDOW,
+  capabilities: OpenAiCompatibleRuntimeCapabilities = { thinkingLevels: ["off"] },
 ): Model<"openai-completions"> {
+  const reasoning = thinkingLevelsReason(capabilities.thinkingLevels);
   return {
     id,
     name: id,
@@ -78,11 +92,11 @@ export function openAiCompatibleModel(
       supportsReasoningEffort: reasoning,
       thinkingFormat: "openai",
     },
-    thinkingLevelMap: { off: "none" },
-    input: inputModalities(acceptsImages),
+    thinkingLevelMap: compatibleThinkingLevelMap(capabilities.thinkingLevels),
+    input: inputModalities(capabilities.acceptsImages ?? false),
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-    contextWindow,
-    maxTokens,
+    contextWindow: capabilities.contextWindow ?? DEFAULT_MODEL_CONTEXT_WINDOW,
+    maxTokens: capabilities.maxTokens ?? DEFAULT_MODEL_MAX_TOKENS,
   };
 }
 
@@ -281,15 +295,18 @@ export function openAiCompatibleCatalogProvider(): Provider {
   const placeholderAcceptsImages = visionIds.has(OPENAI_COMPATIBLE_CATALOG_MODEL_ID);
   const visionModels = [...visionIds]
     .filter((id) => id !== OPENAI_COMPATIBLE_CATALOG_MODEL_ID)
-    .map((id) => openAiCompatibleModel(id, OPENAI_COMPAT_BASE, false, true));
+    .map((id) =>
+      openAiCompatibleModel(id, OPENAI_COMPAT_BASE, {
+        thinkingLevels: ["off"],
+        acceptsImages: true,
+      }),
+    );
   return openAiCompatibleProvider([
     {
-      ...openAiCompatibleModel(
-        OPENAI_COMPATIBLE_CATALOG_MODEL_ID,
-        OPENAI_COMPAT_BASE,
-        false,
-        placeholderAcceptsImages,
-      ),
+      ...openAiCompatibleModel(OPENAI_COMPATIBLE_CATALOG_MODEL_ID, OPENAI_COMPAT_BASE, {
+        thinkingLevels: ["off"],
+        acceptsImages: placeholderAcceptsImages,
+      }),
       name: "Custom model id",
     },
     ...visionModels,
@@ -301,12 +318,18 @@ export function registerOpenAiCompatibleCatalog(models: MutableModels): MutableM
   return guardToolCallNames(models, OPENAI_COMPATIBLE_PROVIDER_ID);
 }
 
-/** Register a concrete model + base URL for an agent run. */
+/**
+ * Register a concrete model + base URL for an agent run. Saved connections
+ * always pass their model's `thinkingLevels` and image flag; only a request
+ * without them derives the old endpoint-wide behavior from `reasoning` and the
+ * operator vision list.
+ */
 export function registerOpenAiCompatibleRuntime(
   models: MutableModels,
   opts: {
     modelId: string;
     baseUrl: string;
+    thinkingLevels?: readonly ThinkingLevel[];
     reasoning?: boolean;
     acceptsImages?: boolean;
     maxTokens?: number;
@@ -315,62 +338,59 @@ export function registerOpenAiCompatibleRuntime(
 ): MutableModels {
   const baseUrl = normalizeOpenAiCompatibleBaseUrl(opts.baseUrl);
   const modelId = opts.modelId.trim();
-  const acceptsImages = opts.acceptsImages || openAiCompatibleVisionModelIds().has(modelId);
   models.setProvider(
     openAiCompatibleProvider([
-      openAiCompatibleModel(
-        modelId,
-        baseUrl,
-        opts.reasoning,
-        acceptsImages,
-        opts.maxTokens,
-        opts.contextWindow,
-      ),
+      openAiCompatibleModel(modelId, baseUrl, {
+        thinkingLevels: opts.thinkingLevels ?? deploymentCompatibleThinkingLevels(opts.reasoning),
+        acceptsImages: opts.acceptsImages ?? openAiCompatibleVisionModelIds().has(modelId),
+        maxTokens: opts.maxTokens,
+        contextWindow: opts.contextWindow,
+      }),
     ]),
   );
   return guardToolCallNames(models, OPENAI_COMPATIBLE_PROVIDER_ID);
 }
 
 export type OpenAiCompatibleConnectInput = {
-  provider: string;
   baseUrl?: string;
-  modelId?: string;
   apiKey?: string;
 };
 
 export function prepareOpenAiCompatibleConnect(input: OpenAiCompatibleConnectInput): {
   baseUrl: string;
-  modelId: string;
   apiKey?: string;
 } {
   const baseUrl = input.baseUrl?.trim();
-  const modelId = input.modelId?.trim();
   if (!baseUrl) throw new Error("Base URL is required for OpenAI-compatible models");
-  if (!modelId) throw new Error("Model id is required for OpenAI-compatible models");
   const allowed = assertAllowedOpenAiCompatibleUrl(baseUrl);
   const apiKey = input.apiKey?.trim();
   assertHttpsForKeyedOpenAiCompatibleUrl(allowed, apiKey);
   const normalized = allowed.href;
-  return apiKey ? { baseUrl: normalized, modelId, apiKey } : { baseUrl: normalized, modelId };
+  return apiKey ? { baseUrl: normalized, apiKey } : { baseUrl: normalized };
 }
+
+type ListedModelEntry = { id?: unknown; owned_by?: unknown } | null | undefined;
 
 export type OpenAiCompatibleModelsResponse = {
   object?: string;
-  data?: Array<{ id?: string }>;
-  models?: Array<{ id?: string }>;
+  data?: ListedModelEntry[];
+  models?: ListedModelEntry[];
 };
+
+/** One `GET /models` entry: exact trimmed id plus `owned_by` when every duplicate agrees. */
+export type OpenAiCompatibleListedModel = { id: string; ownedBy?: string };
 
 /** Shared suffix: /models probe is optional when the user already knows a model id. */
 const OPENAI_COMPAT_PROBE_HAND_FILL_HINT = "You can still Connect with an explicit model id.";
 
-function probeModelIds(
+function listedModels(
   body: OpenAiCompatibleModelsResponse,
   opts?: { catalogProbe?: boolean },
-): string[] {
+): OpenAiCompatibleListedModel[] {
   const { maxModelIds } = modelsProbeLimits(opts?.catalogProbe);
-  const entries = Array.isArray(body.data)
+  const entries = Array.isArray(body?.data)
     ? body.data
-    : Array.isArray(body.models)
+    : Array.isArray(body?.models)
       ? body.models
       : null;
   if (!entries) {
@@ -378,16 +398,27 @@ function probeModelIds(
       `Model server response did not include a models list. ${OPENAI_COMPAT_PROBE_HAND_FILL_HINT}`,
     );
   }
-  const ids: string[] = [];
+  const listed = new Map<string, { ownedBy: string | undefined; consistent: boolean }>();
   for (const entry of entries) {
     const id = typeof entry?.id === "string" ? entry.id.trim() : "";
     if (!id) continue;
-    if (id.length > MAX_MODEL_ID_LENGTH || ids.length >= maxModelIds) {
+    if (id.length > MAX_MODEL_ID_LENGTH) {
       throw new Error("Model server returned too many or overly long model ids");
     }
-    ids.push(id);
+    const ownedBy = typeof entry?.owned_by === "string" ? entry.owned_by : undefined;
+    const seen = listed.get(id);
+    if (seen) {
+      if (seen.ownedBy !== ownedBy) seen.consistent = false;
+      continue;
+    }
+    if (listed.size >= maxModelIds) {
+      throw new Error("Model server returned too many or overly long model ids");
+    }
+    listed.set(id, { ownedBy, consistent: true });
   }
-  return ids;
+  return Array.from(listed, ([id, { ownedBy, consistent }]) =>
+    consistent && ownedBy !== undefined ? { id, ownedBy } : { id },
+  );
 }
 
 async function readBoundedJson(
@@ -427,12 +458,13 @@ async function readBoundedJson(
   }
 }
 
-export async function probeOpenAiCompatibleModels(
+/** Exactly one guarded `GET {baseUrl}/models`, deduplicated by exact trimmed id. */
+export async function listOpenAiCompatibleModels(
   input: { baseUrl: string; apiKey?: string },
   fetchImpl?: typeof fetch,
   signal?: AbortSignal,
   opts?: { allowPublic?: boolean; catalogProbe?: boolean },
-): Promise<string[]> {
+): Promise<OpenAiCompatibleListedModel[]> {
   const baseUrl = assertAllowedOpenAiCompatibleUrl(input.baseUrl, {
     allowPublic: opts?.allowPublic,
   });
@@ -462,7 +494,7 @@ export async function probeOpenAiCompatibleModels(
       );
     }
     const body = await readBoundedJson(response, opts);
-    return probeModelIds(body, opts);
+    return listedModels(body, opts);
   } catch (error) {
     const aborted =
       (error instanceof Error && error.name === "AbortError") ||
@@ -478,4 +510,14 @@ export async function probeOpenAiCompatibleModels(
   } finally {
     clearTimeout(timeout);
   }
+}
+
+export async function probeOpenAiCompatibleModels(
+  input: { baseUrl: string; apiKey?: string },
+  fetchImpl?: typeof fetch,
+  signal?: AbortSignal,
+  opts?: { allowPublic?: boolean; catalogProbe?: boolean },
+): Promise<string[]> {
+  const listed = await listOpenAiCompatibleModels(input, fetchImpl, signal, opts);
+  return listed.map((model) => model.id);
 }

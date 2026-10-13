@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import type { HistorySearchInput } from "@rakazo/contracts";
 import { describe, expect, it } from "vitest";
+import { compatibleConnection } from "./compatible-connection.js";
 import { historyFixture } from "./evals/history-fixtures.js";
 import { runTrial } from "./evals/runner.js";
 import { type ModelEmulatorRequest, startModelEmulator } from "./model-emulator.js";
@@ -163,14 +164,12 @@ describe.skipIf(!enabled)("unfinished broad history search", () => {
           },
           1,
           {
-            connection: {
-              provider: model.model.provider,
-              modelId: model.model.id,
+            connection: compatibleConnection({
               baseUrl: model.baseUrl,
+              modelId: model.model.id,
               apiKey: key,
-              contextWindow: 1000000,
-              maxTokens: 4096,
-            },
+              contextWindow: 1_000_000,
+            }),
             timeoutMs: 30000,
             maxToolCalls: 5,
             createApp: (composio) =>

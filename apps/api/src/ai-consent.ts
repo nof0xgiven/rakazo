@@ -3,6 +3,8 @@ import { ORPCError } from "@orpc/server";
 import {
   aiRecipient,
   cloudAgentsEnabled,
+  compatibleCatalogModelsForSpace,
+  OPENAI_COMPATIBLE_PROVIDER_ID,
   parseModelSecret,
   selectConfiguredModel,
   toStringRecord,
@@ -41,6 +43,7 @@ export async function aiConsentStatus(
     memory,
     settings,
     consents,
+    compatibleModels,
   ] = await Promise.all([
     modelsEnabled
       ? deps.prisma.spaceModelPreference.findMany({
@@ -100,6 +103,7 @@ export async function aiConsentStatus(
     deps.prisma.aiDataConsent.findMany({
       where: { userId: actor.userId, spaceId: actor.spaceId, version: AI_DISCLOSURE_VERSION },
     }),
+    modelsEnabled ? compatibleCatalogModelsForSpace(deps.prisma, deps.secrets, actor) : [],
   ]);
   const allowed = new Set(consents.map((row) => row.recipientKey));
   const recipients = new Map<string, AiRecipient>();
@@ -131,8 +135,11 @@ export async function aiConsentStatus(
         });
       }),
     );
-    // Connected models remain reachable by helpers during a targeted bot run.
-    for (const preference of preferences)
+    // Helpers can select any connected model during a targeted bot run. Every
+    // enabled OpenAI-compatible id is reachable on the endpoint its chooser picks,
+    // which may differ from the credential a preference row points at.
+    for (const preference of preferences) {
+      if (preference.credential.provider === OPENAI_COMPATIBLE_PROVIDER_ID) continue;
       selected.push({
         provider: preference.credential.provider,
         id: preference.modelId ?? "",
@@ -144,6 +151,7 @@ export async function aiConsentStatus(
         },
         thinkingLevel: null,
       });
+    }
     const backupModels = await Promise.all(
       backups.map(async (backup) => {
         const credential = await findModelCredential(
@@ -211,6 +219,16 @@ export async function aiConsentStatus(
           provider: model.provider!,
           modelId: model.id!,
           baseUrl: model.credential ? baseUrls.get(model.credential.secretId) : undefined,
+          use: "model",
+        }),
+      );
+    }
+    for (const model of compatibleModels) {
+      add(
+        aiRecipient({
+          provider: OPENAI_COMPATIBLE_PROVIDER_ID,
+          modelId: model.modelId,
+          baseUrl: model.baseUrl,
           use: "model",
         }),
       );

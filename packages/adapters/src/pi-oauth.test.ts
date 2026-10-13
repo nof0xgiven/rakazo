@@ -107,14 +107,66 @@ describe("model secrets", () => {
     expect(decoded).toEqual(secret);
     expect(secretValuesToRedact(decoded)).toEqual(["fake-api-key"]);
   });
-  it("round-trips compatible model limits", () => {
-    const secret = {
-      kind: "openai_compatible" as const,
-      baseUrl: "http://127.0.0.1:8000/v1",
+  it("round-trips canonical compatible per-model settings and drops invalid entries", () => {
+    const model = {
+      modelId: "model-a",
+      thinkingLevels: ["off" as const, "high" as const],
+      defaultThinkingLevel: null,
       contextWindow: 8192,
       maxTokens: 1024,
+      supportsImages: false,
+    };
+    const secret = {
+      kind: "openai_compatible" as const,
+      format: "canonical" as const,
+      baseUrl: "http://127.0.0.1:8000/v1",
+      apiKey: "fake-key",
+      models: [model],
     };
     expect(parseModelSecret(serializeModelSecret(secret))).toEqual(secret);
+    const withInvalid = JSON.stringify({
+      ...secret,
+      models: [model, { ...model, modelId: "broken", maxTokens: 9000 }],
+    });
+    expect(parseModelSecret(withInvalid)).toEqual(secret);
+  });
+  it.each([null, {}, "model-a", 1])(
+    "reads a present non-array models field %j as canonical with no models",
+    (models) => {
+      const parsed = parseModelSecret(
+        JSON.stringify({
+          kind: "openai_compatible",
+          baseUrl: "http://127.0.0.1:8000/v1",
+          apiKey: "fake-key",
+          reasoning: true,
+          models,
+        }),
+      );
+      expect(parsed).toEqual({
+        kind: "openai_compatible",
+        format: "canonical",
+        baseUrl: "http://127.0.0.1:8000/v1",
+        apiKey: "fake-key",
+        models: [],
+      });
+    },
+  );
+  it("reads endpoint-wide compatible fields only as a legacy secret it never writes", () => {
+    const parsed = parseModelSecret(
+      JSON.stringify({
+        kind: "openai_compatible",
+        baseUrl: "http://127.0.0.1:8000/v1",
+        reasoning: true,
+        maxTokens: 1024,
+      }),
+    );
+    expect(parsed).toEqual({
+      kind: "openai_compatible",
+      format: "legacy",
+      baseUrl: "http://127.0.0.1:8000/v1",
+      legacy: { reasoning: true, maxTokens: 1024 },
+    });
+    expect(() => serializeModelSecret(parsed)).toThrow(/read-only/);
   });
   it("treats plaintext as an API key", () => {
     expect(parseModelSecret("sk-or-v1-abc")).toEqual({ kind: "api_key", key: "sk-or-v1-abc" });
@@ -135,17 +187,20 @@ describe("model secrets", () => {
     expect(secretValuesToRedact(parsed)).toEqual(["access-token", "refresh-token"]);
   });
 
-  it("round-trips openai-compatible credentials", () => {
-    const parsed = parseModelSecret(
-      serializeModelSecret({
-        kind: "openai_compatible",
-        baseUrl: "http://127.0.0.1:8000/v1",
-      }),
-    );
-    expect(parsed).toEqual({
+  it("round-trips a keyless openai-compatible credential", () => {
+    const secret = {
+      kind: "openai_compatible" as const,
+      format: "canonical" as const,
+      baseUrl: "http://127.0.0.1:8000/v1",
+      models: [],
+    };
+    const plaintext = serializeModelSecret(secret);
+    expect(JSON.parse(plaintext)).toEqual({
       kind: "openai_compatible",
       baseUrl: "http://127.0.0.1:8000/v1",
+      models: [],
     });
+    expect(parseModelSecret(plaintext)).toEqual(secret);
   });
 
   it("rejects credential JSON that declares a kind but misses its fields", () => {
@@ -214,7 +269,7 @@ describe("model secrets", () => {
       },
     });
     expect(resolved.apiKey).toBe("new");
-    expect(resolved.secret.maxTokens).toBe(16384);
+    expect(resolved.secret).toMatchObject({ maxTokens: 16384 });
     expect(parseModelSecret(saved)).toMatchObject({
       kind: "oauth",
       maxTokens: 16384,

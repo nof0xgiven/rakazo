@@ -70,6 +70,7 @@ describe("local settings authority", () => {
     for (const procedure of [
       "models/connect",
       "models/setDefault",
+      "models/describeOpenAiCompatible",
       "models/backups",
       "models/setBackups",
       "integrationSetup/get",

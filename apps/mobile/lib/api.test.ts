@@ -801,6 +801,48 @@ describe("mobile API authentication", () => {
     );
   });
 
+  it("keeps a failure's status, code and structured data with the sanitized message", async () => {
+    const data = { reason: "model_configuration_changed" };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse(
+          {
+            json: {
+              defined: true,
+              code: "CONFLICT",
+              status: 409,
+              message: "Model settings changed; reload before saving.",
+              data,
+            },
+          },
+          { status: 409 },
+        ),
+      ),
+    );
+
+    const error = await rpc("models/connect", {}).catch((failure: unknown) => failure);
+    expect(error).toBeInstanceOf(Error);
+    expect(error).toMatchObject({
+      message: "Model settings changed; reload before saving.",
+      status: 409,
+      code: "CONFLICT",
+      data,
+    });
+  });
+
+  it("omits code and data a failure did not send", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(null, { status: 500 })),
+    );
+
+    const error = await rpc("models/connect", {}).catch((failure: unknown) => failure);
+    expect(error).toMatchObject({ status: 500 });
+    expect(error).not.toHaveProperty("code");
+    expect(error).not.toHaveProperty("data");
+  });
+
   it.each([
     ["an empty", new Response(null, { status: 404 })],
     [

@@ -5,10 +5,13 @@ import type { Prisma } from "./client.js";
 import { expireComputerExecutionLeases } from "./computers.js";
 import { appendEventInTransaction, createPendingSteeringRun } from "./events.js";
 import { createThreadMessageInTransaction } from "./messages.js";
+import { lockModelConfigurationOwner } from "./model-credentials.js";
 
 export interface ExpireStuckRunInput {
   runId: string;
   threadId: string;
+  /** Run owner read before the transaction; the owner lock is the transaction's first statement. */
+  ownerUserId: string;
   status: StuckWorkStatus;
   /** Episode clock. A newer claim or answer changes updatedAt and must win. */
   updatedAt: Date;
@@ -29,6 +32,12 @@ export async function expireStuckRun(
   tx: Prisma.TransactionClient,
   input: ExpireStuckRunInput,
 ): Promise<ExpireStuckRunResult | null> {
+  await lockModelConfigurationOwner(tx, input.ownerUserId);
+  const owned = await tx.run.findUnique({
+    where: { id: input.runId },
+    select: { userId: true },
+  });
+  if (owned?.userId !== input.ownerUserId) return null;
   await tx.$queryRaw`SELECT id FROM threads WHERE id = ${input.threadId} FOR UPDATE`;
   const current = await tx.run.findUnique({
     where: { id: input.runId },

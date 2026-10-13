@@ -72,27 +72,53 @@ describe("contracts", () => {
     expect(usableModelId("claude-opus-4-6")).toBe("claude-opus-4-6");
   });
 
-  it("rejects maxTokens larger than contextWindow on model connect", () => {
-    const invalid = ModelConnectInputSchema.safeParse({
-      provider: "openai-compatible",
-      baseUrl: "http://localhost:8000/v1",
-      modelId: "arbitrary-model",
-      maxTokens: 131072,
-      contextWindow: 1,
-    });
-    expect(invalid.success).toBe(false);
-    if (!invalid.success) {
-      expect(invalid.error.issues.some((issue) => issue.path[0] === "maxTokens")).toBe(true);
-    }
-
-    const valid = ModelConnectInputSchema.safeParse({
-      provider: "openai-compatible",
-      baseUrl: "http://localhost:8000/v1",
-      modelId: "arbitrary-model",
-      maxTokens: 8192,
+  it("validates compatible connections per model", () => {
+    const model = {
+      modelId: "model-a",
+      thinkingLevels: ["off", "low", "high"] as const,
+      defaultThinkingLevel: null,
       contextWindow: 32768,
-    });
-    expect(valid.success).toBe(true);
+      maxTokens: 8192,
+      supportsImages: false,
+    };
+    const create = {
+      provider: "openai-compatible",
+      baseUrl: "http://localhost:8000/v1",
+      modelId: "model-a",
+      models: [model],
+    };
+    const issuePaths = (input: unknown) => {
+      const parsed = ModelConnectInputSchema.safeParse(input);
+      return parsed.success ? [] : parsed.error.issues.map((issue) => issue.path.join("."));
+    };
+    expect(issuePaths(create)).toEqual([]);
+    expect(issuePaths({ ...create, models: [{ ...model, maxTokens: 32768 }] })).toContain(
+      "models.0.maxTokens",
+    );
+    expect(
+      issuePaths({ ...create, models: [{ ...model, thinkingLevels: ["high", "low"] }] }),
+    ).toContain("models.0.thinkingLevels");
+    expect(issuePaths({ ...create, contextWindow: 32768 })).toContain("contextWindow");
+    expect(issuePaths({ ...create, models: [] })).toContain("models");
+    expect(issuePaths({ ...create, models: [model, model] })).toContain("models.1.modelId");
+    expect(issuePaths({ ...create, modelId: "model-b" })).toContain("modelId");
+    expect(issuePaths({ ...create, thinkingLevel: "medium" })).toContain("thinkingLevel");
+    expect(issuePaths({ ...create, thinkingLevel: "off" })).toEqual([]);
+    const edit = {
+      provider: "openai-compatible",
+      baseUrl: "http://localhost:8000/v1",
+      credentialId: "cred_1",
+      expectedConfigurationVersion: 3,
+      models: [model],
+    };
+    expect(issuePaths(edit)).toEqual([]);
+    expect(issuePaths({ ...edit, expectedConfigurationVersion: undefined })).toContain(
+      "expectedConfigurationVersion",
+    );
+    expect(issuePaths({ ...edit, modelId: "model-a" })).toContain("modelId");
+    expect(
+      issuePaths({ provider: "openai", apiKey: "sk-test-key-123", models: [model] }),
+    ).toContain("models");
   });
 
   it("validates each Cloudflare routing id and allows an update to send only one", () => {

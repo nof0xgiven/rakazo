@@ -103,6 +103,15 @@ function requestError(error: unknown, signal: AbortSignal): unknown {
   return signal.aborted ? (signal.reason ?? error) : new Error(errorText(error), { cause: error });
 }
 
+function rpcFailure(message: string, status: number, payload: unknown): Error {
+  const failure = Object.defineProperty(new Error(message), "status", { value: status });
+  if (!payload || typeof payload !== "object") return failure;
+  if ("code" in payload && typeof payload.code === "string")
+    Object.defineProperty(failure, "code", { value: payload.code });
+  if ("data" in payload) Object.defineProperty(failure, "data", { value: payload.data });
+  return failure;
+}
+
 let serverReachable = true;
 const serverReachableListeners = new Set<() => void>();
 
@@ -807,9 +816,11 @@ export async function rpc<T>(
       throw requestError(error, controller.signal);
     });
     if (!res.ok) {
-      // oRPC sends a failure as `{ json: { code, status, message } }`; the message is the
+      // oRPC sends a failure as `{ json: { code, status, message, data } }`; the message is the
       // server's user-facing copy.
-      const error = parsed.json as { message?: unknown } | undefined;
+      const error = parsed.json as
+        | { message?: unknown; code?: unknown; data?: unknown }
+        | undefined;
       const message = errorText(typeof error?.message === "string" ? error.message : "");
       const unauthorized = res.status === 401;
       // Without a Space header a 401 means the server no longer accepts the
@@ -897,7 +908,7 @@ export async function rpc<T>(
         if (!selectedSpaceId()) await clearStaleSpaceSelection();
         throw new Error(message);
       }
-      throw Object.defineProperty(new Error(message), "status", { value: res.status });
+      throw rpcFailure(message, res.status, error);
     }
     const verifiedUser = parsed.json as { userId?: unknown; spaceId?: unknown } | null;
     if (

@@ -1170,6 +1170,34 @@ describe("Pi runtime ordered model fallback", () => {
     ).toEqual([primary.provider, backupB.provider]);
   });
 
+  it("runs the first failover turn at the primary's requested effort clamped to the backup", async () => {
+    providerState.models.set(`${primary.provider}/${primary.id}`, { ...primary, reasoning: true });
+    providerState.models.set(`${backupA.provider}/${backupA.id}`, {
+      ...backupA,
+      reasoning: true,
+      thinkingLevelMap: { xhigh: "xhigh", max: "max" },
+    });
+    const input = request([{ provider: backupA.provider, id: backupA.id, apiKey: "max-key" }]);
+    input.model.reasoning = true;
+    input.model.thinkingLevel = "max";
+    const attempts: [string, string | undefined][] = [];
+    providerState.stream.mockImplementation(
+      (target: Model<"openai-completions">, _context: Context, options: { reasoning?: string }) => {
+        attempts.push([target.provider, options.reasoning]);
+        return target.provider === primary.provider
+          ? stream(target, message(target, [], "error", "429 rate_limit_error"))
+          : stream(target, message(target, [{ type: "text", text: "reasoned" }], "stop"));
+      },
+    );
+
+    await run(input);
+
+    expect(attempts).toEqual([
+      [primary.provider, "high"],
+      [backupA.provider, "max"],
+    ]);
+  });
+
   it.each([...IMAGE_RETURNING_COMPUTER_TOOLS, "write_effect"])(
     "requires image-capable backups only when %s can return screenshots",
     async (toolName) => {

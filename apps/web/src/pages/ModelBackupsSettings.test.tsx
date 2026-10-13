@@ -206,6 +206,66 @@ describe("ModelBackupsSettings", () => {
     expect(button("Save backups").disabled).toBe(true);
   });
 
+  it("offers only authorized compatible catalog models and saves their exact ids", async () => {
+    const compatibleCatalog = [
+      ...catalog,
+      {
+        provider: "openai-compatible",
+        providerName: "Server",
+        id: "custom",
+        label: "Custom model",
+        billing: "",
+        placeholder: true,
+      },
+      {
+        provider: "openai-compatible",
+        providerName: "Server",
+        id: "Model/B",
+        label: "Model/B",
+        billing: "",
+      },
+    ];
+    const compatibleCredentials = [
+      ...credentials,
+      {
+        id: "compatible-credential",
+        provider: "openai-compatible",
+        label: "Server",
+        hasKey: true,
+        isDefault: false,
+        modelId: "saved-only",
+        enabledModelIds: ["Model/B", "shadowed-c"],
+      },
+    ];
+    await act(async () => {
+      root.render(
+        <ModelBackupsSettings
+          {...scope}
+          catalog={compatibleCatalog}
+          credentials={compatibleCredentials}
+        />,
+      );
+    });
+    await flush();
+
+    const labels = [
+      ...(container.querySelector<HTMLSelectElement>('select[aria-label="Add connected model"]')
+        ?.options ?? []),
+    ].map((option) => option.textContent?.trim());
+    expect(labels).toContain("Server · Model/B");
+    expect(labels.some((label) => /saved-only|shadowed-c|Custom model/.test(label ?? ""))).toBe(
+      false,
+    );
+    await pickConnectedModel("Server · Model/B");
+    await clickButton("Add");
+    await clickButton("Save backups");
+    await flush();
+    expect(backupApi.setBackups).toHaveBeenCalledWith(
+      [{ provider: "openai-compatible", modelId: "Model/B" }],
+      { context: { spaceId: scope.spaceId } },
+    );
+  });
+
   it("reloads the saved order and leaves disconnected entries removable without substitution", async () => {
     backupApi.backups.mockResolvedValue([
       { provider: "openai", modelId: "gpt-test" },

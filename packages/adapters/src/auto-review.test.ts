@@ -9,6 +9,7 @@ import {
   redactToolArgsForReview,
   resolveAutoReviewChecker,
   resolveAutoReviewProviderKind,
+  runAutoReviewJudge,
 } from "./auto-review.js";
 
 describe("resolveAutoReviewChecker", () => {
@@ -317,6 +318,41 @@ describe("runAutoReviewJudge instructions", () => {
     });
     expect(captured?.instructions).toContain("Current date and time");
     expect(captured?.instructions).toContain("fast safety checker");
+  });
+
+  it("runs the checker with its model's supported levels and resolved effort", async () => {
+    let captured: { model?: Record<string, unknown> } | undefined;
+    const runtime = {
+      describe: () => ({ capabilities: { scripted: false } }),
+      run: (request: { model?: Record<string, unknown> }) => {
+        captured = request;
+        return (async function* () {
+          yield { type: "done", text: '{"decision":"pass","reason":"ok"}' } as never;
+        })();
+      },
+      abort: async () => {},
+    };
+    await runAutoReviewJudge({
+      runtime: runtime as never,
+      checker: { provider: "openai-compatible", model: "judge-model" },
+      baseUrl: "http://127.0.0.1:8000/v1",
+      reasoning: true,
+      thinkingLevels: ["low", "high"],
+      thinkingLevel: "high",
+      prompt: "test",
+      runId: "run",
+      spaceId: "ws",
+      userId: "user",
+      botId: "bot",
+      threadId: "thread",
+    });
+    expect(captured?.model).toMatchObject({
+      provider: "openai-compatible",
+      id: "judge-model",
+      reasoning: true,
+      thinkingLevels: ["low", "high"],
+      thinkingLevel: "high",
+    });
   });
 });
 

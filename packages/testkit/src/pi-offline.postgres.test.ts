@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { ComposioEmulator } from "@rakazo/adapters";
 import { describe, expect, it } from "vitest";
+import { compatibleConnection } from "./compatible-connection.js";
 import { discardBotIntroRun } from "./discard-bot-intro.js";
 import { sessionCookieHeader } from "./index.js";
 import { startModelEmulator } from "./model-emulator.js";
@@ -88,14 +89,16 @@ describe.skipIf(!databaseAvailable)("offline Pi product journey", () => {
       });
       expect(signup.status).toBeLessThan(400);
       const cookie = sessionCookieHeader(signup);
-      await rpc(handles.app, cookie, "models/connect", {
-        provider: model.model.provider,
-        modelId: model.model.id,
-        baseUrl: model.baseUrl,
-        apiKey: fixtureKey,
-        contextWindow: 160_000,
-        maxTokens: 4096,
-      });
+      await rpc(
+        handles.app,
+        cookie,
+        "models/connect",
+        compatibleConnection({
+          baseUrl: model.baseUrl,
+          modelId: model.model.id,
+          apiKey: fixtureKey,
+        }),
+      );
       const bot = await rpc<{ id: string }>(handles.app, cookie, "bots/create", {
         name: "File fixture",
         title: "",

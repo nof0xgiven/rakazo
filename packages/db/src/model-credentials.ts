@@ -1,5 +1,5 @@
-import { usableModelId } from "@rakazo/contracts";
-import type { PrismaClient } from "./client.js";
+import { OPENAI_COMPATIBLE_PROVIDER_ID, usableModelId } from "@rakazo/contracts";
+import type { Prisma, PrismaClient } from "./client.js";
 
 export const newestCredentialOrder = [
   { updatedAt: "desc" as const },
@@ -10,6 +10,38 @@ export const newestCredentialOrder = [
 export const newestModelCredentialOrder = newestCredentialOrder;
 
 type ModelCredentialScope = { userId: string; spaceId: string };
+
+/**
+ * Serializes every write that changes which models an account may run or
+ * which credential a reference resolves to. Must be the first statement of a
+ * ReadCommitted transaction so the waiter reads state committed by the holder.
+ */
+export async function lockModelConfigurationOwner(
+  tx: Pick<Prisma.TransactionClient, "$queryRaw">,
+  userId: string,
+): Promise<void> {
+  const rows = await tx.$queryRaw<Array<{ id: string }>>`
+    SELECT "id" FROM "user" WHERE "id" = ${userId} FOR UPDATE
+  `;
+  if (rows.length !== 1) throw new Error("Model configuration owner not found");
+}
+
+/**
+ * Authorization for a model on the chosen credential. OpenAI-compatible
+ * credentials authorize only their enabled ids; hosted providers are
+ * authorized by catalog rules elsewhere.
+ */
+export function credentialEnablesModel(
+  credential: { provider: string; enabledModelIds: readonly string[] },
+  modelId: string,
+): boolean {
+  return (
+    credential.provider !== OPENAI_COMPATIBLE_PROVIDER_ID ||
+    credential.enabledModelIds.includes(modelId)
+  );
+}
+
+type ModelCredentialReader = Pick<PrismaClient, "spaceModelPreference" | "userModelCredential">;
 
 export async function selectSpaceModelPreference(
   prisma: Pick<PrismaClient, "spaceModelPreference">,
@@ -63,6 +95,9 @@ function withModelPreference<
       provider: string;
       label: string;
       secretId: string;
+      supportsImages: boolean;
+      enabledModelIds: string[];
+      modelConfigurationVersion: number;
       createdAt: Date;
       updatedAt: Date;
     };
@@ -80,7 +115,7 @@ function withModelPreference<
 }
 
 export async function findDefaultModelCredential(
-  prisma: PrismaClient,
+  prisma: ModelCredentialReader,
   scope: ModelCredentialScope,
 ) {
   const preference = await prisma.spaceModelPreference.findFirst({
@@ -92,7 +127,7 @@ export async function findDefaultModelCredential(
 }
 
 export function findNewestUserModelCredential(
-  prisma: PrismaClient,
+  prisma: ModelCredentialReader,
   userId: string,
   provider: string,
 ) {
@@ -185,6 +220,7 @@ function appendCredential<C extends OrderedCredential>(
  * Credentials to try when saving a space default, best first.
  * The preference that already owns the model is the only candidate.
  * Otherwise the space preference comes first, ahead of a newer unused account.
+ * OpenAI-compatible defaults never fall through: the chooser's credential is the only candidate.
  */
 export function defaultModelCredentialCandidates<C extends OrderedCredential>(input: {
   provider: string;
@@ -192,6 +228,11 @@ export function defaultModelCredentialCandidates<C extends OrderedCredential>(in
   preferences: Array<OrderedPreference<C>>;
   credentials: C[];
 }): C[] {
+  if (input.provider === OPENAI_COMPATIBLE_PROVIDER_ID) {
+    const choice = chooseModelCredential(input);
+    if (!choice) return [];
+    return [choice.source === "preference" ? choice.preference.credential : choice.credential];
+  }
   const requestedModelId = usableModelId(input.modelId);
   const preferences = input.preferences
     .filter((preference) => preference.credential.provider === input.provider)
@@ -241,6 +282,9 @@ function credentialFromChoice<
     userId: string;
     label: string;
     secretId: string;
+    supportsImages: boolean;
+    enabledModelIds: string[];
+    modelConfigurationVersion: number;
   },
 >(choice: ReturnType<typeof chooseModelCredential<C>>) {
   if (!choice) return null;
@@ -249,7 +293,7 @@ function credentialFromChoice<
 }
 
 export async function findModelCredential(
-  prisma: PrismaClient,
+  prisma: ModelCredentialReader,
   scope: ModelCredentialScope,
   provider: string,
   modelId?: string | null,

@@ -12,15 +12,17 @@ import type {
   SecretStore,
 } from "@rakazo/adapter-kit";
 import type {
+  CacheCapabilities,
   ModelContextLimits,
   ModelOAuthBegin,
   ModelOAuthSignInMode,
+  OpenAiCompatibleModelConfig,
   ThinkingLevel,
 } from "@rakazo/contracts";
 import {
-  MAX_MODEL_CONTEXT_WINDOW,
   MAX_MODEL_MAX_TOKENS,
   ModelContextLimitsSchema,
+  OpenAiCompatibleModelConfigSchema,
   ThinkingLevelSchema,
 } from "@rakazo/contracts";
 import type { PrismaClient } from "@rakazo/db";
@@ -273,17 +275,38 @@ export type StoredModelSecret =
       gatewayId?: string;
     } & StoredModelLimits)
   | { kind: "oauth"; credential: OAuthCredential; maxTokens?: number }
-  | ({
+  | OpenAiCompatibleStoredSecret;
+
+/**
+ * Endpoint-wide fields written before per-model configuration. Read only
+ * through `openAiCompatibleModelConfigs`; never written again.
+ */
+export type LegacyOpenAiCompatibleFields = {
+  reasoning?: boolean;
+  thinkingLevel?: ThinkingLevel | null;
+  maxTokens?: number;
+  contextWindow?: number;
+  visionModelIds?: string[];
+  maxImagesPerPrompt?: number;
+  cacheCapabilities?: CacheCapabilities;
+};
+
+export type OpenAiCompatibleStoredSecret =
+  | {
       kind: "openai_compatible";
+      format: "canonical";
       baseUrl: string;
       apiKey?: string;
-      reasoning?: boolean;
-      thinkingLevel?: ThinkingLevel | null;
-      maxTokens?: number;
-      contextWindow?: number;
-      visionModelIds?: string[];
-      maxImagesPerPrompt?: number;
-    } & StoredModelLimits);
+      /** Valid entries only; an enabled id without one is unavailable. */
+      models: OpenAiCompatibleModelConfig[];
+    }
+  | {
+      kind: "openai_compatible";
+      format: "legacy";
+      baseUrl: string;
+      apiKey?: string;
+      legacy: LegacyOpenAiCompatibleFields;
+    };
 
 export type PiOAuthConnected = {
   status: "connected";
@@ -387,17 +410,23 @@ export function parseModelSecret(plaintext: string): StoredModelSecret {
     if (typeof parsed.baseUrl !== "string" || !parsed.baseUrl.trim()) {
       throw new Error(CORRUPT_MODEL_SECRET_MESSAGE);
     }
-    const apiKey = typeof parsed.apiKey === "string" ? parsed.apiKey : undefined;
+    const apiKey = typeof parsed.apiKey === "string" && parsed.apiKey ? parsed.apiKey : undefined;
+    const endpoint = { kind: "openai_compatible" as const, baseUrl: parsed.baseUrl.trim() };
+    if (Object.hasOwn(parsed, "models")) {
+      const entries: unknown[] = Array.isArray(parsed.models) ? parsed.models : [];
+      return {
+        ...endpoint,
+        format: "canonical",
+        ...(apiKey ? { apiKey } : {}),
+        models: entries.flatMap((entry) => {
+          const model = OpenAiCompatibleModelConfigSchema.safeParse(entry);
+          return model.success ? [model.data] : [];
+        }),
+      };
+    }
     const parsedThinkingLevel = ThinkingLevelSchema.nullable().safeParse(parsed.thinkingLevel);
     const thinkingLevel = parsedThinkingLevel.success ? parsedThinkingLevel.data : undefined;
     const maxTokens = parsedMaxTokens(parsed.maxTokens);
-    const contextWindow =
-      typeof parsed.contextWindow === "number" &&
-      Number.isInteger(parsed.contextWindow) &&
-      parsed.contextWindow >= 1 &&
-      parsed.contextWindow <= MAX_MODEL_CONTEXT_WINDOW
-        ? parsed.contextWindow
-        : undefined;
     const visionModelIds = Array.isArray(parsed.visionModelIds)
       ? parsed.visionModelIds.filter(
           (modelId): modelId is string => typeof modelId === "string" && modelId.trim().length > 0,
@@ -411,16 +440,17 @@ export function parseModelSecret(plaintext: string): StoredModelSecret {
         ? parsed.maxImagesPerPrompt
         : undefined;
     return {
-      kind: "openai_compatible",
-      baseUrl: parsed.baseUrl.trim(),
+      ...endpoint,
+      format: "legacy",
       ...(apiKey ? { apiKey } : {}),
-      ...(typeof parsed.reasoning === "boolean" ? { reasoning: parsed.reasoning } : {}),
-      ...(thinkingLevel !== undefined ? { thinkingLevel } : {}),
-      ...(maxTokens !== undefined ? { maxTokens } : {}),
-      ...(contextWindow !== undefined ? { contextWindow } : {}),
-      ...(visionModelIds ? { visionModelIds } : {}),
-      ...(maxImagesPerPrompt !== undefined ? { maxImagesPerPrompt } : {}),
-      ...modelLimits(parsed),
+      legacy: {
+        ...(typeof parsed.reasoning === "boolean" ? { reasoning: parsed.reasoning } : {}),
+        ...(thinkingLevel !== undefined ? { thinkingLevel } : {}),
+        ...(maxTokens !== undefined ? { maxTokens } : {}),
+        ...(visionModelIds ? { visionModelIds } : {}),
+        ...(maxImagesPerPrompt !== undefined ? { maxImagesPerPrompt } : {}),
+        ...modelLimits(parsed),
+      },
     };
   }
   if (parsed.kind === "api_key") {
@@ -468,19 +498,14 @@ export function serializeModelSecret(secret: StoredModelSecret): string {
     });
   }
   if (secret.kind === "openai_compatible") {
+    if (secret.format === "legacy") {
+      throw new Error("Legacy OpenAI-compatible secrets are read-only");
+    }
     return JSON.stringify({
       kind: "openai_compatible",
-      ...modelLimits(secret as unknown as Record<string, unknown>),
       baseUrl: secret.baseUrl,
       ...(secret.apiKey ? { apiKey: secret.apiKey } : {}),
-      ...(secret.reasoning !== undefined ? { reasoning: secret.reasoning } : {}),
-      ...(secret.thinkingLevel !== undefined ? { thinkingLevel: secret.thinkingLevel } : {}),
-      ...(secret.maxTokens !== undefined ? { maxTokens: secret.maxTokens } : {}),
-      ...(secret.contextWindow !== undefined ? { contextWindow: secret.contextWindow } : {}),
-      ...(secret.visionModelIds !== undefined ? { visionModelIds: secret.visionModelIds } : {}),
-      ...(secret.maxImagesPerPrompt !== undefined
-        ? { maxImagesPerPrompt: secret.maxImagesPerPrompt }
-        : {}),
+      models: secret.models,
     });
   }
   if (

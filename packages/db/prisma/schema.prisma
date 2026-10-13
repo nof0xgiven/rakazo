@@ -311,6 +311,10 @@ model UserModelCredential {
   label       String
   secretId    String
   supportsImages Boolean              @default(false)
+  /// OpenAI-compatible authorization allowlist, mirrored from the secret's model list. Empty authorizes nothing.
+  enabledModelIds String[]            @default([])
+  /// Bumped on every compatible endpoint, key, enablement or capability save.
+  modelConfigurationVersion Int       @default(0)
   createdAt   DateTime               @default(now())
   updatedAt   DateTime               @updatedAt
   preferences SpaceModelPreference[]

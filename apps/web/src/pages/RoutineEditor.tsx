@@ -1,13 +1,15 @@
 import { t } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
-import type { ModelCatalogEntry, ModelCredential, Routine } from "@rakazo/contracts";
+import type { ModelCatalogEntry, ModelCredential, Routine, ThinkingLevel } from "@rakazo/contracts";
 import {
   type CronFreq,
   type CronPreset,
   cronFromPreset,
   defaultCronPreset,
+  findConnectedModelChoice,
   formatCron,
   isOneShotRoutineCrons,
+  modelEffortChoices,
   presetFromCron,
 } from "@rakazo/core";
 import {
@@ -44,6 +46,7 @@ import {
   modelOptionKey,
   parseModelOptionKey,
   thinkingLevelLabel,
+  thinkingLevelOptions,
 } from "../lib/model-catalog";
 import { rpc } from "../lib/rpc";
 import { RoutineRunHistory } from "./RoutineRunHistory";
@@ -127,6 +130,36 @@ export function draftFromRoutine(routine: Routine): RoutineDraftState {
         : "",
     thinkingLevel: routine.thinkingLevel ?? "",
   };
+}
+
+export type RoutineModelPatch = {
+  modelProvider?: string | null;
+  modelId?: string | null;
+  thinkingLevel?: ThinkingLevel | null;
+};
+
+/**
+ * Model fields for a routine save. An update compares the raw draft with the
+ * saved routine so untouched values, including a legacy effort the model no
+ * longer supports, stay off the wire.
+ */
+export function routineModelPatch(
+  draft: Pick<RoutineDraftState, "modelKey" | "thinkingLevel">,
+  saved: Routine | null,
+): RoutineModelPatch {
+  const model = draft.modelKey ? parseModelOptionKey(draft.modelKey) : null;
+  const thinkingLevel = (
+    model && draft.thinkingLevel ? draft.thinkingLevel : null
+  ) as ThinkingLevel | null;
+  const base = saved ? draftFromRoutine(saved) : null;
+  if (!base || draft.modelKey !== base.modelKey) {
+    return {
+      modelProvider: model?.provider ?? null,
+      modelId: model?.modelId ?? null,
+      thinkingLevel,
+    };
+  }
+  return draft.thinkingLevel !== base.thinkingLevel ? { thinkingLevel } : {};
 }
 
 export function routineTriggerSummary(routine: Routine): string {
@@ -249,31 +282,29 @@ export function RoutineEditor({
   const fieldId = useId();
   const [credentials, setCredentials] = useState<ModelCredential[]>([]);
   const [catalog, setCatalog] = useState<ModelCatalogEntry[]>([]);
+  const [modelMeta, setModelMeta] = useState<"loading" | "ready" | "failed">("loading");
   useEffect(() => {
     void Promise.all([rpc.models.credentials(), rpc.models.list()])
       .then(([nextCredentials, nextCatalog]) => {
         setCredentials(nextCredentials);
         setCatalog(nextCatalog);
+        setModelMeta("ready");
       })
-      .catch(() => undefined);
+      .catch(() => setModelMeta("failed"));
   }, []);
   const modelOptions = connectedModelOptions(credentials, catalog);
   const selectedModel = draft.modelKey ? parseModelOptionKey(draft.modelKey) : null;
-  const selectedEntry = selectedModel
-    ? catalog.find(
-        (entry) => entry.provider === selectedModel.provider && entry.id === selectedModel.modelId,
-      )
+  const selectedChoice = selectedModel
+    ? findConnectedModelChoice(modelOptions, catalog, selectedModel.provider, selectedModel.modelId)
     : undefined;
-  const selectedCredential = credentials.find(
-    (entry) =>
-      entry.provider === selectedModel?.provider && entry.modelId === selectedModel?.modelId,
-  );
-  const thinkingOptions = (
-    selectedCredential?.thinkingLevels ??
-    selectedEntry?.thinkingLevels ??
-    []
-  ).filter((level) => level !== "off");
-  const defaultThinkingLevel = selectedCredential?.thinkingLevel ?? "medium";
+  const selectedModelKey = selectedChoice?.key ?? draft.modelKey;
+  const effortChoices =
+    modelMeta === "ready" && selectedModel
+      ? modelEffortChoices(
+          selectedChoice?.capabilities,
+          (draft.thinkingLevel || null) as ThinkingLevel | null,
+        )
+      : null;
   const slackAvailable = messageProviders.includes("slack");
   const slackDisabledReasonId = `${fieldId}-slack-disabled-reason`;
   const hasTriggers =
@@ -420,16 +451,16 @@ export function RoutineEditor({
                 <NativeSelect
                   id={`${fieldId}-model`}
                   className="mt-2 w-full"
-                  value={draft.modelKey}
+                  value={selectedModelKey}
+                  disabled={modelMeta !== "ready"}
                   onChange={(event) =>
                     onChange({ ...draft, modelKey: event.target.value, thinkingLevel: "" })
                   }
                 >
                   <NativeSelectOption value="">{t`Bot's model`}</NativeSelectOption>
-                  {draft.modelKey &&
-                  !modelOptions.some((option) => option.key === draft.modelKey) ? (
-                    <NativeSelectOption value={draft.modelKey}>
-                      {selectedModel?.modelId ?? draft.modelKey}
+                  {selectedModelKey && !selectedChoice ? (
+                    <NativeSelectOption value={selectedModelKey}>
+                      {selectedModel?.modelId ?? selectedModelKey}
                     </NativeSelectOption>
                   ) : null}
                   {modelOptions.map((option) => (
@@ -439,13 +470,18 @@ export function RoutineEditor({
                   ))}
                 </NativeSelect>
               </label>
+              {modelMeta === "failed" ? (
+                <p role="alert" className="mt-2 text-sm text-destructive">
+                  {t`Could not load model settings`}
+                </p>
+              ) : null}
 
-              {thinkingOptions.length ? (
+              {effortChoices ? (
                 <label
                   htmlFor={`${fieldId}-thinking`}
                   className="mt-5 block text-sm text-muted-foreground"
                 >
-                  <Trans>Thinking</Trans>
+                  <Trans>Reasoning effort</Trans>
                   <NativeSelect
                     id={`${fieldId}-thinking`}
                     className="mt-2 w-full"
@@ -453,11 +489,15 @@ export function RoutineEditor({
                     onChange={(event) => onChange({ ...draft, thinkingLevel: event.target.value })}
                   >
                     <NativeSelectOption value="">
-                      {t`Default (${thinkingLevelLabel(defaultThinkingLevel)})`}
+                      {t`Default (${thinkingLevelLabel(effortChoices.defaultLevel)})`}
                     </NativeSelectOption>
-                    {thinkingOptions.map((level) => (
-                      <NativeSelectOption key={level} value={level}>
-                        {thinkingLevelLabel(level)}
+                    {thinkingLevelOptions(effortChoices).map((option) => (
+                      <NativeSelectOption
+                        key={option.value}
+                        value={option.value}
+                        disabled={option.disabled}
+                      >
+                        {option.label}
                       </NativeSelectOption>
                     ))}
                   </NativeSelect>

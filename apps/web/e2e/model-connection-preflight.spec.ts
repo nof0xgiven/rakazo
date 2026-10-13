@@ -42,33 +42,33 @@ test("onboarding preflight stays on the connection being tested", async ({ page 
     if (holdProbe) await probeHeld;
     await route.fulfill({
       contentType: "application/json",
-      body: JSON.stringify({ json: { models: ["listed-model"] } }),
+      body: JSON.stringify({ json: { models: [{ modelId: "listed-model", capabilities: null }] } }),
     });
   });
 
   await provider.click();
   await page.getByRole("option", { name: "OpenAI-compatible" }).click();
-  await page.getByLabel("OpenAI-compatible server URL").fill("http://127.0.0.1:8090/v1");
-  const modelId = page.getByLabel("Model id");
-  await modelId.fill("missing-model");
+  const serverUrl = page.getByLabel("OpenAI-compatible server URL");
+  await serverUrl.fill("http://127.0.0.1:8090/v1");
   await page.getByRole("button", { name: "Find models" }).click();
-  const alert = page.getByRole("alert");
-  await expect(alert).toHaveCount(1);
-  await expect(alert).toContainText("was not listed");
-  await expect(page.getByText(/Found \d+ model/)).toHaveCount(0);
-  await captureScreenshot(page, testInfo, "onboarding-preflight-unavailable-model");
+  await expect(page.getByText("Found 1 model.")).toBeVisible();
+  const listed = page.getByRole("checkbox", { name: "listed-model" });
+  await expect(listed).not.toBeChecked();
+  await expect(page.getByRole("button", { name: "Continue" })).toBeDisabled();
+  await captureScreenshot(page, testInfo, "onboarding-preflight-listed-model");
 
   holdProbe = true;
+  await serverUrl.fill("http://127.0.0.1:8091/v1");
+  await expect(listed).toHaveCount(0);
   const held = page.waitForRequest("**/rpc/models/probeOpenAiCompatible");
   await page.getByRole("button", { name: "Find models" }).click();
   await held;
-  await modelId.fill("missing-model-edited");
-  await expect(alert).toHaveCount(0);
+  await serverUrl.fill("http://127.0.0.1:8092/v1");
   releaseProbe();
   await expect(page.getByRole("button", { name: "Find models" })).toBeEnabled();
-  await expect(alert).toHaveCount(0);
   await expect(page.getByText(/Found \d+ model/)).toHaveCount(0);
-  await expect(page.getByText("was not listed")).toHaveCount(0);
+  await expect(listed).toHaveCount(0);
+  await expect(page.getByRole("alert")).toHaveCount(0);
 });
 
 test("settings preflight distinguishes a stored API key from sign-in", async ({

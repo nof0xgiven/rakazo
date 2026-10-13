@@ -5,9 +5,11 @@ import {
   connectedModelChoices,
   featuredModelProviders,
   filterModelCatalog,
+  findConnectedModelChoice,
   pickCatalogModelId,
   resolveSelectableModelId,
   selectedProviderOutsideSearchResults,
+  spaceDefaultModelCapabilities,
 } from "./model-providers.js";
 
 function provider(provider: string): ModelCatalogEntry {
@@ -237,6 +239,134 @@ describe("connected model choices", () => {
       "deepseek-v4-pro",
     );
     expect(resolveSelectableModelId(deepseek, "deepseek", "my-finetune")).toBe("my-finetune");
+  });
+
+  it("keeps an OpenAI-compatible id exact apart from trimming", () => {
+    const compatible = [
+      { provider: "openai-compatible", id: "DeepSeek-V4.1-Flash", label: "DeepSeek-V4.1-Flash" },
+      { provider: "openai-compatible", id: "deepseek_v4_pro", label: "deepseek_v4_pro" },
+    ];
+    expect(resolveSelectableModelId(compatible, "openai-compatible", " deepseek-v4-pro ")).toBe(
+      "deepseek-v4-pro",
+    );
+    expect(resolveSelectableModelId(compatible, "openai-compatible", "deepseek-v41-flash")).toBe(
+      "deepseek-v41-flash",
+    );
+  });
+
+  it("lists compatible models only from authorized catalog rows with their own capabilities", () => {
+    const catalog = [
+      {
+        provider: "openai-compatible",
+        providerName: "OpenAI-compatible",
+        id: "custom",
+        label: "Custom model",
+        placeholder: true,
+      },
+      {
+        provider: "openai-compatible",
+        providerName: "OpenAI-compatible",
+        id: "Model/A::1",
+        label: "Model/A::1",
+        thinkingLevels: ["off", "low", "high", "xhigh"] as const,
+        defaultThinkingLevel: null,
+      },
+      {
+        provider: "openai-compatible",
+        providerName: "OpenAI-compatible",
+        id: "model-b",
+        label: "model-b",
+        thinkingLevels: ["low", "medium"] as const,
+        defaultThinkingLevel: "low" as const,
+      },
+      {
+        provider: "openai-compatible",
+        providerName: "OpenAI-compatible",
+        id: "model-b",
+        label: "model-b",
+        thinkingLevels: ["off"] as const,
+        defaultThinkingLevel: null,
+      },
+    ];
+    const credentials = [
+      {
+        provider: "openai-compatible",
+        label: "First",
+        modelId: "saved-only",
+        thinkingLevel: "max" as const,
+        models: [{ modelId: "model-b", thinkingLevels: ["max"], defaultThinkingLevel: "max" }],
+      },
+      { provider: "openai-compatible", label: "Second", modelId: "model-b" },
+    ];
+    const choices = connectedModelChoices(credentials, catalog);
+    expect(choices).toEqual([
+      {
+        key: "openai-compatible::Model/A::1",
+        provider: "openai-compatible",
+        modelId: "Model/A::1",
+        label: "OpenAI-compatible · Model/A::1",
+        capabilities: {
+          thinkingLevels: ["off", "low", "high", "xhigh"],
+          defaultThinkingLevel: null,
+        },
+      },
+      {
+        key: "openai-compatible::model-b",
+        provider: "openai-compatible",
+        modelId: "model-b",
+        label: "OpenAI-compatible · model-b",
+        capabilities: { thinkingLevels: ["low", "medium"], defaultThinkingLevel: "low" },
+      },
+    ]);
+    expect(
+      findConnectedModelChoice(choices, catalog, "openai-compatible", "Model/A::1")?.modelId,
+    ).toBe("Model/A::1");
+    expect(findConnectedModelChoice(choices, catalog, "openai-compatible", "saved-only")).toBe(
+      undefined,
+    );
+    expect(connectedModelChoices([], catalog)).toEqual([]);
+  });
+
+  it("describes a hosted Space default from the catalog without a user credential", () => {
+    const catalog = [
+      ...deepseek.map((entry) => ({ ...entry, thinkingLevels: ["low", "high"] as const })),
+      {
+        provider: "openai-compatible",
+        id: "model-b",
+        label: "model-b",
+        thinkingLevels: ["low"] as const,
+        defaultThinkingLevel: null,
+      },
+    ];
+    expect(spaceDefaultModelCapabilities([], catalog, "deepseek", "DeepSeek-V4.1-Flash")).toEqual({
+      thinkingLevels: ["low", "high"],
+      defaultThinkingLevel: null,
+    });
+    expect(spaceDefaultModelCapabilities([], catalog, "openai-compatible", "model-b")).toBe(
+      undefined,
+    );
+  });
+
+  it("defaults a hosted model to its exact-model space preference effort", () => {
+    const catalog = deepseek.map((entry) => ({
+      ...entry,
+      thinkingLevels: ["off", "low", "high"] as const,
+    }));
+    const choices = connectedModelChoices(
+      [
+        {
+          provider: "deepseek",
+          label: "DeepSeek",
+          modelId: "deepseek-v4-pro",
+          thinkingLevel: "low",
+        },
+      ],
+      catalog,
+    );
+    expect(choices.map((choice) => choice.capabilities?.defaultThinkingLevel)).toEqual([
+      null,
+      "low",
+    ]);
   });
 });
 

@@ -55,7 +55,10 @@ import {
   ExternalConversationPolicySchema,
   GroupDetailSchema,
   GroupSchema,
+  HOSTED_MODEL_ID_MAX_LENGTH,
+  hostedModelIdLengthIssue,
   IntegrationCatalogResultSchema,
+  MAX_OPENAI_COMPATIBLE_ENABLED_MODELS,
   McpServerConfigInput,
   McpServerSchema,
   MemoryDocumentSchema,
@@ -65,12 +68,15 @@ import {
   MessagingChannelMembershipSchema,
   MessagingLinkedIdentitySchema,
   MessagingStatusSchema,
+  MODEL_REFERENCE_MAX_LENGTH,
   ModelBackupChoiceSchema,
   ModelBackupListSchema,
   ModelCatalogEntrySchema,
+  ModelConfigurationConflictDataSchema,
   ModelConnectInputSchema,
   ModelCredentialSchema,
   ModelOAuthBeginSchema,
+  OpenAiCompatibleDiscoveredModelSchema,
   REPLY_QUOTE_MAX_LENGTH,
   ReorderBotsInput,
   RoutineSchema,
@@ -110,6 +116,10 @@ import { RoutineHistorySchema, RoutineRunCursorSchema, RunsListOutputSchema } fr
 import { SearchQueryOutputSchema } from "./search.js";
 
 const botId = z.object({ botId: Id });
+/** Structured 409 for model configuration saves, default changes and disconnects. */
+const modelConfigurationErrors = {
+  CONFLICT: { status: 409, data: ModelConfigurationConflictDataSchema },
+} as const;
 const groupId = z.object({ groupId: Id });
 
 const threadTarget = z
@@ -232,15 +242,33 @@ export const appContract = {
     credentials: oc.output(z.array(ModelCredentialSchema)),
     backups: oc.output(z.array(ModelBackupChoiceSchema)),
     setBackups: oc.input(ModelBackupListSchema).output(z.object({ ok: z.literal(true) })),
-    connect: oc.input(ModelConnectInputSchema).output(ModelCredentialSchema),
+    connect: oc
+      .errors(modelConfigurationErrors)
+      .input(ModelConnectInputSchema)
+      .output(ModelCredentialSchema),
+    /** Lists models at the endpoint. A saved key is reused only for its own normalized endpoint. */
     probeOpenAiCompatible: oc
       .input(
         z.object({
           baseUrl: z.string(),
           apiKey: z.string().optional(),
+          credentialId: Id.optional(),
         }),
       )
-      .output(z.object({ models: z.array(z.string()) })),
+      .output(z.object({ models: z.array(OpenAiCompatibleDiscoveredModelSchema) })),
+    /** Suggests settings for exact model ids from the local catalog; never contacts the endpoint. */
+    describeOpenAiCompatible: oc
+      .input(
+        z.object({
+          baseUrl: z.string(),
+          credentialId: Id.optional(),
+          modelIds: z
+            .array(z.string().min(1).max(MODEL_REFERENCE_MAX_LENGTH))
+            .min(1)
+            .max(MAX_OPENAI_COMPATIBLE_ENABLED_MODELS),
+        }),
+      )
+      .output(z.object({ models: z.array(OpenAiCompatibleDiscoveredModelSchema) })),
     probeCatalog: oc
       .input(
         z.object({
@@ -276,6 +304,7 @@ export const appContract = {
       .input(z.object({ loginId: z.string() }))
       .output(z.object({ ok: z.literal(true) })),
     setDefault: oc
+      .errors(modelConfigurationErrors)
       .input(
         z.object({
           provider: z.string(),
@@ -285,6 +314,7 @@ export const appContract = {
       )
       .output(z.object({ ok: z.literal(true) })),
     disconnect: oc
+      .errors(modelConfigurationErrors)
       .input(z.object({ provider: z.string().trim().min(1) }))
       .output(z.object({ ok: z.literal(true) })),
   },
@@ -522,7 +552,7 @@ export const appContract = {
               .optional(),
             /** Null clears the routine's own model and runs it on the bot's. */
             modelProvider: z.string().trim().min(1).max(80).nullable().optional(),
-            modelId: z.string().trim().min(1).max(200).nullable().optional(),
+            modelId: z.string().trim().min(1).max(MODEL_REFERENCE_MAX_LENGTH).nullable().optional(),
             thinkingLevel: ThinkingLevelSchema.nullable().optional(),
             /** ISO datetime to arm a never-run one-shot. */
             runAt: IsoDate.optional(),
@@ -541,6 +571,13 @@ export const appContract = {
                 path: ["crons"],
               });
             }
+            hostedModelIdLengthIssue(
+              value.modelProvider,
+              value.modelId,
+              HOSTED_MODEL_ID_MAX_LENGTH,
+              ctx,
+              ["modelId"],
+            );
           }),
       )
       .output(RoutineSchema),

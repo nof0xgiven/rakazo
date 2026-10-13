@@ -277,6 +277,8 @@ export async function runAutoReviewJudge(input: {
   contextWindow?: number;
   maxTokens?: number;
   reasoning?: boolean;
+  thinkingLevels?: AgentRunModel["thinkingLevels"];
+  thinkingLevel?: AgentRunModel["thinkingLevel"];
   oauth?: AgentRunModel["oauth"];
   prompt: string;
   runId: string;
@@ -322,6 +324,8 @@ export async function runAutoReviewJudge(input: {
           contextWindow: input.contextWindow,
           maxTokens: input.maxTokens,
           reasoning: input.reasoning,
+          thinkingLevels: input.thinkingLevels,
+          thinkingLevel: input.thinkingLevel,
           oauth: input.oauth,
         },
       },
@@ -373,6 +377,8 @@ export type LlmAutoReviewOptions = {
   contextWindow?: number;
   maxTokens?: number;
   reasoning?: boolean;
+  thinkingLevels?: AgentRunModel["thinkingLevels"];
+  thinkingLevel?: AgentRunModel["thinkingLevel"];
   oauth?: AgentRunModel["oauth"];
   runId: string;
   spaceId: string;

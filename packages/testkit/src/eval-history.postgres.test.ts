@@ -2,6 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { compatibleConnection } from "./compatible-connection.js";
 import { runTrial } from "./evals/runner.js";
 import { startModelEmulator } from "./model-emulator.js";
 
@@ -58,14 +59,11 @@ describe.skipIf(!databaseAvailable)("eval history accounting", () => {
           },
           1,
           {
-            connection: {
-              provider: model.model.provider,
-              modelId: model.model.id,
+            connection: compatibleConnection({
               baseUrl: model.baseUrl,
+              modelId: model.model.id,
               apiKey: fixtureKey,
-              contextWindow: 160_000,
-              maxTokens: 4096,
-            },
+            }),
             timeoutMs: 20_000,
             maxToolCalls,
             createApp: (composio) =>

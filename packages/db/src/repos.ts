@@ -1,10 +1,11 @@
 import type { Actor, Bot, BotSection, MessageBlock, SpaceBot } from "@rakazo/contracts";
 import { BOT_COLORS } from "@rakazo/contracts";
 import { BACKGROUND_RUN_TRIGGERS, isBackgroundRunTrigger, userVisibleMessages } from "@rakazo/core";
-import type { PrismaClient } from "./client.js";
+import type { Prisma, PrismaClient } from "./client.js";
 import type { ComputerMode } from "./computers.js";
 import { ensureComputerRecord, parseComputerMode } from "./computers.js";
 import { createThreadMessageInTransaction } from "./messages.js";
+import { withModelConfigurationOwnerLock } from "./model-references.js";
 import { BotSectionNameConflictError, IsolationError } from "./scope.js";
 import { lockSpaceForContentCreation } from "./spaces.js";
 import { activeRunSelection, latestBotRunSelection, previewFromBlocks } from "./thread-listing.js";
@@ -12,6 +13,12 @@ import { withTransactionRetry } from "./transaction-retry.js";
 
 /** Newest messages loaded for sidebar preview; enough to skip a short peer-run tail. */
 const SIDEBAR_PREVIEW_MESSAGE_WINDOW = 16;
+
+export type CreateBotModelChoice = {
+  modelProvider: string | null;
+  modelId: string | null;
+  thinkingLevel: string | null;
+};
 
 function isUniqueViolation(error: unknown): boolean {
   return Boolean(error && typeof error === "object" && "code" in error && error.code === "P2002");
@@ -426,6 +433,12 @@ export function createRepos(prisma: PrismaClient) {
           runId?: string;
         };
       },
+      options: {
+        validateModelChoice?: (
+          tx: Prisma.TransactionClient,
+          choice: CreateBotModelChoice,
+        ) => Promise<void>;
+      } = {},
     ): Promise<Bot> {
       let color = input.color;
       if (color === undefined) {
@@ -434,38 +447,46 @@ export function createRepos(prisma: PrismaClient) {
         });
         color = BOT_COLORS[count % BOT_COLORS.length] ?? BOT_COLORS[0];
       }
-      let modelProvider = input.modelProvider ?? null;
-      let modelId = input.modelId ?? null;
-      let thinkingLevel = input.thinkingLevel ?? null;
-      let disabledBuiltinTools = input.disabledBuiltinTools ?? [];
-      if (input.parentBotId) {
-        const parent = await prisma.bot.findFirst({
-          where: {
-            id: input.parentBotId,
-            spaceId: actor.spaceId,
-            userId: actor.userId,
-          },
-        });
-        if (!parent) throw new IsolationError();
-        if (!modelId) {
-          modelProvider = parent.modelProvider ?? null;
-          modelId = parent.modelId ?? null;
-        }
-        if (thinkingLevel == null) thinkingLevel = parent.thinkingLevel ?? null;
-        if (input.disabledBuiltinTools === undefined) {
-          disabledBuiltinTools = parent.disabledBuiltinTools;
-        }
-      }
       const settings = await prisma.deploymentSettings.findUnique({ where: { id: "default" } });
       const envKind = process.env.SANDBOX_PROVIDER ?? "docker";
       const kind =
         envKind === "docker" && settings?.computerHost === "this-mac" ? "desktop" : envKind;
       const insertBot = () =>
-        prisma.$transaction(async (tx) => {
+        withModelConfigurationOwnerLock(prisma, actor.userId, async (tx) => {
           await lockSpaceForContentCreation(tx, {
             spaceId: actor.spaceId,
             userId: actor.userId,
           });
+          const parent = input.parentBotId
+            ? await tx.bot.findFirst({
+                where: {
+                  id: input.parentBotId,
+                  spaceId: actor.spaceId,
+                  userId: actor.userId,
+                },
+                select: {
+                  modelProvider: true,
+                  modelId: true,
+                  thinkingLevel: true,
+                  disabledBuiltinTools: true,
+                },
+              })
+            : null;
+          if (input.parentBotId && !parent) throw new IsolationError();
+          // A child follows its parent's model, and that model's effort, unless it names its own.
+          const choice: CreateBotModelChoice =
+            parent && !input.modelId
+              ? {
+                  modelProvider: parent.modelProvider,
+                  modelId: parent.modelId,
+                  thinkingLevel: input.thinkingLevel ?? parent.thinkingLevel,
+                }
+              : {
+                  modelProvider: input.modelProvider ?? null,
+                  modelId: input.modelId ?? null,
+                  thinkingLevel: input.thinkingLevel ?? null,
+                };
+          await options.validateModelChoice?.(tx, choice);
           const positions = await tx.bot.aggregate({
             where: { spaceId: actor.spaceId, userId: actor.userId },
             _max: { position: true },
@@ -490,10 +511,9 @@ export function createRepos(prisma: PrismaClient) {
               parentBotId: input.parentBotId ?? null,
               computerId: teamComputer.id,
               spawnKey: input.spawnKey,
-              modelProvider,
-              modelId,
-              thinkingLevel,
-              disabledBuiltinTools,
+              ...choice,
+              disabledBuiltinTools:
+                input.disabledBuiltinTools ?? parent?.disabledBuiltinTools ?? [],
             },
           });
           const thread = await tx.thread.create({

@@ -4,23 +4,17 @@ import type { Me, ThinkingLevel } from "@rakazo/contracts";
 import {
   CLOUDFLARE_AI_GATEWAY_PROVIDER_ID,
   cloudflareGatewayRouting,
-  DEFAULT_MODEL_CONTEXT_WINDOW,
-  DEFAULT_MODEL_MAX_TOKENS,
-  MAX_MODEL_CONTEXT_WINDOW,
+  effectiveThinkingLevel,
   MAX_MODEL_MAX_TOKENS,
   OPENAI_COMPATIBLE_PROVIDER_ID,
-  openAiCompatibleConnectReady,
-  openAiCompatibleProbeSuccessMessage,
-  parseModelContextWindow,
-  parseModelMaxImagesPerPrompt,
   parseModelMaxTokens,
 } from "@rakazo/contracts";
 import {
-  COMPATIBLE_THINKING_LEVELS,
   clampCatalogThinkingLevel,
-  createModelProbe,
   filterModelCatalog,
-  initialModelProbeState,
+  openAiCompatibleConnectInput,
+  openAiCompatibleCredential,
+  openAiCompatibleDraftBlockers,
   pickCatalogModelId,
 } from "@rakazo/core";
 import {
@@ -40,7 +34,6 @@ import {
   DialogHeader,
   DialogTitle,
   Input,
-  ModelThinkingOptions,
   NativeSelect,
   NativeSelectOption,
 } from "@rakazo/ui-web";
@@ -51,29 +44,25 @@ import {
   ModelPreflightFeedback,
   modelPreflightTestingLabel,
 } from "../components/ModelConnectionPreflightNotice";
+import {
+  ModelConfigurationConflictNotice,
+  OpenAiCompatibleSetupFields,
+  useOpenAiCompatibleSetup,
+} from "../components/OpenAiCompatibleSetup";
 import { useCopyText } from "../lib/copy-text";
 import { localizedProviderHint } from "../lib/localized-provider-hint";
 import type { ModelCatalogEntry, ModelCredential } from "../lib/model-auth";
 import { thinkingLevelLabel } from "../lib/model-catalog";
 import type { ModelPreflightFailure } from "../lib/model-connection-preflight";
 import {
-  classifyModelConnectionFailure,
   loadStoredModelAuth,
   modelPreflightSuccessMessage,
   runModelConnectionPreflight,
-  unavailableSelectedModel,
 } from "../lib/model-connection-preflight";
 import { rpc } from "../lib/rpc";
 import { useModelOAuthSignIn } from "../lib/use-model-oauth-signin";
 import { errorText } from "../lib/user-error";
 import { ModelBackupsSettings } from "./ModelBackupsSettings";
-
-function connectionMaxTokensField(providerId: string, stored: number | undefined): string {
-  if (providerId === OPENAI_COMPATIBLE_PROVIDER_ID) {
-    return String(stored ?? DEFAULT_MODEL_MAX_TOKENS);
-  }
-  return stored !== undefined ? String(stored) : "";
-}
 
 export function ModelSettingsOverlay({
   onClose,
@@ -94,21 +83,12 @@ export function ModelSettingsOverlay({
   const [ownKeyProvider, setOwnKeyProvider] = useState<string | null>(null);
   const [providerQuery, setProviderQuery] = useState("");
   const [modelId, setModelId] = useState("");
-  const modelIdRef = useRef(modelId);
-  modelIdRef.current = modelId;
   const [apiKey, setApiKey] = useState("");
   const [accountId, setAccountId] = useState("");
   const [gatewayId, setGatewayId] = useState("");
-  const [baseUrl, setBaseUrl] = useState("");
-  const [reasoning, setReasoning] = useState(false);
   const [thinkingLevel, setThinkingLevel] = useState<ThinkingLevel | null>(null);
-  const [maxTokens, setMaxTokens] = useState(String(DEFAULT_MODEL_MAX_TOKENS));
-  const [contextWindow, setContextWindow] = useState(String(DEFAULT_MODEL_CONTEXT_WINDOW));
-  const [supportsImages, setSupportsImages] = useState(false);
-  const [maxImagesPerPrompt, setMaxImagesPerPrompt] = useState("");
-  const [{ models: probeModels, probing }, setProbe] = useState(initialModelProbeState);
-  const [modelProbe] = useState(() => createModelProbe(setProbe));
-  const resetOpenAiCompatibleProbe = modelProbe.reset;
+  const [maxTokens, setMaxTokens] = useState("");
+  const compatible = useOpenAiCompatibleSetup();
   const [codeCopied, copyOAuthCode] = useCopyText();
   const [loading, setLoading] = useState(true);
   const [pending, setPending] = useState<"connect" | "default" | "disconnect" | null>(null);
@@ -116,9 +96,7 @@ export function ModelSettingsOverlay({
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [preflightTesting, setPreflightTesting] = useState(false);
-  const [preflightTarget, setPreflightTarget] = useState<
-    "api-key" | "sign-in" | "compatible" | null
-  >(null);
+  const [preflightTarget, setPreflightTarget] = useState<"api-key" | "sign-in" | null>(null);
   const [preflightSuccess, setPreflightSuccess] = useState<string | null>(null);
   const [preflightFailure, setPreflightFailure] = useState<ModelPreflightFailure | null>(null);
   const preflightRevisionRef = useRef(0);
@@ -146,7 +124,7 @@ export function ModelSettingsOverlay({
     },
   });
 
-  async function refresh() {
+  async function refresh(): Promise<ModelCredential[] | undefined> {
     const refreshRevision = ++refreshRevisionRef.current;
     const selectionRevision = selectionRevisionRef.current;
     const [nextCatalog, nextCredentials, nextMe] = await Promise.all([
@@ -154,12 +132,15 @@ export function ModelSettingsOverlay({
       rpc.models.credentials(),
       rpc.me(),
     ]);
-    if (refreshRevision !== refreshRevisionRef.current) return;
+    if (refreshRevision !== refreshRevisionRef.current) return undefined;
     const nextProvider =
       provider && nextCatalog.some((entry) => entry.provider === provider)
         ? provider
         : (nextMe.defaultProvider ?? nextCatalog[0]?.provider ?? "");
-    const nextCredential = nextCredentials.find((entry) => entry.provider === nextProvider);
+    const nextCredential =
+      nextProvider === OPENAI_COMPATIBLE_PROVIDER_ID
+        ? openAiCompatibleCredential(nextCredentials)
+        : nextCredentials.find((entry) => entry.provider === nextProvider);
     const nextModel =
       nextProvider === OPENAI_COMPATIBLE_PROVIDER_ID
         ? (nextCredential?.modelId ??
@@ -177,46 +158,36 @@ export function ModelSettingsOverlay({
     setMe(nextMe);
     if (selectionRevision === selectionRevisionRef.current) {
       invalidatePreflight();
-      resetOpenAiCompatibleProbe();
       setProvider(nextProvider);
       setModelId(nextModel);
-      if (nextProvider === OPENAI_COMPATIBLE_PROVIDER_ID) {
-        setBaseUrl(nextCredential?.baseUrl ?? "");
-        setReasoning(nextCredential?.reasoning ?? false);
-        setThinkingLevel(
-          clampCatalogThinkingLevel(
-            nextCredential?.modelId === nextModel ? nextCredential?.thinkingLevel : null,
-            nextCredential?.reasoning ? COMPATIBLE_THINKING_LEVELS : [],
-          ) as ThinkingLevel | null,
-        );
-        setContextWindow(String(nextCredential?.contextWindow ?? DEFAULT_MODEL_CONTEXT_WINDOW));
-        setSupportsImages(nextCredential?.supportsImages ?? false);
-        setMaxImagesPerPrompt(String(nextCredential?.maxImagesPerPrompt ?? ""));
-      } else {
-        // A credential's stored effort is bound to its saved model choice.
-        const nextEntry = nextCatalog.find(
-          (entry) => entry.provider === nextProvider && entry.id === nextModel,
-        );
-        setThinkingLevel(
-          clampCatalogThinkingLevel(
-            nextCredential?.modelId === nextModel ? nextCredential.thinkingLevel : null,
-            nextEntry?.thinkingLevels,
-          ) as ThinkingLevel | null,
-        );
-      }
-      setMaxTokens(connectionMaxTokensField(nextProvider, nextCredential?.maxTokens));
+      // A credential's stored effort is bound to its saved model choice.
+      const nextEntry = nextCatalog.find(
+        (entry) => entry.provider === nextProvider && entry.id === nextModel,
+      );
+      setThinkingLevel(
+        nextProvider === OPENAI_COMPATIBLE_PROVIDER_ID
+          ? null
+          : (clampCatalogThinkingLevel(
+              nextCredential?.modelId === nextModel ? nextCredential.thinkingLevel : null,
+              nextEntry?.thinkingLevels,
+            ) as ThinkingLevel | null),
+      );
+      setMaxTokens(String(nextCredential?.maxTokens ?? ""));
       setAccountId(nextCredential?.accountId ?? "");
       setGatewayId(nextCredential?.gatewayId ?? "");
     }
+    return nextCredentials;
   }
 
   useEffect(() => {
     void refresh()
+      .then((nextCredentials) => {
+        if (nextCredentials) compatible.load(openAiCompatibleCredential(nextCredentials));
+      })
       .catch((err: unknown) => setError(errorText(err, t`Could not load model settings`)))
       .finally(() => setLoading(false));
     return () => {
       refreshRevisionRef.current += 1;
-      modelProbe.invalidate();
     };
   }, []);
 
@@ -298,23 +269,28 @@ export function ModelSettingsOverlay({
   const isCloudflareGateway = provider === CLOUDFLARE_AI_GATEWAY_PROVIDER_ID;
   const cloudflareRoutingReady =
     !isCloudflareGateway || cloudflareGatewayRouting({ accountId, gatewayId }) !== undefined;
-  const credential = credentials.find((entry) => entry.provider === provider);
+  const credential = isOpenAiCompatible
+    ? (openAiCompatibleCredential(credentials) ?? undefined)
+    : credentials.find((entry) => entry.provider === provider);
   const currentEntry = catalog.find(
     (entry) => entry.provider === me?.defaultProvider && entry.id === me?.defaultModel,
   );
   const activeCredential = credentials.find(
     (entry) => entry.provider === me?.defaultProvider && entry.modelId === me?.defaultModel,
   );
-  // The banner shows the effective effort — stored level or the runtime
-  // default — only when the active model can actually think.
-  const activeThinkingLabel =
-    (currentEntry?.thinkingLevels ?? []).some((level) => level !== "off") ||
-    activeCredential?.reasoning
-      ? thinkingLevelLabel(activeCredential?.thinkingLevel ?? "medium")
-      : null;
+  const activeLevels = currentEntry?.thinkingLevels ?? [];
+  const activeThinkingLabel = activeLevels.some((level) => level !== "off")
+    ? thinkingLevelLabel(
+        effectiveThinkingLevel(
+          activeLevels,
+          activeCredential?.thinkingLevel,
+          currentEntry?.defaultThinkingLevel,
+        ),
+      )
+    : null;
   const isActive =
     me?.defaultProvider === selected?.provider &&
-    me?.defaultModel === (isOpenAiCompatible ? modelId.trim() : selected?.id);
+    me?.defaultModel === (isOpenAiCompatible ? modelId : selected?.id);
   // Space still bills the host while this provider matches; model id alone is not credentials.
   const usingServerCredentials = provider === me?.hostCredentialProvider;
   const acceptsKey = selected?.auth !== "oauth";
@@ -331,11 +307,12 @@ export function ModelSettingsOverlay({
       : null;
   const thinkingDirty = !isOpenAiCompatible && (thinkingLevel ?? null) !== selectedStoredLevel;
   const busy = pending !== null || oauthPending;
-  const effectiveBaseUrl = baseUrl.trim();
-  const openAiCompatibleReady = openAiCompatibleConnectReady({
-    baseUrl: effectiveBaseUrl,
-    modelId,
+  const compatibleConnection = compatible.draft.connection;
+  const compatibleBlockers = openAiCompatibleDraftBlockers(compatible.draft, {
+    requireDefault: compatibleConnection === null,
   });
+  const compatibleSaveReady =
+    compatibleBlockers.length === 0 && !compatible.stale && compatible.draft.baseUrl.trim() !== "";
   const builtinLimitSave = !isOpenAiCompatible && Boolean(credential) && apiKey.trim().length === 0;
 
   function invalidatePreflight() {
@@ -350,105 +327,45 @@ export function ModelSettingsOverlay({
     return revision === preflightRevisionRef.current;
   }
 
-  function updateBaseUrl(nextBaseUrl: string) {
-    setBaseUrl(nextBaseUrl);
-    resetOpenAiCompatibleProbe();
-    invalidatePreflight();
-    setError(null);
-    setNotice(null);
-  }
-
   function updateApiKey(nextApiKey: string) {
     setApiKey(nextApiKey);
-    resetOpenAiCompatibleProbe();
     invalidatePreflight();
-  }
-
-  function stageCompatibleModelId(nextModelId: string) {
-    setModelId(nextModelId);
-    setThinkingLevel(
-      clampCatalogThinkingLevel(
-        credential?.modelId === nextModelId ? credential.thinkingLevel : null,
-        reasoning ? COMPATIBLE_THINKING_LEVELS : [],
-      ) as ThinkingLevel | null,
-    );
   }
 
   function chooseProvider(nextProvider: string) {
     cancelOAuthAttempt();
     selectionRevisionRef.current += 1;
-    const nextCredential = credentials.find((entry) => entry.provider === nextProvider);
+    const nextCredential =
+      nextProvider === OPENAI_COMPATIBLE_PROVIDER_ID
+        ? openAiCompatibleCredential(credentials)
+        : credentials.find((entry) => entry.provider === nextProvider);
     const nextModelId =
       nextProvider === OPENAI_COMPATIBLE_PROVIDER_ID
         ? (nextCredential?.modelId ?? "")
         : pickCatalogModelId(catalog, nextProvider, nextCredential?.modelId ?? me?.defaultModel);
     setProvider(nextProvider);
-    setReasoning(nextCredential?.reasoning ?? false);
     const nextEntry = catalog.find(
       (entry) => entry.provider === nextProvider && entry.id === nextModelId,
     );
     setThinkingLevel(
-      clampCatalogThinkingLevel(
-        nextCredential?.modelId === nextModelId ? nextCredential.thinkingLevel : null,
-        nextProvider === OPENAI_COMPATIBLE_PROVIDER_ID
-          ? nextCredential?.reasoning
-            ? COMPATIBLE_THINKING_LEVELS
-            : []
-          : nextEntry?.thinkingLevels,
-      ) as ThinkingLevel | null,
+      nextProvider === OPENAI_COMPATIBLE_PROVIDER_ID
+        ? null
+        : (clampCatalogThinkingLevel(
+            nextCredential?.modelId === nextModelId ? nextCredential.thinkingLevel : null,
+            nextEntry?.thinkingLevels,
+          ) as ThinkingLevel | null),
     );
-    setMaxTokens(connectionMaxTokensField(nextProvider, nextCredential?.maxTokens));
-    setContextWindow(String(nextCredential?.contextWindow ?? DEFAULT_MODEL_CONTEXT_WINDOW));
-    setSupportsImages(nextCredential?.supportsImages ?? false);
-    setMaxImagesPerPrompt(String(nextCredential?.maxImagesPerPrompt ?? ""));
+    setMaxTokens(String(nextCredential?.maxTokens ?? ""));
     setModelId(nextModelId);
-    setBaseUrl(
-      nextProvider === OPENAI_COMPATIBLE_PROVIDER_ID ? (nextCredential?.baseUrl ?? "") : "",
-    );
     detailScrollRef.current?.scrollTo({ top: 0 });
     setApiKey("");
     setAccountId(nextCredential?.accountId ?? "");
     setGatewayId(nextCredential?.gatewayId ?? "");
-    resetOpenAiCompatibleProbe();
+    compatible.resetLookups();
+    compatible.clearConflict();
     invalidatePreflight();
     setError(null);
     setNotice(null);
-  }
-
-  async function probeServerModels() {
-    if (!baseUrl.trim()) return;
-    const revision = preflightRevisionRef.current;
-    setError(null);
-    setNotice(null);
-    setPreflightSuccess(null);
-    setPreflightFailure(null);
-    setPreflightTarget("compatible");
-    await modelProbe.probe({
-      baseUrl,
-      apiKey,
-      request: rpc.models.probeOpenAiCompatible,
-      onSuccess: (models) => {
-        if (!preflightStillCurrent(revision)) return;
-        const current = modelIdRef.current;
-        const next = current.trim() || models[0] || "";
-        if (next !== current) stageCompatibleModelId(next);
-        else setModelId(next);
-        const unavailable = unavailableSelectedModel(current, models);
-        if (unavailable) {
-          setPreflightFailure(unavailable);
-          setNotice(null);
-          return;
-        }
-        setPreflightTarget(null);
-        setPreflightFailure(null);
-        setNotice(openAiCompatibleProbeSuccessMessage(models.length));
-      },
-      onError: (err) => {
-        if (!preflightStillCurrent(revision)) return;
-        setPreflightFailure(classifyModelConnectionFailure(err, { modelId }));
-        setNotice(null);
-      },
-    });
   }
 
   async function testApiKeyConnection() {
@@ -508,17 +425,21 @@ export function ModelSettingsOverlay({
 
   async function setModelDefault() {
     if (!selected || !credential) return;
-    const activeModelId = isOpenAiCompatible ? modelId.trim() : selected.id;
-    if (isOpenAiCompatible && !activeModelId) return;
+    const activeModelId = isOpenAiCompatible ? modelId : selected.id;
+    if (
+      isOpenAiCompatible &&
+      !compatibleConnection?.models.some((model) => model.modelId === activeModelId)
+    ) {
+      return;
+    }
     setError(null);
     setNotice(null);
+    compatible.clearConflict();
     setPending("default");
     try {
       await rpc.models.setDefault({
         provider: selected.provider,
         modelId: activeModelId,
-        // Catalog connections keep the space default effort on the preference;
-        // openai-compatible still owns its level inside the stored endpoint config.
         ...(!isOpenAiCompatible
           ? {
               thinkingLevel: clampCatalogThinkingLevel(
@@ -531,112 +452,102 @@ export function ModelSettingsOverlay({
       await refresh();
       setNotice(isOpenAiCompatible ? t`Model updated.` : t`Now using ${selected.label}.`);
     } catch (err) {
-      setError(errorText(err, t`Could not change the default model`));
+      if (!compatible.handleConflict(err, "default")) {
+        setError(errorText(err, t`Could not change the default model`));
+      }
     } finally {
       setPending(null);
     }
   }
 
   async function connectKey() {
-    if (!selected) return;
-    const savingLimitOnly = !isOpenAiCompatible && !apiKey.trim();
-    const activeModelId = isOpenAiCompatible ? modelId.trim() : selected.id;
-    const supportedThinking = isOpenAiCompatible
-      ? reasoning
-        ? COMPATIBLE_THINKING_LEVELS
-        : []
-      : selected.thinkingLevels;
+    if (!selected || isOpenAiCompatible) return;
+    const savingLimitOnly = !apiKey.trim();
     // The staged effort belongs to the model on screen. Clamp it before connect
     // or a limit save so a previous model's level cannot stick.
     const stagedThinking = clampCatalogThinkingLevel(
       thinkingLevel,
-      supportedThinking,
+      selected.thinkingLevels,
     ) as ThinkingLevel | null;
-    const modelChanged = (credential?.modelId ?? null) !== (activeModelId || null);
-    if (isOpenAiCompatible) {
-      if (!effectiveBaseUrl || !modelId.trim()) return;
-    } else if (savingLimitOnly) {
+    const modelChanged = (credential?.modelId ?? null) !== selected.id;
+    if (savingLimitOnly) {
       if (!credential) return;
     } else if (apiKey.trim().length < 8) {
       return;
     }
     const parsedMaxTokens = maxTokens.trim() ? parseModelMaxTokens(maxTokens) : undefined;
-    if ((isOpenAiCompatible || maxTokens.trim()) && parsedMaxTokens === undefined) {
+    if (maxTokens.trim() && parsedMaxTokens === undefined) {
       setError(
         t`Enter a whole number from 1 to ${MAX_MODEL_MAX_TOKENS} for maximum output tokens.`,
       );
       return;
     }
-    const parsedMaxImagesPerPrompt = isOpenAiCompatible
-      ? parseModelMaxImagesPerPrompt(maxImagesPerPrompt, supportsImages)
-      : undefined;
-    if (
-      isOpenAiCompatible &&
-      supportsImages &&
-      maxImagesPerPrompt.trim() &&
-      parsedMaxImagesPerPrompt === undefined
-    ) {
-      setError(t`Enter a whole number from 1 to 1000 for the image limit.`);
-      return;
-    }
-    const maxImagesPerPromptInput =
-      supportsImages && !maxImagesPerPrompt.trim() ? null : parsedMaxImagesPerPrompt;
-    const parsedContextWindow = isOpenAiCompatible
-      ? parseModelContextWindow(contextWindow)
-      : undefined;
-    if (isOpenAiCompatible && parsedContextWindow === undefined) {
-      setError(
-        t`Enter a whole number from 1 to ${MAX_MODEL_CONTEXT_WINDOW} for the context limit.`,
-      );
-      return;
-    }
-    if (isOpenAiCompatible && parsedMaxTokens === undefined) return;
     setError(null);
     setNotice(null);
+    compatible.clearConflict();
     setPending("connect");
     try {
-      await rpc.models.connect(
-        isOpenAiCompatible
-          ? {
-              provider: selected.provider,
-              baseUrl: effectiveBaseUrl,
-              modelId: modelId.trim(),
-              reasoning,
-              thinkingLevel: stagedThinking,
-              maxTokens: parsedMaxTokens,
-              contextWindow: parsedContextWindow,
-              supportsImages,
-              maxImagesPerPrompt: maxImagesPerPromptInput,
-              apiKey: apiKey.trim() || undefined,
-              label: selected.providerName ?? selected.provider,
-            }
-          : {
-              provider: selected.provider,
-              ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
-              ...(isCloudflareGateway
-                ? { accountId: accountId.trim(), gatewayId: gatewayId.trim() }
-                : {}),
-              modelId: selected.id,
-              // A limits-only save leaves the stored effort alone while the model
-              // stays put. Changing the model sends the clamped level, including
-              // null, so the previous model's effort is not reused.
-              ...(!savingLimitOnly || modelChanged ? { thinkingLevel: stagedThinking } : {}),
-              maxTokens: parsedMaxTokens ?? null,
-              label: selected.providerName ?? selected.provider,
-            },
-      );
+      await rpc.models.connect({
+        provider: selected.provider,
+        ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
+        ...(isCloudflareGateway
+          ? { accountId: accountId.trim(), gatewayId: gatewayId.trim() }
+          : {}),
+        modelId: selected.id,
+        // A limits-only save leaves the stored effort alone while the model
+        // stays put. Changing the model sends the clamped level, including
+        // null, so the previous model's effort is not reused.
+        ...(!savingLimitOnly || modelChanged ? { thinkingLevel: stagedThinking } : {}),
+        maxTokens: parsedMaxTokens ?? null,
+        label: selected.providerName ?? selected.provider,
+      });
       setApiKey("");
       await refresh();
       detailScrollRef.current?.scrollTo({ top: 0 });
-      setNotice(
-        isOpenAiCompatible || savingLimitOnly
-          ? t`Saved.`
-          : t`Connected and using ${selected.label}.`,
-      );
+      setNotice(savingLimitOnly ? t`Saved.` : t`Connected and using ${selected.label}.`);
     } catch (err) {
-      setError(errorText(err, t`Could not connect this provider`));
+      if (!compatible.handleConflict(err, "default")) {
+        setError(errorText(err, t`Could not connect this provider`));
+      }
     } finally {
       setPending(null);
+    }
+  }
+
+  async function saveCompatibleConnection() {
+    if (!selected || !isOpenAiCompatible || !compatibleSaveReady) return;
+    setError(null);
+    setNotice(null);
+    compatible.clearConflict();
+    setPending("connect");
+    try {
+      await rpc.models.connect(
+        openAiCompatibleConnectInput(compatible.draft, {
+          apiKey: compatible.keyInput,
+          label: selected.providerName ?? selected.provider,
+        }),
+      );
+      const nextCredentials = await refresh();
+      if (nextCredentials) compatible.saved(openAiCompatibleCredential(nextCredentials));
+      detailScrollRef.current?.scrollTo({ top: 0 });
+      setNotice(t`Saved.`);
+    } catch (err) {
+      if (!compatible.handleConflict(err, "save")) {
+        setError(errorText(err, t`Could not connect this provider`));
+      }
+    } finally {
+      setPending(null);
+    }
+  }
+
+  async function reloadCompatibleConnection() {
+    setError(null);
+    setNotice(null);
+    try {
+      const nextCredentials = await refresh();
+      if (nextCredentials) compatible.load(openAiCompatibleCredential(nextCredentials));
+    } catch (err) {
+      setError(errorText(err, t`Could not load model settings`));
     }
   }
 
@@ -645,16 +556,22 @@ export function ModelSettingsOverlay({
     cancelOAuthAttempt();
     setError(null);
     setNotice(null);
+    compatible.clearConflict();
     setPending("disconnect");
     try {
       await rpc.models.disconnect({ provider: selected.provider });
       setApiKey("");
       setThinkingLevel(null);
-      await refresh();
+      const nextCredentials = await refresh();
+      if (isOpenAiCompatible && nextCredentials) {
+        compatible.load(openAiCompatibleCredential(nextCredentials));
+      }
       detailScrollRef.current?.scrollTo({ top: 0 });
       setNotice(t`Disconnected ${selected.providerName ?? selected.provider}.`);
     } catch (err) {
-      setError(errorText(err, t`Could not disconnect this provider`));
+      if (!compatible.handleConflict(err, "disconnect")) {
+        setError(errorText(err, t`Could not disconnect this provider`));
+      }
     } finally {
       setPending(null);
     }
@@ -745,18 +662,32 @@ export function ModelSettingsOverlay({
               setNotice(null);
             }}
           />
-          <ModelThinkingOptions
-            showThinking={false}
-            disabled={busy}
-            advancedLabel={t`Advanced`}
-            maxTokens={maxTokens}
-            onMaxTokensChange={(value) => {
-              selectionRevisionRef.current += 1;
-              setMaxTokens(value);
-              setNotice(null);
-            }}
-            maxTokensLabel={t`Maximum output tokens`}
-          />
+          <details className="mt-4 text-sm text-muted-foreground">
+            <summary className="cursor-pointer">
+              <Trans>Advanced</Trans>
+            </summary>
+            <label htmlFor="model-max-tokens" className="mt-3 flex items-center gap-2">
+              <span className="min-w-0 flex-1">
+                <Trans>Maximum output tokens</Trans>
+              </span>
+              <Input
+                id="model-max-tokens"
+                type="number"
+                inputMode="numeric"
+                min={1}
+                max={MAX_MODEL_MAX_TOKENS}
+                step={1}
+                value={maxTokens}
+                onChange={(event) => {
+                  selectionRevisionRef.current += 1;
+                  setMaxTokens(event.target.value);
+                  setNotice(null);
+                }}
+                disabled={busy}
+                className="h-8 w-24 text-center text-foreground"
+              />
+            </label>
+          </details>
         </div>
         {catalogThinkingLevels.length ? (
           <label
@@ -779,7 +710,11 @@ export function ModelSettingsOverlay({
                 {i18n._({
                   id: "Default ({0})",
                   message: "Default ({0})",
-                  values: { "0": thinkingLevelLabel("medium") },
+                  values: {
+                    "0": thinkingLevelLabel(
+                      effectiveThinkingLevel(selected.thinkingLevels ?? [], null, null),
+                    ),
+                  },
                 })}
               </NativeSelectOption>
               {catalogThinkingLevels.map((level) => (
@@ -1078,34 +1013,89 @@ export function ModelSettingsOverlay({
     </>
   ) : null;
 
-  // OpenAI-compatible connections keep an optional key behind a disclosure.
-  const compatKeyBlock = isOpenAiCompatible ? (
-    <div className="mt-5">
-      <details className="text-[13.5px] text-muted-foreground">
-        <summary className="w-fit cursor-pointer select-none">
-          <Trans>API key</Trans>
-        </summary>
-        <Input
-          aria-label={t`API key`}
-          value={apiKey}
-          onChange={(event) => updateApiKey(event.target.value)}
-          placeholder={credential?.hasKey ? t`Paste a replacement key` : t`Optional`}
-          type="password"
-          autoComplete="new-password"
-          className="mt-2 h-10 text-foreground"
-        />
-      </details>
+  const compatibleDefaultChoices = compatibleConnection?.models ?? [];
+  const compatibleSection = isOpenAiCompatible ? (
+    <>
+      {credential ? (
+        <div className="mb-5 flex items-start justify-between gap-3">
+          <div className="min-w-0 text-[15px] text-foreground">
+            <Trans>Connected · {credential.label}</Trans>
+          </div>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="-mr-2 shrink-0 text-muted-foreground"
+            disabled={busy}
+            onClick={() => setConfirmDisconnect(true)}
+          >
+            {pending === "disconnect" ? <Trans>Disconnecting…</Trans> : <Trans>Disconnect</Trans>}
+          </Button>
+        </div>
+      ) : null}
+      <OpenAiCompatibleSetupFields
+        setup={compatible}
+        busy={busy}
+        blockers={compatibleBlockers}
+        chooseDefault={compatibleConnection === null}
+      />
       <Button
         type="button"
         variant="secondary"
-        className="mt-3 rounded-full"
+        className="mt-4 rounded-full"
         size="sm"
-        disabled={busy || !openAiCompatibleReady}
-        onClick={() => void connectKey()}
+        disabled={busy || !compatibleSaveReady}
+        onClick={() => void saveCompatibleConnection()}
       >
         {pending === "connect" ? <Trans>Saving…</Trans> : <Trans>Save</Trans>}
       </Button>
-    </div>
+      {compatibleDefaultChoices.length > 0 ? (
+        <div className="mt-6 border-t border-border pt-5">
+          <label
+            className="block text-[13.5px] text-muted-foreground"
+            htmlFor="compatible-default-model"
+          >
+            <Trans>Default model</Trans>
+            <NativeSelect
+              id="compatible-default-model"
+              className="mt-2 w-full text-foreground"
+              value={
+                compatibleDefaultChoices.some((model) => model.modelId === modelId) ? modelId : ""
+              }
+              disabled={busy}
+              onChange={(event) => {
+                selectionRevisionRef.current += 1;
+                setModelId(event.target.value);
+                setNotice(null);
+              }}
+            >
+              <NativeSelectOption value="" disabled>
+                {t`Choose a saved model`}
+              </NativeSelectOption>
+              {compatibleDefaultChoices.map((model) => (
+                <NativeSelectOption key={model.modelId} value={model.modelId}>
+                  {model.modelId}
+                </NativeSelectOption>
+              ))}
+            </NativeSelect>
+          </label>
+          <Button
+            type="button"
+            variant="secondary"
+            className="mt-3 rounded-full"
+            size="sm"
+            disabled={
+              busy ||
+              (isActive && !usingServerCredentials) ||
+              !compatibleDefaultChoices.some((model) => model.modelId === modelId)
+            }
+            onClick={() => void setModelDefault()}
+          >
+            {pending === "default" ? <Trans>Switching…</Trans> : <Trans>Use this model</Trans>}
+          </Button>
+        </div>
+      ) : null}
+    </>
   ) : null;
 
   const saveButton =
@@ -1116,7 +1106,7 @@ export function ModelSettingsOverlay({
           variant="secondary"
           className="rounded-full"
           size="sm"
-          disabled={busy || (isOpenAiCompatible && !modelId.trim())}
+          disabled={busy}
           onClick={() => void setModelDefault()}
         >
           {pending === "default" ? (
@@ -1228,231 +1218,80 @@ export function ModelSettingsOverlay({
               {error}
             </p>
           ) : null}
+          <ModelConfigurationConflictNotice
+            conflict={compatible.conflict}
+            busy={busy}
+            onReload={() => void reloadCompatibleConnection()}
+          />
           {notice ? (
             <p className="mb-4 text-sm text-success" role="status">
               {notice}
             </p>
           ) : null}
           {selected ? (
-            <>
-              {isOpenAiCompatible ? (
-                <div className="block text-[13.5px] text-muted-foreground">
-                  <label className="block" htmlFor="model-base-url">
-                    <Trans>Server URL</Trans>
-                    <Input
-                      id="model-base-url"
-                      value={baseUrl}
-                      onChange={(event) => updateBaseUrl(event.target.value)}
-                      aria-label={t`OpenAI-compatible server URL`}
-                      placeholder="http://127.0.0.1:8000/v1"
-                      autoComplete="off"
-                      className="mt-2 h-10 text-foreground"
-                    />
-                  </label>
-                  <details className="mt-2 text-[13px] leading-[1.5] text-muted-foreground">
-                    <summary className="w-fit cursor-pointer select-none">
-                      <Trans>Setup help</Trans>
-                    </summary>
-                    <p className="mt-1">
-                      {t`Paste the OpenAI-compatible address from your server. Rakazo adds /v1 if needed.`}
-                    </p>
-                  </details>
-                  <div className="mt-3 flex items-center gap-2">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      disabled={busy || probing || !effectiveBaseUrl}
-                      onClick={() => void probeServerModels()}
-                    >
-                      {probing ? <Trans>Finding…</Trans> : <Trans>Find models</Trans>}
-                    </Button>
-                  </div>
-                  {preflightTarget === "compatible" ? (
-                    <ModelPreflightFeedback success={null} failure={preflightFailure} />
-                  ) : null}
-                  <div className="mt-4 block">
-                    <span>
-                      <Trans>Model</Trans>
-                    </span>
-                    {probeModels.length && probeModels.includes(modelId) ? (
-                      <NativeSelect
-                        className="mt-2 w-full text-foreground"
-                        value={modelId}
-                        onChange={(event) => {
-                          cancelOAuthAttempt();
-                          selectionRevisionRef.current += 1;
-                          invalidatePreflight();
-                          stageCompatibleModelId(event.target.value);
-                          setError(null);
-                          setNotice(null);
-                        }}
-                        aria-label={t`Models from server`}
-                      >
-                        {probeModels.map((id) => (
-                          <NativeSelectOption key={id} value={id}>
-                            {id}
-                          </NativeSelectOption>
-                        ))}
-                        <NativeSelectOption value="">
-                          <Trans>Other model…</Trans>
-                        </NativeSelectOption>
-                      </NativeSelect>
-                    ) : (
-                      <Input
-                        value={modelId}
-                        onChange={(event) => {
-                          cancelOAuthAttempt();
-                          selectionRevisionRef.current += 1;
-                          invalidatePreflight();
-                          stageCompatibleModelId(event.target.value);
-                          setError(null);
-                          setNotice(null);
-                        }}
-                        aria-label={t`Model id`}
-                        placeholder="exact-model-id"
-                        className="mt-2 h-10 text-foreground"
-                      />
-                    )}
-                    {probeModels.length && !probeModels.includes(modelId) ? (
-                      <Button
-                        type="button"
-                        variant="link"
-                        className="mt-2 h-auto px-0 text-[13px] text-muted-foreground underline"
-                        onClick={() => {
-                          invalidatePreflight();
-                          stageCompatibleModelId(probeModels[0] ?? "");
-                        }}
-                      >
-                        <Trans>Use a found model</Trans>
-                      </Button>
-                    ) : null}
-                  </div>
-                  <ModelThinkingOptions
-                    reasoning={reasoning}
-                    onReasoningChange={(value) => {
-                      selectionRevisionRef.current += 1;
-                      setReasoning(value);
-                      if (!value) setThinkingLevel(null);
-                      setNotice(null);
-                    }}
-                    disabled={busy}
-                    advancedLabel={t`Advanced`}
-                    thinkingLabel={t`Supports thinking`}
-                    thinkingLevel={thinkingLevel}
-                    onThinkingLevelChange={(value) => {
-                      selectionRevisionRef.current += 1;
-                      setThinkingLevel(value as ThinkingLevel | null);
-                      setNotice(null);
-                    }}
-                    thinkingLevelOptions={[
-                      { value: "minimal", label: t`Minimal` },
-                      { value: "low", label: t`Low` },
-                      { value: "medium", label: t`Medium` },
-                      { value: "high", label: t`High` },
-                      { value: "xhigh", label: t`Extra high` },
-                      { value: "max", label: t`Max` },
-                    ]}
-                    thinkingLevelLabel={t`Reasoning effort`}
-                    thinkingLevelDefaultLabel={t`Default`}
-                    maxTokens={maxTokens}
-                    onMaxTokensChange={(value) => {
-                      selectionRevisionRef.current += 1;
-                      setMaxTokens(value);
-                      setNotice(null);
-                    }}
-                    maxTokensLabel={t`Maximum output tokens`}
-                    contextWindow={contextWindow}
-                    onContextWindowChange={(value) => {
-                      selectionRevisionRef.current += 1;
-                      setContextWindow(value);
-                      setNotice(null);
-                    }}
-                    contextWindowLabel={t`Context limit`}
-                    supportsImages={supportsImages}
-                    onSupportsImagesChange={(value) => {
-                      selectionRevisionRef.current += 1;
-                      setSupportsImages(value);
-                      setNotice(null);
-                    }}
-                    imagesLabel={t`Supports images`}
-                    maxImagesPerPrompt={maxImagesPerPrompt}
-                    onMaxImagesPerPromptChange={(value) => {
-                      selectionRevisionRef.current += 1;
-                      setMaxImagesPerPrompt(value);
-                      setNotice(null);
-                    }}
-                    maxImagesLabel={t`Maximum images per request`}
-                  />
-                </div>
-              ) : null}
-              {isOpenAiCompatible ? (
-                <>
-                  {compatKeyBlock}
-                  {saveButton}
-                </>
-              ) : credential ? (
-                <>
-                  {/* The key may be the default in another space while this one runs on server
+            isOpenAiCompatible ? (
+              compatibleSection
+            ) : credential ? (
+              <>
+                {/* The key may be the default in another space while this one runs on server
                       credentials; saving here switches this space to the key. */}
-                  {provider === me?.hostCredentialProvider ? (
-                    <div className="mb-5">{serverCredentialsNote}</div>
-                  ) : null}
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="text-[15px] text-foreground">
-                        <Trans>Connected · {credential.label}</Trans>
-                      </div>
-                      <div className="mt-0.5 text-[13px] text-muted-foreground">
-                        <Trans>Stored securely. Never shown here.</Trans>
-                      </div>
+                {provider === me?.hostCredentialProvider ? (
+                  <div className="mb-5">{serverCredentialsNote}</div>
+                ) : null}
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="text-[15px] text-foreground">
+                      <Trans>Connected · {credential.label}</Trans>
                     </div>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="-mr-2 shrink-0 text-muted-foreground"
-                      disabled={busy}
-                      onClick={() => setConfirmDisconnect(true)}
-                    >
-                      {pending === "disconnect" ? (
-                        <Trans>Disconnecting…</Trans>
-                      ) : (
-                        <Trans>Disconnect</Trans>
-                      )}
-                    </Button>
+                    <div className="mt-0.5 text-[13px] text-muted-foreground">
+                      <Trans>Stored securely. Never shown here.</Trans>
+                    </div>
                   </div>
-                  <div className="mt-5">{catalogModelConfig}</div>
-                  {saveButton}
-                  <div className="mt-6 border-t border-border pt-5">{connectionControls}</div>
-                </>
-              ) : provider === me?.hostCredentialProvider ? (
-                <>
-                  {serverCredentialsNote}
-                  <details
-                    className="mt-5 text-sm text-muted-foreground"
-                    open={ownKeyProvider === provider}
-                    onToggle={(event) =>
-                      setOwnKeyProvider(event.currentTarget.open ? provider : null)
-                    }
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="-mr-2 shrink-0 text-muted-foreground"
+                    disabled={busy}
+                    onClick={() => setConfirmDisconnect(true)}
                   >
-                    <summary className="w-fit cursor-pointer select-none">
-                      <Trans>Use your own key</Trans>
-                    </summary>
-                    <div className="mt-5">{connectionControls}</div>
-                    <div className="mt-6">{catalogModelConfig}</div>
-                  </details>
-                </>
-              ) : (
-                <>
-                  <p className="text-sm leading-[1.5] text-muted-foreground">
-                    <Trans>Connect this provider to use it as your personal model.</Trans>
-                  </p>
-                  {connectionControls}
+                    {pending === "disconnect" ? (
+                      <Trans>Disconnecting…</Trans>
+                    ) : (
+                      <Trans>Disconnect</Trans>
+                    )}
+                  </Button>
+                </div>
+                <div className="mt-5">{catalogModelConfig}</div>
+                {saveButton}
+                <div className="mt-6 border-t border-border pt-5">{connectionControls}</div>
+              </>
+            ) : provider === me?.hostCredentialProvider ? (
+              <>
+                {serverCredentialsNote}
+                <details
+                  className="mt-5 text-sm text-muted-foreground"
+                  open={ownKeyProvider === provider}
+                  onToggle={(event) =>
+                    setOwnKeyProvider(event.currentTarget.open ? provider : null)
+                  }
+                >
+                  <summary className="w-fit cursor-pointer select-none">
+                    <Trans>Use your own key</Trans>
+                  </summary>
+                  <div className="mt-5">{connectionControls}</div>
                   <div className="mt-6">{catalogModelConfig}</div>
-                </>
-              )}
-            </>
+                </details>
+              </>
+            ) : (
+              <>
+                <p className="text-sm leading-[1.5] text-muted-foreground">
+                  <Trans>Connect this provider to use it as your personal model.</Trans>
+                </p>
+                {connectionControls}
+                <div className="mt-6">{catalogModelConfig}</div>
+              </>
+            )
           ) : loading ? (
             <p className="text-muted-foreground">
               <Trans>Loading model catalog…</Trans>
