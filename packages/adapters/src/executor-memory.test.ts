@@ -393,6 +393,36 @@ describe("executor bank memory", () => {
     expect(f.save).not.toHaveBeenCalled();
   });
 
+  it("redacts known secrets from a save before recording its effect or intent", async () => {
+    vi.mocked(insertExplicitMemoryRetention).mockResolvedValue({
+      retentionId: "retention-secret",
+      created: true,
+    });
+    const f = fixture({
+      resolvedSecrets: ["hsk_test_fixture"],
+      calls: [
+        {
+          name: "save_memory",
+          args: { content: "Deploy key is hsk_test_fixture." },
+          executionId: "call_0",
+        },
+      ],
+    });
+
+    await f.run();
+
+    expect(f.results[0]).toEqual({ ok: true, value: { status: "queued" } });
+    const effect = f.prisma.externalEffect.create.mock.calls[0]?.[0]?.data;
+    expect(JSON.stringify(effect?.request)).not.toContain("hsk_test_fixture");
+    expect(insertExplicitMemoryRetention).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        sourceKey: effect?.idempotencyKey,
+        content: expect.not.stringContaining("hsk_test_fixture"),
+      }),
+    );
+  });
+
   it("records a successful exchange with its reply and enqueues it after commit", async () => {
     vi.mocked(loadRetentionSourceMessages).mockResolvedValue([
       {

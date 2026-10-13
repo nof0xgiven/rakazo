@@ -506,7 +506,18 @@ describePostgres("memory retention (PostgreSQL + Hindsight emulator)", () => {
 
   it("stops new calls after rebind, disconnect, bot deletion or revoked membership", async () => {
     const rebound = await setup();
-    const first = await rebound.commit();
+    const explicitInput = (sourceKey: string) => ({
+      runId: rebound.run.id,
+      leaseOwner: WORKER,
+      leaseFence: 1,
+      bindingId: rebound.binding.id,
+      sourceKey,
+      content: "Retired pin",
+      occurredAt: new Date(),
+    });
+    const first = await insertExplicitMemoryRetention(prisma, explicitInput("effect-1"));
+    if (!("retentionId" in first)) throw new Error("Expected an explicit intent");
+    const intent = await rebound.conversation();
     await prisma.botMemoryBank.delete({ where: { id: rebound.binding.id } });
     const bindingB = await prisma.botMemoryBank.create({
       data: {
@@ -525,19 +536,14 @@ describePostgres("memory retention (PostgreSQL + Hindsight emulator)", () => {
         name: "Alpha",
       },
     });
-    expect(await retention(first)).toBeNull();
-    await handler()({ retentionId: first });
-    await expect(
-      insertExplicitMemoryRetention(prisma, {
-        runId: rebound.run.id,
-        leaseOwner: WORKER,
-        leaseFence: 1,
-        bindingId: rebound.binding.id,
-        sourceKey: "effect-1",
-        content: "Retired pin",
-        occurredAt: new Date(),
-      }),
-    ).resolves.toEqual({ error: "binding_retired" });
+    expect(await retention(first.retentionId)).toBeNull();
+    await handler()({ retentionId: first.retentionId });
+    await expect(insertExplicitMemoryRetention(prisma, explicitInput("effect-2"))).resolves.toEqual(
+      { error: "binding_retired" },
+    );
+    const finalized = await finalizeRun(prisma, rebound.finalizeInput(intent));
+    expect(finalized).toMatchObject({ memoryRetentionId: null });
+    expect(await prisma.memoryRetention.count({ where: { runId: rebound.run.id } })).toBe(0);
     expect(rebound.fixture.requests).toHaveLength(0);
 
     const disconnected = await setup();
