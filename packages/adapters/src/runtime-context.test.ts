@@ -3,6 +3,7 @@ import type { AgentRunRequest } from "@rakazo/adapter-kit";
 import { DEFAULT_CONTEXT_STRATEGY } from "@rakazo/adapter-kit";
 import { describe, expect, it } from "vitest";
 import { ContextBudgetError, ContextCacheTracker } from "./context-selection.js";
+import { formatRecalledMemory } from "./history-compaction.js";
 import { createRuntimeContextPolicy } from "./runtime-context.js";
 
 const model = {
@@ -349,6 +350,22 @@ describe("runtime context policy", () => {
       contextStrategy: "snapshots",
     }).prepareContext(context, model);
     expect(prepared.messages[0]!.content).toBe(summary);
+  });
+  it("preserves recalled memory context like a rolling summary", () => {
+    const { request, context } = fixture();
+    const recalled = formatRecalledMemory([{ memory: "The user prefers concise replies." }]);
+    request.history.unshift({ role: "user", content: recalled });
+    context.messages.unshift({
+      role: "user",
+      content: recalled,
+      timestamp: 0,
+      rakazoHistory: true,
+    } as Message);
+    const prepared = createRuntimeContextPolicy({
+      ...request,
+      contextStrategy: "snapshots",
+    }).prepareContext(context, model);
+    expect(prepared.messages[0]!.content).toBe(recalled);
   });
   it("places a rolling summary after Pi's leading system message", () => {
     const { request, context } = fixture();

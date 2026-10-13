@@ -41,7 +41,7 @@ describe("bot tool permissions", () => {
       graphicalToolsAllowed: false,
       groupId: null,
       trigger: "user",
-      semanticMemoryEnabled: false,
+      memoryCapabilities: null,
       messagingChannelRun: false,
     };
     const baseline = selectBuiltinToolsForRun(options).map((tool) => tool.name);
@@ -310,7 +310,7 @@ describe("run tool selection", () => {
       cloudAgentEnabled: cloud,
       groupId: null,
       trigger: "message",
-      semanticMemoryEnabled: false,
+      memoryCapabilities: null,
       messagingChannelRun: false,
     }).map((tool) => tool.name);
     expect(names.includes("browser_snapshot")).toBe(page);
@@ -328,7 +328,7 @@ describe("run tool selection", () => {
       pageBrowserAllowed: options?.pageBrowserAllowed ?? true,
       groupId,
       trigger,
-      semanticMemoryEnabled: false,
+      memoryCapabilities: null,
       messagingChannelRun: false,
     }).map((tool) => tool.name);
 
@@ -367,7 +367,7 @@ describe("run tool selection", () => {
       graphicalToolsAllowed: true,
       groupId: null,
       trigger: "call_end",
-      semanticMemoryEnabled: false,
+      memoryCapabilities: null,
       messagingChannelRun: false,
       voiceCall: true,
     }).map((tool) => tool.name);
@@ -383,7 +383,7 @@ describe("run tool selection", () => {
         pageBrowserAllowed: false,
         groupId: null,
         trigger: "message",
-        semanticMemoryEnabled: false,
+        memoryCapabilities: null,
         messagingChannelRun: false,
         disabledBuiltinTools,
       }).map((tool) => tool.name);
@@ -1428,7 +1428,7 @@ describe("createRunExecutor", () => {
       graphicalToolsAllowed: false,
       groupId: null,
       trigger: "messaging",
-      semanticMemoryEnabled: true,
+      memoryCapabilities: { recall: true, save: true, purgeHistory: true, sharedScope: true },
       messagingChannelRun: true,
     }).map((tool) => tool.name);
     expect(tools).not.toContain("recall_memory");
@@ -2323,7 +2323,7 @@ description: Prepare standup notes
     const runtimeRun = vi.fn();
     const finalizeRun = vi.fn(async () => {
       status = "failed";
-      return { continuationRunId: null };
+      return { continuationRunId: null, memoryRetentionId: null };
     });
     const run = {
       id: "run-1",
@@ -2393,7 +2393,10 @@ description: Prepare standup notes
         describe: () => ({ capabilities: { scripted: false } }),
         run: runtimeRun,
       },
-      memoryProviders: { resolve: vi.fn(async () => null) },
+      memoryProviders: {
+              select: vi.fn(async () => ({ kind: "native" })),
+              resolve: vi.fn(async () => ({ kind: "native" })),
+            },
       memory: { read: vi.fn(async () => ({ documents: [] })) },
       events: { append: vi.fn(async () => undefined), finalizeRun },
       jobs: { enqueue: vi.fn(async () => undefined) },
@@ -2414,7 +2417,7 @@ description: Prepare standup notes
 
   it("fails a pinned routine run instead of falling back to the space default", async () => {
     const runtimeRun = vi.fn();
-    const finalizeRun = vi.fn(async () => ({ continuationRunId: null }));
+    const finalizeRun = vi.fn(async () => ({ continuationRunId: null, memoryRetentionId: null }));
     const run = {
       id: "run-1",
       botId: "bot-1",
@@ -2499,7 +2502,10 @@ description: Prepare standup notes
         describe: () => ({ capabilities: { scripted: false } }),
         run: runtimeRun,
       },
-      memoryProviders: { resolve: vi.fn(async () => null) },
+      memoryProviders: {
+              select: vi.fn(async () => ({ kind: "native" })),
+              resolve: vi.fn(async () => ({ kind: "native" })),
+            },
       memory: { read: vi.fn(async () => ({ documents: [] })) },
       events: { append: vi.fn(async () => undefined), finalizeRun },
       jobs: { enqueue: vi.fn(async () => undefined) },
@@ -3065,7 +3071,7 @@ describe("ticket board tool capability", () => {
     graphicalToolsAllowed: false,
     groupId: null,
     trigger: "user",
-    semanticMemoryEnabled: false,
+    memoryCapabilities: null,
     messagingChannelRun: false,
   };
   const ticketNames = [

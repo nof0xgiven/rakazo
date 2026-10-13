@@ -230,7 +230,10 @@ describe.skipIf(!enabled)("persisted Pi usage accounting", () => {
           prisma: handles.prisma,
           runtime: handles.runtime,
           jobs: handles.jobs,
-          memoryProviders: { resolve: async () => null },
+          memoryProviders: {
+            select: async () => ({ kind: "native" }) as const,
+            resolve: async () => ({ kind: "native" }) as const,
+          },
           resolveModel: async (scope) => handles.executor.resolveModel(scope),
         },
         thread.id,

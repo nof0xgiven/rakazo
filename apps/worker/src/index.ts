@@ -12,6 +12,7 @@ import {
   createCloudAgentConnection,
   createConnectorStack,
   createJobReconciler,
+  createMemoryRetentionReconciler,
   createMessagingContextLoader,
   createPostgresReconciliationLeadership,
   createRunExecutor,
@@ -162,7 +163,7 @@ async function main() {
   const connector = stack.destination;
   await connector.start();
   integrationSettings.warmDirectories();
-  const memoryProviders = new SpaceMemoryProviderResolver(prisma, secrets);
+  const memoryProviders = new SpaceMemoryProviderResolver({ prisma, secrets });
   const home = new LocalAgentHomeStore(dataDir);
   const artifacts = new LocalArtifactStore(dataDir);
   const inMemoryJobs = process.env.WAKEUP_DRIVER === "memory" ? new InMemoryJobQueue() : undefined;
@@ -271,6 +272,7 @@ async function main() {
     leadership: createPostgresReconciliationLeadership(pool),
     reconcileCloudAgents: () => reconcileCloudAgents({ prisma, jobs, cloudAgent }),
     reconcileComputerUpdates: () => reconcileComputerUpdates({ prisma, jobs }),
+    reconcileMemoryRetention: createMemoryRetentionReconciler({ prisma, jobs }),
   });
   reconciler.start();
 

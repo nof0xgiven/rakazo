@@ -2,19 +2,24 @@ import type {
   AgentRunRequest,
   AgentRuntime,
   JobPublisher,
+  SemanticMemoryCapabilities,
+  SemanticMemoryProvider,
   SemanticMemoryResponse,
 } from "@rakazo/adapter-kit";
 import { historyCompactJob } from "@rakazo/adapter-kit";
-import type { MessageBlock } from "@rakazo/contracts";
+import type { MemorySelection, MessageBlock } from "@rakazo/contracts";
+import { RECALLED_MEMORY_PREFIX } from "@rakazo/core";
 import type { PrismaClient } from "@rakazo/db";
 import { createLogger, createTestSink, installLogger, wrapJobPayload } from "@rakazo/logging";
 import { describe, expect, it, vi } from "vitest";
 import {
+  boundRecalledResults,
   compactHistory,
   formatCompactedSummary,
   formatRecalledMemory,
   historyWindowSize,
   MAX_COMPACTED_SUMMARY_CHARS,
+  MAX_RECALLED_CONTEXT_BYTES,
   MAX_SUMMARIZE_PROMPT_CHARS,
   MAX_TRANSCRIPT_CHARS,
   nextCompactionBatchRange,
@@ -26,6 +31,7 @@ import {
   shouldEnqueueCompaction,
   summarizeTimeoutMs,
 } from "./history-compaction.js";
+import type { MemoryResolution } from "./memory-provider-factory.js";
 
 describe("shouldEnqueueCompaction", () => {
   it("is false when nothing has aged out of the window yet", () => {
@@ -205,6 +211,30 @@ describe("formatRecalledMemory", () => {
     expect(formatRecalledMemory([])).toBe("");
   });
 
+  it("injects nothing when every recalled fact is blank", () => {
+    expect(formatRecalledMemory([{ memory: "   " }, { memory: "" }])).toBe("");
+  });
+
+  it("labels recalled context as untrusted data", () => {
+    expect(formatRecalledMemory([{ memory: "fact" }]).startsWith(RECALLED_MEMORY_PREFIX)).toBe(
+      true,
+    );
+  });
+
+  it("keeps the escaped block and attribution within the context budget", () => {
+    const block = formatRecalledMemory(
+      Array.from({ length: 5 }, (_, i) => ({
+        memory: `${i}${"<&>".repeat(4_000)}`,
+        id: "i".repeat(2_000),
+        provenance: "p".repeat(2_000),
+      })),
+    );
+    expect(Buffer.byteLength(block, "utf8")).toBeLessThanOrEqual(MAX_RECALLED_CONTEXT_BYTES);
+    expect(block.endsWith("\n</recalled_memory>")).toBe(true);
+    expect(block.match(/<\/recalled_memory>/g)).toHaveLength(1);
+    expect(block).not.toMatch(/&[a-z]{0,3}(?![a-z;])/);
+  });
+
   it("preserves Serenity citations alongside the fact text", () => {
     const block = formatRecalledMemory([
       {
@@ -218,6 +248,24 @@ describe("formatRecalledMemory", () => {
     expect(block).toContain("provenance: evals/corpora/ava.yaml");
     expect(block).toContain("id: fact-1");
     expect(block).toContain("entity: rakazo-space/workspace-1");
+  });
+});
+
+describe("boundRecalledResults", () => {
+  it("keeps ranked facts while the serialized results stay within the budget", () => {
+    const results = Array.from({ length: 5 }, (_, i) => ({
+      memory: `${i}${"é".repeat(3_000)}`,
+      score: 1 - i / 10,
+    }));
+    const bounded = boundRecalledResults(results);
+    expect(bounded.length).toBeGreaterThan(0);
+    expect(bounded.map((result) => result.score)).toEqual(
+      results.slice(0, bounded.length).map((result) => result.score),
+    );
+    expect(Buffer.byteLength(JSON.stringify(bounded), "utf8")).toBeLessThanOrEqual(
+      MAX_RECALLED_CONTEXT_BYTES,
+    );
+    expect(bounded.every((result) => !result.memory.includes("\uFFFD"))).toBe(true);
   });
 });
 
@@ -244,6 +292,7 @@ function compactionHarness(
       botId?: string;
     }) => Promise<AgentRunRequest["model"]>;
     withMemoryProvider?: boolean;
+    bankProvider?: boolean;
     memoryConfig?: {
       defaultMemoryScope: string;
     } | null;
@@ -340,32 +389,58 @@ function compactionHarness(
   const purgeHistory = vi.fn(
     async (): Promise<SemanticMemoryResponse> => ({ ok: true, value: undefined }),
   );
+  const capabilities: SemanticMemoryCapabilities = options.bankProvider
+    ? {
+        recall: true,
+        save: true,
+        purgeHistory: false,
+        sharedScope: false,
+        banks: true,
+        automaticRecall: true,
+        conversationRetention: true,
+        forget: false,
+      }
+    : { recall: true, save: true, purgeHistory: true, sharedScope: true };
+  const provider: SemanticMemoryProvider = {
+    describe: () => ({
+      id: "test-memory",
+      contractVersion: "1",
+      adapterVersion: "1",
+      capabilities,
+    }),
+    recall: vi.fn(),
+    save: saveMemory,
+    ...(options.bankProvider ? {} : { purgeHistory }),
+  };
+  const selection: MemorySelection = options.bankProvider
+    ? {
+        kind: "bank",
+        configId: "config-1",
+        provider: "hindsight",
+        bindingId: "binding-1",
+        bankId: "bank-1",
+      }
+    : memoryConfig
+      ? {
+          kind: "legacy",
+          configId: "config-1",
+          provider: "supermemory",
+          scope: memoryConfig.defaultMemoryScope === "shared" ? "shared" : "isolated",
+        }
+      : { kind: "native" };
   const memoryProviders = {
-    resolve: vi.fn(async () =>
-      memoryConfig
-        ? {
-            defaultScope:
-              memoryConfig.defaultMemoryScope === "shared"
-                ? ("shared" as const)
-                : ("isolated" as const),
-            provider: {
-              describe: () => ({
-                id: "test-memory",
-                contractVersion: "1",
-                adapterVersion: "1",
-                capabilities: {
-                  recall: true,
-                  save: true,
-                  purgeHistory: true,
-                  sharedScope: true,
-                } as const,
-              }),
-              recall: vi.fn(),
-              save: saveMemory,
-              purgeHistory,
+    select: vi.fn(async (): Promise<MemorySelection> => selection),
+    resolve: vi.fn(
+      async (input: { selection: MemorySelection }): Promise<MemoryResolution> =>
+        input.selection.kind === "native"
+          ? { kind: "native" }
+          : {
+              kind: "configured",
+              provider,
+              capabilities,
+              defaultScope: input.selection.kind === "legacy" ? input.selection.scope : "isolated",
+              selection: input.selection,
             },
-          }
-        : null,
     ),
   };
   const jobs = { enqueue: vi.fn(async () => undefined) };
@@ -586,13 +661,29 @@ describe("compactHistory", () => {
 
   it("keeps local compaction when the optional memory provider cannot be loaded", async () => {
     const harness = compactionHarness({ deploymentModelKey: "openrouter-key" });
-    harness.memoryProviders.resolve.mockRejectedValueOnce(new Error("database unavailable"));
+    harness.memoryProviders.select.mockRejectedValueOnce(new Error("database unavailable"));
 
     await compactHistory(harness.deps, "thread-1");
 
     expect(harness.thread.historyCompactionSummary).toBe("Summary of 50 messages.");
     expect(harness.thread.historyCompactedUpToSeq).toBe(49);
     expect(harness.saveMemory).not.toHaveBeenCalled();
+  });
+
+  it("keeps bank-bound summaries local and never saves or purges them in the provider", async () => {
+    const harness = compactionHarness({ deploymentModelKey: "openrouter-key", bankProvider: true });
+
+    await compactHistory(harness.deps, "thread-1");
+
+    expect(harness.thread.historyCompactionSummary).toBe("Summary of 50 messages.");
+    expect(harness.thread.historyCompactedUpToSeq).toBe(49);
+    expect(harness.memoryProviders.select).toHaveBeenCalledWith({
+      spaceId: "workspace-1",
+      userId: "user-1",
+      botId: "bot-1",
+    });
+    expect(harness.saveMemory).not.toHaveBeenCalled();
+    expect(harness.purgeHistory).not.toHaveBeenCalled();
   });
 
   it("uses the thread owner's resolved model for background compaction", async () => {
@@ -1026,7 +1117,7 @@ describe("compactHistory", () => {
     expect(harness.runtime.run).not.toHaveBeenCalled();
     expect(harness.saveMemory).not.toHaveBeenCalled();
     expect(harness.prisma.thread.updateMany).not.toHaveBeenCalled();
-    expect(harness.memoryProviders.resolve).not.toHaveBeenCalled();
+    expect(harness.memoryProviders.select).not.toHaveBeenCalled();
     expect(harness.jobs.enqueue).not.toHaveBeenCalled();
   });
 

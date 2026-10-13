@@ -67,6 +67,12 @@ export * from "./fish-audio-voice.js";
 export * from "./github-webhook-emulator.js";
 export * from "./graphql-connectors.js";
 export * from "./group-handoff.js";
+export {
+  HINDSIGHT_CLOUD_ORIGIN,
+  HINDSIGHT_LIST_PAGE_SIZE,
+  HINDSIGHT_PROVIDER_ID,
+} from "./hindsight-client.js";
+export { HINDSIGHT_CAPABILITIES, HindsightMemoryProvider } from "./hindsight-memory-provider.js";
 export * from "./home.js";
 export * from "./host-aware-sandbox.js";
 export * from "./infisical-secret-store.js";
@@ -81,6 +87,13 @@ export * from "./mcp-oauth.js";
 export * from "./mcp-server-tool.js";
 export * from "./mcp-transport.js";
 export * from "./memory-provider-factory.js";
+export {
+  createMemoryRetainHandler,
+  createMemoryRetentionReconciler,
+  prepareConversationRetention,
+  prepareExplicitRetention,
+  retentionDocumentId,
+} from "./memory-retention.js";
 export * from "./messaging-context.js";
 export * from "./messaging-delivery.js";
 export * from "./messaging-platforms.js";

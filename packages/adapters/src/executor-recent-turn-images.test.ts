@@ -163,7 +163,7 @@ async function runWithModel(
       ]),
     },
   };
-  const finalizeRun = vi.fn(async () => ({ continuationRunId: null }));
+  const finalizeRun = vi.fn(async () => ({ continuationRunId: null, memoryRetentionId: null }));
   const executor = createRunExecutor({
     prisma,
     deploymentModelKey: "fake-deployment-key",
@@ -177,7 +177,7 @@ async function runWithModel(
     },
     home: { commit: vi.fn(async () => "fixture-revision") },
     memory: { read: async () => ({ documents: [] }) },
-    memoryProviders: { resolve: async () => null },
+    memoryProviders: { select: async () => ({ kind: "native" }), resolve: async () => ({ kind: "native" }) },
     artifacts: { get },
     events: { append: vi.fn(async () => undefined), finalizeRun },
     jobs: { enqueue: vi.fn(async () => undefined) },

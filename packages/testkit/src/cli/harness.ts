@@ -117,6 +117,7 @@ async function main() {
         "packages/adapters/src/realtime.postgres.test.ts",
         "packages/adapters/src/job-reconciler.postgres.test.ts",
         "packages/adapters/src/cloud-agent.postgres.test.ts",
+        "packages/testkit/src/memory-retention.postgres.test.ts",
       ];
       // Each app reconciles all durable work in its database, including intentionally
       // unfinished fixture runs. Clone the pristine migrated schema so one suite

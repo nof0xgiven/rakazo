@@ -18,6 +18,7 @@ import { performComputerUpdate } from "./computer-update.js";
 import type { createRunExecutor } from "./executor.js";
 import { compactHistory } from "./history-compaction.js";
 import type { MemoryProviderResolver } from "./memory-provider-factory.js";
+import { createMemoryRetainHandler } from "./memory-retention.js";
 import { deliverMessagingOutbound, mirrorMessagingOutbound } from "./messaging-delivery.js";
 import { expireTaughtSkillTeaching } from "./teaching-session.js";
 
@@ -51,6 +52,11 @@ export function createBackgroundJobHandlers(deps: {
       },
     );
   };
+  const retainMemory = createMemoryRetainHandler({
+    prisma: deps.prisma,
+    resolver: deps.memoryProviders,
+    jobs: deps.jobs,
+  });
 
   return {
     "run.continue": async (payload) => {
@@ -116,5 +122,6 @@ export function createBackgroundJobHandlers(deps: {
         payload.threadId,
       );
     },
+    "memory.retain": retainMemory,
   };
 }

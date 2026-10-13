@@ -184,7 +184,7 @@ function fixture(runId = "run-1") {
     run.status = "waiting_input";
     return true;
   });
-  const finalizeRun = vi.fn(async () => ({ continuationRunId: null }));
+  const finalizeRun = vi.fn(async () => ({ continuationRunId: null, memoryRetentionId: null }));
   let calls: ToolCall[] = [];
   const runtimeRun = vi.fn(async function* (request: AgentRunRequest) {
     for (const call of calls) {
@@ -209,7 +209,7 @@ function fixture(runId = "run-1") {
       commit: memoryCommit,
       exportMarkdown: async function* () {},
     },
-    memoryProviders: { resolve: async () => null },
+    memoryProviders: { select: async () => ({ kind: "native" }), resolve: async () => ({ kind: "native" }) },
     events: { append: vi.fn(async () => undefined), pauseRunForInput, finalizeRun },
     jobs: { enqueue: vi.fn(async () => undefined) },
     secrets: [],

@@ -207,7 +207,7 @@ describe("builtin tools", () => {
       graphicalToolsAllowed: true,
       groupId: null,
       trigger: "user",
-      semanticMemoryEnabled: true,
+      memoryCapabilities: { recall: true, save: true, purgeHistory: true, sharedScope: true } as const,
       cloudAgentEnabled: true,
       historyRetrievalEnabled: true,
       messagingChannelRun: false,

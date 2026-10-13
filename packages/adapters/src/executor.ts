@@ -24,13 +24,15 @@ import type {
   NotificationProvider,
   SandboxProvider,
   SecretStore,
-  SemanticMemoryProvider,
+  SemanticMemoryCapabilities,
+  SemanticMemoryResult,
   WebProvider,
 } from "@rakazo/adapter-kit";
 import {
   DEFAULT_CONTEXT_STRATEGY,
   historyCompactJob,
   MEMORY_REVISION_CONFLICT_ERROR,
+  memoryRetainJob,
   routineJobKey,
   routineWakeupJob,
   runContinueJob,
@@ -49,6 +51,7 @@ import {
   HistoryReadInputSchema,
   HistorySearchInputSchema,
   isAttachmentImageMimeType,
+  MEMORY_FAILURE_MESSAGES,
   OPENAI_COMPATIBLE_PROVIDER_ID,
 } from "@rakazo/contracts";
 import type { ActionApprovalRule, ToolCallStreak } from "@rakazo/core";
@@ -72,6 +75,7 @@ import {
   inferAttachmentMimeType,
   isBackgroundRunTrigger,
   isCallClientNonce,
+  isConversationalRun,
   isMessagingChannelRun,
   isOneShotRoutineCrons,
   isTerminal,
@@ -104,14 +108,17 @@ import {
   appendEventInTransaction,
   createSpaceForMember,
   createThreadMessageInTransaction,
-  effectiveMemoryScope,
   findDefaultModelCredential,
   findModelCredential,
   InvalidSpaceNameError,
+  insertExplicitMemoryRetention,
   isTooManyDatabaseConnections,
+  loadRetentionSourceMessages,
   loadRunHistoryMessages,
   parseComputerMode,
+  pinRunMemorySelection,
   readHistory,
+  readRunMemorySelection,
   recordUsage,
   retireModelCredential,
   SpaceLimitError,
@@ -239,6 +246,7 @@ import { formatCurrentTimeInstruction } from "./current-time.js";
 import { resolveDeploymentModel } from "./deployment-model.js";
 import { handoffToGroupBot, loadGroupContext } from "./group-handoff.js";
 import {
+  boundRecalledResults,
   COMPACTION_BATCH_SIZE,
   formatCompactedSummary,
   formatRecalledMemory,
@@ -260,7 +268,9 @@ import {
   parseMcpServerToolArgs,
 } from "./mcp-server-tool.js";
 import { loadAgentMemoryContext } from "./memory-context.js";
-import type { MemoryProviderResolver } from "./memory-provider-factory.js";
+import type { MemoryProviderResolver, MemoryResolution } from "./memory-provider-factory.js";
+import { MemoryDispatchDeniedError } from "./memory-provider-factory.js";
+import { prepareConversationRetention, prepareExplicitRetention } from "./memory-retention.js";
 import { selectMemoryTools } from "./memory-tools.js";
 import {
   isCatalogModelChoice,
@@ -3362,6 +3372,31 @@ export function createRunExecutor(deps: ExecutorDeps) {
             : undefined;
         const channelId = messagingChannelId(sourceBlocks);
         const messagingChannelRun = isMessagingChannelRun(run.trigger, sourceBlocks);
+        const resolveRunMemory = async (): Promise<MemoryResolution | null> => {
+          const owner = { spaceId: run.spaceId, userId: run.userId, botId: run.botId };
+          const selection =
+            (await readRunMemorySelection(deps.prisma, runId)) ??
+            (await pinRunMemorySelection(deps.prisma, {
+              runId,
+              leaseOwner: workerId,
+              leaseFence: fence,
+              selection: await deps.memoryProviders.select(owner),
+            }));
+          if (!selection) return null;
+          return deps.memoryProviders.resolve(
+            { ...owner, selection },
+            {
+              registerSecrets: (values) => {
+                runSecrets.push(...values.filter((value) => !runSecrets.includes(value)));
+              },
+              beforeRequest: async () => {
+                if (!(await renewRunLease(deps, runId, workerId, fence))) {
+                  throw new MemoryDispatchDeniedError("forbidden");
+                }
+              },
+            },
+          );
+        };
         const [
           bot,
           thread,
@@ -3371,7 +3406,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           storedConnections,
           defaultCredential,
           settings,
-          configuredMemory,
+          runMemory,
           savedSkills,
           agentSkills,
           agentSecretRows,
@@ -3402,7 +3437,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           deps.prisma.deploymentSettings.findUnique({
             where: { id: "default" },
           }),
-          deps.memoryProviders.resolve(run.spaceId),
+          resolveRunMemory(),
           deps.prisma.taughtSkill.findMany({
             where: { botId: run.botId, spaceId: run.spaceId, status: "saved" },
           }),
@@ -3419,6 +3454,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
           }),
           loadBotCommandEnvironment(deps.prisma, deps.secretStore, run),
         ]);
+        if (!runMemory) {
+          leaseValid = false;
+          return;
+        }
         const historySearchBeforeSeq =
           contextStrategy !== "current" && run.sourceMessageId
             ? (messages.find((message) => message.id === run.sourceMessageId)?.seq ??
@@ -3492,10 +3531,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
           })),
           connectedProviders: connectedComposio.map((row) => row.provider),
         };
-        const memoryScope = configuredMemory
-          ? effectiveMemoryScope(bot.memoryScope, configuredMemory.defaultScope)
-          : null;
-        const semanticMemory: SemanticMemoryProvider | null = configuredMemory?.provider ?? null;
+        const memoryCapabilities: SemanticMemoryCapabilities | null =
+          runMemory.kind === "native" || messagingChannelRun ? null : runMemory.capabilities;
+        const deliveredSteeringMessageIds: string[] = [];
 
         await deps.events.append({
           spaceId: run.spaceId,
@@ -3565,29 +3603,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
             ? `Update from ${peerMessage.fromBotName}: ${peerMessage.text}`
             : DELEGATED_EMPTY_NOTICE
           : undefined;
-        const recallPromise =
-          threadContext.includeSemanticRecall &&
-          semanticMemory &&
-          memoryScope &&
-          thread.historyCompactedUpToSeq != null
-            ? semanticMemory.recall(
-                {
-                  query: task.prompt,
-                  scope: memoryScope,
-                  botId: bot.id,
-                  historyGeneration: thread.historyCompactionGeneration,
-                  limit: MAX_RECALLED_MEMORIES,
-                },
-                context,
-              )
-            : Promise.resolve(null);
         const [
           discovered,
           currentTurnImages,
           memoryContext,
           scratchpadContext,
           ticketContext,
-          recalled,
         ] = await Promise.all([
           discoveredPromise,
           loadCurrentTurnImages(deps, turnBlocks, context),
@@ -3606,28 +3627,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 spaceId: run.spaceId,
                 text: task.prompt,
               }),
-          recallPromise,
         ]);
-        const semanticMemoryEnabled = Boolean(semanticMemory) && !messagingChannelRun;
-        let recalledMemory = "";
-        let recallSucceeded = false;
-        if (recalled) {
-          if (recalled.ok && recalled.value.length > 0) {
-            recallSucceeded = true;
-            recalledMemory = formatRecalledMemory(recalled.value);
-          } else if (!recalled.ok) {
-            getLogger().error("semantic memory recall failed", recalled.error);
-          }
-        }
-        if (!compactedHistory.usedLocalSummary) {
-          history = history.slice(
-            -historyWindowSize({
-              semanticMemoryEnabled: semanticMemoryEnabled && !thread.historyCompactionSummary,
-              compacted: thread.historyCompactedUpToSeq != null,
-              recallSucceeded,
-            }),
-          );
-        }
         const runDeployment = deps.deploymentModelConfigured ? resolveDeploymentModel() : null;
         const runtimeFallback = runtimeFallbackModel(deps.runtime);
         const pinError = run.modelPinned
@@ -3720,6 +3720,66 @@ export function createRunExecutor(deps: ExecutorDeps) {
           return;
         }
         runSecrets.push(...resolved.redact);
+        let recalledMemory = "";
+        if (
+          runMemory.kind === "configured" &&
+          threadContext.includeSemanticRecall &&
+          (runMemory.capabilities.automaticRecall === true ||
+            thread.historyCompactedUpToSeq != null)
+        ) {
+          const query = redactSecrets(
+            runMemory.capabilities.automaticRecall === true
+              ? ((await loadSourceMessageText(deps.prisma, run.sourceMessageId, thread.id, messages)) ??
+                  task.prompt)
+              : task.prompt,
+            runSecrets,
+          );
+          if (query.trim()) {
+            try {
+              const recalled = await runMemory.provider.recall(
+                {
+                  query,
+                  scope: runMemory.defaultScope,
+                  botId: bot.id,
+                  ...(thread.historyCompactedUpToSeq == null
+                    ? {}
+                    : { historyGeneration: thread.historyCompactionGeneration }),
+                  limit: MAX_RECALLED_MEMORIES,
+                },
+                context,
+              );
+              if (recalled.ok) {
+                recalledMemory = formatRecalledMemory(
+                  redactRecalledResults(recalled.value, runSecrets),
+                );
+              } else {
+                getLogger().error("semantic memory recall failed", {
+                  runId,
+                  botId: bot.id,
+                  code: recalled.code ?? "unknown",
+                });
+              }
+            } catch (error) {
+              getLogger().error("semantic memory recall failed", {
+                runId,
+                botId: bot.id,
+                code: error instanceof MemoryDispatchDeniedError ? error.code : "unknown",
+              });
+            }
+          }
+        }
+        if (!compactedHistory.usedLocalSummary) {
+          history = history.slice(
+            -historyWindowSize({
+              semanticMemoryEnabled:
+                runMemory.kind === "configured" &&
+                !messagingChannelRun &&
+                !thread.historyCompactionSummary,
+              compacted: thread.historyCompactedUpToSeq != null,
+              recallSucceeded: recalledMemory !== "",
+            }),
+          );
+        }
         // A pin stays as it was created. Unpinned runs still record the model they
         // used; modelPinned is what keeps that record from becoming the next choice.
         if (!run.modelPinned) {
@@ -3825,7 +3885,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             pageBrowserAllowed,
             groupId: thread.groupId,
             trigger: run.trigger,
-            semanticMemoryEnabled,
+            memoryCapabilities,
             cloudAgentEnabled: cloudAgentsEnabled(cloudAgent, run.spaceId),
             messagingChannelRun,
             voiceCall,
@@ -4047,12 +4107,16 @@ export function createRunExecutor(deps: ExecutorDeps) {
 
         const applyTool = async (
           name: string,
-          args: Record<string, unknown>,
+          rawArgs: Record<string, unknown>,
           executionId: string,
           _route?: unknown,
           observer?: AgentToolExecutionObserver,
         ) => {
           context.signal.throwIfAborted();
+          let args: Record<string, unknown> =
+            name === "save_memory"
+              ? { ...rawArgs, content: redactSecrets(String(rawArgs.content ?? ""), runSecrets) }
+              : rawArgs;
           if (handedOff) {
             return {
               error: "This stage was handed off. End the turn without more tool calls.",
@@ -5580,10 +5644,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
             });
           }
           if (name === "recall_memory") {
-            return semanticMemory!.recall(
+            if (runMemory.kind !== "configured") return memoryUnavailableResult(runMemory);
+            const recalled = await runMemory.provider.recall(
               {
-                query: String(args.query ?? ""),
-                scope: memoryScope!,
+                query: redactSecrets(String(args.query ?? ""), runSecrets),
+                scope: runMemory.defaultScope,
                 botId: bot.id,
                 ...(thread.historyCompactedUpToSeq == null
                   ? {}
@@ -5592,6 +5657,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
               },
               context,
             );
+            return recalled.ok
+              ? {
+                  ok: true,
+                  value: boundRecalledResults(redactRecalledResults(recalled.value, runSecrets)),
+                }
+              : recalled;
           }
           if (name === "search_history" || name === "read_history") {
             const scope = {
@@ -5618,26 +5689,81 @@ export function createRunExecutor(deps: ExecutorDeps) {
             return finish(redacted);
           }
           if (name === "save_memory") {
-            return finish(
-              await semanticMemory!.save(
-                {
-                  content: String(args.content ?? ""),
-                  scope: memoryScope!,
-                  botId: bot.id,
-                  source: { kind: "durable" },
-                },
-                context,
-              ),
-            );
+            if (runMemory.kind !== "configured") return finish(memoryUnavailableResult(runMemory));
+            const content = redactSecrets(String(args.content ?? ""), runSecrets);
+            if (runMemory.selection.kind !== "bank") {
+              return finish(
+                await runMemory.provider.save(
+                  {
+                    content,
+                    scope: runMemory.defaultScope,
+                    botId: bot.id,
+                    source: { kind: "durable" },
+                  },
+                  context,
+                ),
+              );
+            }
+            const prepared = prepareExplicitRetention(content, {
+              space_id: run.spaceId,
+              bot_id: bot.id,
+              thread_id: thread.id,
+              run_id: runId,
+              source_kind: "durable",
+              source_key: effectKey,
+            });
+            if (!prepared.ok) {
+              return finish({
+                ok: false,
+                error:
+                  prepared.reason === "too_large"
+                    ? "This memory is too large to save. Save a shorter version."
+                    : "There is nothing to save.",
+              });
+            }
+            const queued = await insertExplicitMemoryRetention(deps.prisma, {
+              runId,
+              leaseOwner: workerId,
+              leaseFence: fence,
+              bindingId: runMemory.selection.bindingId,
+              sourceKey: effectKey,
+              content: prepared.content,
+              occurredAt: new Date(),
+            });
+            if ("error" in queued) {
+              if (queued.error === "fence_lost") {
+                leaseValid = false;
+                runAbortController?.abort();
+                return { error: "This run no longer owns its lease." };
+              }
+              return finish({
+                ok: false,
+                code: queued.error,
+                error: MEMORY_FAILURE_MESSAGES[queued.error],
+              });
+            }
+            await deps.jobs
+              .enqueue(memoryRetainJob(queued.retentionId))
+              .catch(() =>
+                getLogger().error("memory retain enqueue failed", {
+                  runId,
+                  retentionId: queued.retentionId,
+                }),
+              );
+            return finish({ ok: true, value: { status: "queued" } });
           }
           if (name === "forget_memory") {
-            if (!semanticMemory?.forget) {
+            if (
+              runMemory.kind !== "configured" ||
+              runMemory.capabilities.forget === false ||
+              !runMemory.provider.forget
+            ) {
               return finish({
                 error: "This memory provider does not support forgetting individual facts.",
               });
             }
             return finish(
-              await semanticMemory.forget(
+              await runMemory.provider.forget(
                 {
                   id: String(args.id ?? ""),
                   ...(typeof args.entity === "string" && args.entity.trim()
@@ -6628,7 +6754,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                       leaseFence: fence,
                       seenIds,
                     });
-                    return Promise.all(
+                    const batch = await Promise.all(
                       steering.map(async (item) => {
                         const { images, files, unavailableInstruction } =
                           await settleSteeringAttachmentLoads(
@@ -6670,6 +6796,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
                         };
                       }),
                     );
+                    deliveredSteeringMessageIds.push(...batch.map((item) => item.messageId));
+                    return batch;
                   },
             },
             context,
@@ -7110,6 +7238,67 @@ export function createRunExecutor(deps: ExecutorDeps) {
             run.trigger === "bot_message"
               ? botMessageOutcomeFromMidTurn(text, midTurnUserTexts)
               : null;
+          const assistantText = blocks
+            .flatMap((block) => (block.kind === "text" ? [block.text] : []))
+            .join("\n\n")
+            .trim();
+          let memoryRetention:
+            | { bindingId: string; content: string; occurredAt: string; sourceMessageIds: string[] }
+            | undefined;
+          if (
+            runMemory.kind === "configured" &&
+            runMemory.selection.kind === "bank" &&
+            runMemory.capabilities.conversationRetention === true &&
+            threadContext.includeSemanticRecall &&
+            isConversationalRun(run.trigger) &&
+            run.trigger !== "messaging" &&
+            assistantText
+          ) {
+            try {
+              const sources = await loadRetentionSourceMessages(deps.prisma, {
+                runId,
+                threadId: thread.id,
+                messageIds: [
+                  ...new Set(
+                    [run.sourceMessageId, ...deliveredSteeringMessageIds].filter(
+                      (id): id is string => Boolean(id),
+                    ),
+                  ),
+                ],
+              });
+              const completedAt = new Date();
+              const prepared = prepareConversationRetention({
+                userSources: sources.map((source) => ({
+                  id: source.id,
+                  createdAt: source.createdAt,
+                  text: redactSecrets(source.text, runSecrets),
+                })),
+                assistantText,
+                completedAt,
+                metadata: {
+                  space_id: run.spaceId,
+                  bot_id: bot.id,
+                  thread_id: thread.id,
+                  run_id: runId,
+                  source_kind: "conversation",
+                  source_key: "conversation",
+                },
+              });
+              if (prepared) {
+                memoryRetention = {
+                  bindingId: runMemory.selection.bindingId,
+                  content: prepared.content,
+                  occurredAt: completedAt.toISOString(),
+                  sourceMessageIds: prepared.sourceMessageIds,
+                };
+              }
+            } catch {
+              getLogger().error("conversation memory preparation failed", {
+                runId,
+                botId: bot.id,
+              });
+            }
+          }
           const completed = await deps.events.finalizeRun({
             spaceId: run.spaceId,
             threadId: thread.id,
@@ -7126,12 +7315,21 @@ export function createRunExecutor(deps: ExecutorDeps) {
               text,
               peerMessage?.repliesToRequest === true,
             ),
+            ...(memoryRetention ? { memoryRetention } : {}),
           });
           if (!completed) return;
           if (completed.continuationRunId) {
             await deps.jobs
               .enqueue(runContinueJob(completed.continuationRunId))
               .catch((error) => getLogger().error("steering continuation enqueue", error));
+          }
+          const retentionId = completed.memoryRetentionId;
+          if (retentionId) {
+            await deps.jobs
+              .enqueue(memoryRetainJob(retentionId))
+              .catch(() =>
+                getLogger().error("memory retain enqueue failed", { runId, retentionId }),
+              );
           }
           if (botMessageOutcome) {
             // Prefer the final reply. If the turn only posted mid-turn progress, return that
@@ -7462,7 +7660,7 @@ export function selectBuiltinToolsForRun(options: {
   pageBrowserAllowed?: boolean;
   groupId: string | null;
   trigger: string;
-  semanticMemoryEnabled: boolean;
+  memoryCapabilities: SemanticMemoryCapabilities | null;
   cloudAgentEnabled?: boolean;
   messagingChannelRun: boolean;
   /** Hanging up is only offered to a turn the caller spoke on a live call. */
@@ -7483,7 +7681,7 @@ export function selectBuiltinToolsForRun(options: {
         ),
         options.trigger,
       ),
-      options.semanticMemoryEnabled,
+      options.memoryCapabilities,
     ),
     Boolean(options.cloudAgentEnabled),
   ).filter(
@@ -7859,6 +8057,46 @@ export function threadContextForRun<T>(
   return messagingChannelRun
     ? { ...context, summary: null, historyCompactedUpToSeq: null, includeSemanticRecall: false }
     : { ...context, includeSemanticRecall: true };
+}
+
+async function loadSourceMessageText(
+  prisma: PrismaClient,
+  sourceMessageId: string | null,
+  threadId: string,
+  loaded: Array<{ id: string; role: string; blocks: unknown }>,
+): Promise<string | null> {
+  if (!sourceMessageId) return null;
+  const source =
+    loaded.find((message) => message.id === sourceMessageId) ??
+    (await prisma.message.findUnique({
+      where: { id: sourceMessageId, threadId },
+      select: { id: true, role: true, blocks: true },
+    }));
+  if (source?.role !== "user") return null;
+  const text = (source.blocks as MessageBlock[])
+    .flatMap((block) => (block.kind === "text" ? [block.text] : []))
+    .join("\n\n")
+    .trim();
+  return text || null;
+}
+
+function redactRecalledResults(
+  results: SemanticMemoryResult[],
+  secrets: string[],
+): SemanticMemoryResult[] {
+  return results.map((result) => ({
+    ...result,
+    memory: redactSecrets(result.memory, secrets),
+    ...(result.id ? { id: redactSecrets(result.id, secrets) } : {}),
+    ...(result.provenance ? { provenance: redactSecrets(result.provenance, secrets) } : {}),
+    ...(result.entity ? { entity: redactSecrets(result.entity, secrets) } : {}),
+  }));
+}
+
+function memoryUnavailableResult(resolution: MemoryResolution) {
+  return resolution.kind === "unavailable"
+    ? { ok: false, code: resolution.code, error: resolution.error }
+    : { ok: false, error: "Semantic memory is not connected for this bot." };
 }
 
 /** Profile fields the creation intro is asked to explain. Other runs keep the prior identity line. */
