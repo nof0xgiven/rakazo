@@ -11,6 +11,8 @@ import {
   ThirdPartyConnectorEmulator,
 } from "@rakazo/adapters";
 import { createThreadMessage, type PrismaClient } from "@rakazo/db";
+import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
+import { startHindsightEmulator } from "../hindsight-emulator.js";
 import { sessionCookieHeader } from "../index.js";
 import { runProcess } from "./process.js";
 
@@ -19,6 +21,7 @@ const REPORT_DIR = path.join(ROOT, "test-report", "mobile-screenshots");
 const DATA_DIR = path.join(ROOT, ".tmp", "mobile-screenshots-data");
 const FLOW_DIR = path.join(ROOT, "apps", "mobile", ".maestro");
 const EMAIL = "mobile-screenshots@example.test";
+const EMPTY_EMAIL = "mobile-screenshots-empty@example.test";
 const PASSWORD = "test-password-123";
 const API_PORT = 3110;
 const DEVICE_CONTROL_PORT = 3111;
@@ -26,16 +29,31 @@ const HOST_API_URL = `http://127.0.0.1:${API_PORT}`;
 const DEVICE_CONTROL_URL = `http://127.0.0.1:${DEVICE_CONTROL_PORT}`;
 const EXPAND_NOTIFICATIONS_URL = `${DEVICE_CONTROL_URL}/expand-notifications`;
 const WEB_ORIGIN = "http://127.0.0.1:5180";
+const MEMORY_BANKS = [
+  { bankId: "launch-research", name: "Launch research" },
+  { bankId: "launch-retrospective", name: "Launch retrospective" },
+  { bankId: "support-replies", name: "Support replies" },
+  { bankId: "writing-drafts", name: "Writing drafts" },
+];
 
 type App = { request: (input: string, init?: RequestInit) => Response | Promise<Response> };
 
 /** Capture app screenshots and the notification demo against an isolated, disposable backend. */
 async function main() {
+  const serveMode = parseServeMode(process.argv.slice(2));
   process.chdir(ROOT);
-  configureEnvironment();
-  await rm(REPORT_DIR, { recursive: true, force: true });
+  let postgres: StartedPostgreSqlContainer | undefined;
+  if (serveMode) {
+    postgres = await new PostgreSqlContainer("postgres:16-alpine").start();
+    process.env.DATABASE_URL = postgres.getConnectionUri();
+  }
+  const apiHost = serveMode ? "127.0.0.1" : "0.0.0.0";
+  configureEnvironment(apiHost);
+  if (!serveMode) {
+    await rm(REPORT_DIR, { recursive: true, force: true });
+    await mkdir(REPORT_DIR, { recursive: true });
+  }
   await rm(DATA_DIR, { recursive: true, force: true });
-  await mkdir(REPORT_DIR, { recursive: true });
   await mkdir(DATA_DIR, { recursive: true });
 
   execFileSync("pnpm", ["--filter", "@rakazo/db", "exec", "prisma", "migrate", "deploy"], {
@@ -43,6 +61,8 @@ async function main() {
     env: process.env,
     stdio: "inherit",
   });
+  const hindsight = await startHindsightEmulator();
+  const memoryFixture = hindsight.createFixture({ banks: MEMORY_BANKS });
   const thirdParties = new ThirdPartyConnectorEmulator();
   const pipedream = new PipedreamConnector(
     {
@@ -58,7 +78,7 @@ async function main() {
   const handles = await createApp({
     databaseUrl: process.env.DATABASE_URL!,
     dataDir: DATA_DIR,
-    apiHost: "0.0.0.0",
+    apiHost,
     apiUrl: HOST_API_URL,
     composio: new ComposioEmulator(),
     pipedream,
@@ -67,18 +87,24 @@ async function main() {
       fetch: thirdParties.fetch,
       resolveHostname: thirdParties.resolveHostname,
     },
+    memoryTransport: { fetch: hindsight.fetch },
   });
 
   const fixture = await seedFixture(handles.app, handles.prisma);
   const server = serve({
     fetch: handles.app.fetch,
-    hostname: "0.0.0.0",
+    hostname: apiHost,
     port: API_PORT,
   });
-  const deviceControl = startDeviceControlServer();
+  const deviceControl = serveMode ? null : startDeviceControlServer();
 
   try {
     await waitForHealth(`${HOST_API_URL}/health`, 15_000);
+    if (serveMode) {
+      printServeInstructions(process.env.DATABASE_URL!, memoryFixture.apiKey);
+      await waitForStopSignal();
+      return;
+    }
     for (const flow of ["screenshots", "notification-demo"]) {
       await runProcess(
         "maestro",
@@ -105,6 +131,10 @@ async function main() {
           "-e",
           `RAKAZO_SCREENSHOT_ROUTINE_ID=${fixture.routineId}`,
           "-e",
+          `RAKAZO_SCREENSHOT_MEMORY_BOT_ID=${fixture.memoryBotId}`,
+          "-e",
+          `RAKAZO_SCREENSHOT_HINDSIGHT_KEY=${memoryFixture.apiKey}`,
+          "-e",
           `RAKAZO_NOTIFICATION_VIDEO=${path.join(REPORT_DIR, "notification-demo")}`,
           "-e",
           `RAKAZO_EXPAND_NOTIFICATIONS_URL=${EXPAND_NOTIFICATIONS_URL}`,
@@ -122,12 +152,57 @@ async function main() {
       server.close(() => resolve());
       server.closeAllConnections();
     });
-    await new Promise<void>((resolve, reject) => {
-      deviceControl.close((error) => (error ? reject(error) : resolve()));
-    }).catch(() => undefined);
+    if (deviceControl) {
+      await new Promise<void>((resolve, reject) => {
+        deviceControl.close((error) => (error ? reject(error) : resolve()));
+      }).catch(() => undefined);
+    }
     await handles.stop().catch(() => undefined);
+    await hindsight.close().catch(() => undefined);
+    await postgres?.stop().catch(() => undefined);
     await rm(DATA_DIR, { recursive: true, force: true });
   }
+}
+
+function parseServeMode(argv: string[]) {
+  let serveMode = false;
+  for (const arg of argv) {
+    if (arg === "--") continue;
+    if (arg === "--serve") {
+      serveMode = true;
+      continue;
+    }
+    throw new Error(`Unknown argument ${arg}`);
+  }
+  return serveMode;
+}
+
+function printServeInstructions(databaseUrl: string, hindsightKey: string) {
+  console.log(
+    [
+      "",
+      "Disposable mobile screenshot API is ready. Press Ctrl+C to stop and delete it.",
+      "",
+      `export RAKAZO_API_URL=${HOST_API_URL}`,
+      `export DATABASE_URL=${databaseUrl}`,
+      `export RAKAZO_SCREENSHOT_EMAIL=${EMAIL}`,
+      `export RAKAZO_SCREENSHOT_EMPTY_EMAIL=${EMPTY_EMAIL}`,
+      `export RAKAZO_SCREENSHOT_PASSWORD=${PASSWORD}`,
+      `export RAKAZO_SCREENSHOT_HINDSIGHT_KEY=${hindsightKey}`,
+      "",
+      `Synthetic Hindsight Cloud banks: ${MEMORY_BANKS.map((bank) => bank.bankId).join(", ")}`,
+      "Set SIM_UDID to a booted simulator, then run: pnpm ios:screenshots -- --section settings",
+      "To connect memory manually, open Account → Memory in the app and paste RAKAZO_SCREENSHOT_HINDSIGHT_KEY.",
+      "",
+    ].join("\n"),
+  );
+}
+
+function waitForStopSignal() {
+  return new Promise<void>((resolve) => {
+    process.once("SIGINT", () => resolve());
+    process.once("SIGTERM", () => resolve());
+  });
 }
 
 /** Maestro host-side helper: expand the Android shade without flaky status-bar swipes. */
@@ -152,7 +227,7 @@ function startDeviceControlServer(): Server {
   return server;
 }
 
-function configureEnvironment() {
+function configureEnvironment(apiHost: string) {
   if (!process.env.DATABASE_URL) {
     throw new Error("DATABASE_URL is required for the isolated mobile screenshot fixture");
   }
@@ -167,7 +242,7 @@ function configureEnvironment() {
     SCREEN_PROXY_SECRET: "mobile-screenshot-screen-secret-32chars",
     BETTER_AUTH_URL: HOST_API_URL,
     WEB_ORIGIN,
-    API_HOST: "0.0.0.0",
+    API_HOST: apiHost,
     API_PORT: String(API_PORT),
     API_URL: HOST_API_URL,
     DATA_DIR,
@@ -275,7 +350,12 @@ async function seedFixture(app: App, prisma: PrismaClient) {
     },
   });
 
-  return { botId: researcher.id, groupId: group.id, routineId: routine.id };
+  return {
+    botId: researcher.id,
+    memoryBotId: support.id,
+    groupId: group.id,
+    routineId: routine.id,
+  };
 }
 
 async function signup(app: App) {

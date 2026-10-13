@@ -160,6 +160,77 @@ tags:
 - assertVisible: "Space default.*"
 - takeScreenshot: "17-bot-settings"
 
+- openLink: "rakazo:///account"
+- extendedWaitUntil:
+    visible: "Change password"
+    timeout: 10000
+- scrollUntilVisible:
+    element: "Memory"
+    direction: DOWN
+- tapOn: "Memory"
+- extendedWaitUntil:
+    visible: "API key"
+    timeout: 10000
+- tapOn: "API key"
+- inputText: ${RAKAZO_SCREENSHOT_HINDSIGHT_KEY}
+- hideKeyboard
+- assertVisible: "Bots in this Space can use banks this key can access."
+- takeScreenshot: "17b-memory-connect"
+- tapOn: "Connect"
+- extendedWaitUntil:
+    visible: "Disconnect"
+    timeout: 30000
+- assertVisible: "Hindsight Cloud"
+- takeScreenshot: "17c-memory-connected"
+
+- openLink: "rakazo:///bot-settings?botId=${RAKAZO_SCREENSHOT_MEMORY_BOT_ID}"
+- extendedWaitUntil:
+    visible: "Support"
+    timeout: 10000
+- tapOn: "Advanced"
+- scrollUntilVisible:
+    element: "Built-in"
+    direction: DOWN
+    timeout: 30000
+- tapOn: "Memory"
+- extendedWaitUntil:
+    visible: "Launch research"
+    timeout: 30000
+- assertVisible: "Bots using the same bank share memory."
+- assertVisible: "Support replies"
+- takeScreenshot: "17d-memory-bank-picker"
+- tapOn: "Search banks|Search"
+- inputText: "launch"
+- extendedWaitUntil:
+    visible: "Launch retrospective"
+    timeout: 10000
+- assertNotVisible: "Support replies"
+- assertVisible: "Launch research"
+- takeScreenshot: "17e-memory-bank-search"
+- tapOn: "Launch research"
+- extendedWaitUntil:
+    notVisible: "Use bank ID"
+    timeout: 10000
+- assertVisible: "Launch research"
+- takeScreenshot: "17f-bot-settings-memory-bank"
+- scrollUntilVisible:
+    element: "Save"
+    direction: DOWN
+- tapOn: "Save"
+- extendedWaitUntil:
+    visible: "Disconnect"
+    timeout: 30000
+
+- openLink: "rakazo:///bot-settings?botId=${RAKAZO_SCREENSHOT_MEMORY_BOT_ID}"
+- extendedWaitUntil:
+    visible: "Support"
+    timeout: 10000
+- tapOn: "Advanced"
+- scrollUntilVisible:
+    element: "Launch research"
+    direction: DOWN
+    timeout: 30000
+
 - openLink: "rakazo:///computer?botId=${RAKAZO_SCREENSHOT_BOT_ID}&name=Researcher"
 - extendedWaitUntil:
     visible: "Take control"
