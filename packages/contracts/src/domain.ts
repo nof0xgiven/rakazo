@@ -32,6 +32,19 @@ export const ThinkingLevelSchema = z.enum([
 ]);
 export type ThinkingLevel = z.infer<typeof ThinkingLevelSchema>;
 
+export const OPENAI_COMPATIBLE_PROVIDER_ID = "openai-compatible";
+
+/** Largest model id accepted for a newly enabled or described compatible model. */
+export const OPENAI_COMPATIBLE_MODEL_ID_MAX_LENGTH = 256;
+/** Most models a compatible connection may enable. */
+export const MAX_OPENAI_COMPATIBLE_ENABLED_MODELS = 500;
+/** Upper bound for any persisted model reference; compatible ids are otherwise checked by membership. */
+export const MODEL_REFERENCE_MAX_LENGTH = 4096;
+/** Historical bound for hosted bot and routine model ids. */
+export const HOSTED_MODEL_ID_MAX_LENGTH = 200;
+/** Historical bound for hosted backup model ids. */
+export const HOSTED_BACKUP_MODEL_ID_MAX_LENGTH = 512;
+
 export { AGENT_SECRET_NAME_PATTERN };
 
 export const AgentSecretSchema = z.object({
@@ -341,7 +354,7 @@ export const UpdateBotInput = z
     voiceId: z.string().max(120).nullable().optional(),
     autoSpeak: z.boolean().optional(),
     modelProvider: z.string().trim().min(1).max(80).nullable().optional(),
-    modelId: z.string().trim().min(1).max(200).nullable().optional(),
+    modelId: z.string().trim().min(1).max(MODEL_REFERENCE_MAX_LENGTH).nullable().optional(),
     thinkingLevel: ThinkingLevelSchema.nullable().optional(),
     teamChatAmbientEnabled: z.boolean().optional(),
     teamChatRules: z.string().max(TEAM_CHAT_RULES_MAX_LENGTH).optional(),
@@ -370,6 +383,9 @@ export const UpdateBotInput = z
         path: ["modelId"],
       });
     }
+    hostedModelIdLengthIssue(value.modelProvider, value.modelId, HOSTED_MODEL_ID_MAX_LENGTH, ctx, [
+      "modelId",
+    ]);
   });
 
 /**
@@ -382,7 +398,7 @@ export function routineModelIssues(
     modelId?: string | null;
     thinkingLevel?: string | null;
   },
-  ctx: { addIssue: (issue: { code: "custom"; message: string; path: string[] }) => void },
+  ctx: CapabilityIssueContext,
 ) {
   const providerProvided = value.modelProvider !== undefined && value.modelProvider !== null;
   const modelProvided = value.modelId !== undefined && value.modelId !== null;
@@ -401,6 +417,9 @@ export function routineModelIssues(
       path: ["thinkingLevel"],
     });
   }
+  hostedModelIdLengthIssue(value.modelProvider, value.modelId, HOSTED_MODEL_ID_MAX_LENGTH, ctx, [
+    "modelId",
+  ]);
 }
 
 export const RoutineSchema = z.object({
@@ -449,7 +468,7 @@ export const CreateRoutineInput = z
       .nullable()
       .default(null),
     modelProvider: z.string().trim().min(1).max(80).nullable().default(null),
-    modelId: z.string().trim().min(1).max(200).nullable().default(null),
+    modelId: z.string().trim().min(1).max(MODEL_REFERENCE_MAX_LENGTH).nullable().default(null),
     thinkingLevel: ThinkingLevelSchema.nullable().default(null),
   })
   .superRefine((value, ctx) => {
@@ -1029,13 +1048,16 @@ export const ModelCredentialSchema = z.object({
   baseUrl: z.string().optional(),
   accountId: z.string().optional(),
   gatewayId: z.string().optional(),
+  /** Space preference: the selected model. Never proof of availability. */
   modelId: z.string().optional(),
-  reasoning: z.boolean().optional(),
+  /** Space preference effort for `modelId`. */
   thinkingLevel: ThinkingLevelSchema.nullable().optional(),
   maxTokens: z.number().int().min(1).max(MAX_MODEL_MAX_TOKENS).optional(),
-  supportsImages: z.boolean().optional(),
-  maxImagesPerPrompt: z.number().int().min(1).max(1000).optional(),
-  thinkingLevels: z.array(ThinkingLevelSchema).optional(),
+  /** OpenAI-compatible authorization allowlist; empty authorizes nothing. */
+  enabledModelIds: z.array(z.string()).optional(),
+  /** OpenAI-compatible per-model settings; empty when the secret is unreadable. */
+  models: z.lazy(() => z.array(OpenAiCompatibleModelConfigSchema)).optional(),
+  configurationVersion: z.number().int().nonnegative().optional(),
   /** Stored secret kind. Absent when the secret could not be read. */
   authKind: z.enum(["api_key", "oauth", "openai_compatible"]).optional(),
 });
@@ -1044,7 +1066,7 @@ export type ModelCredential = z.infer<typeof ModelCredentialSchema>;
 export const MAX_MODEL_BACKUPS = 10;
 export const ModelBackupChoiceSchema = z.object({
   provider: z.string().trim().min(1).max(128),
-  modelId: z.string().trim().min(1).max(512),
+  modelId: z.string().trim().min(1).max(MODEL_REFERENCE_MAX_LENGTH),
 });
 export type ModelBackupChoice = z.infer<typeof ModelBackupChoiceSchema>;
 export const ModelBackupListSchema = z
@@ -1062,10 +1084,281 @@ export const ModelBackupListSchema = z
         });
       }
       seen.add(key);
+      hostedModelIdLengthIssue(choice.provider, choice.modelId, HOSTED_BACKUP_MODEL_ID_MAX_LENGTH, ctx, [
+        index,
+        "modelId",
+      ]);
     }
   });
 
-export const OPENAI_COMPATIBLE_PROVIDER_ID = "openai-compatible";
+/** Unique levels in canonical off-through-max order. */
+export function canonicalThinkingLevels(levels: readonly ThinkingLevel[]): ThinkingLevel[] {
+  const present = new Set(levels);
+  return ThinkingLevelSchema.options.filter((level) => present.has(level));
+}
+
+/** Whether a supported set reasons at all; `["off"]` alone means no reasoning. */
+export function thinkingLevelsReason(levels: readonly ThinkingLevel[]): boolean {
+  return levels.some((level) => level !== "off");
+}
+
+/**
+ * Pi's execution clamp: the requested level if supported, else the next
+ * higher supported level, else the next lower one.
+ */
+export function clampThinkingLevelToSupported(
+  levels: readonly ThinkingLevel[],
+  level: ThinkingLevel,
+): ThinkingLevel {
+  if (levels.includes(level)) return level;
+  const order = ThinkingLevelSchema.options;
+  const requested = order.indexOf(level);
+  for (let index = requested; index < order.length; index++) {
+    const candidate = order[index];
+    if (candidate && levels.includes(candidate)) return candidate;
+  }
+  for (let index = requested - 1; index >= 0; index--) {
+    const candidate = order[index];
+    if (candidate && levels.includes(candidate)) return candidate;
+  }
+  return levels[0] ?? "off";
+}
+
+/** Pi's own default when neither a preference nor a model default is set. */
+export const PI_DEFAULT_THINKING_LEVEL: ThinkingLevel = "medium";
+
+/** Level a run executes with: explicit preference, then model default, then Pi's default, clamped. */
+export function effectiveThinkingLevel(
+  levels: readonly ThinkingLevel[],
+  preferred: ThinkingLevel | null | undefined,
+  defaultThinkingLevel: ThinkingLevel | null | undefined,
+): ThinkingLevel {
+  if (!thinkingLevelsReason(levels)) return "off";
+  return clampThinkingLevelToSupported(
+    levels,
+    preferred ?? defaultThinkingLevel ?? PI_DEFAULT_THINKING_LEVEL,
+  );
+}
+
+const openAiCompatibleModelCapabilitiesShape = {
+  thinkingLevels: z.array(ThinkingLevelSchema).min(1),
+  defaultThinkingLevel: ThinkingLevelSchema.nullable(),
+  contextWindow: z.number().int().min(1).max(MAX_MODEL_CONTEXT_WINDOW),
+  maxTokens: z.number().int().min(1).max(MAX_MODEL_MAX_TOKENS),
+  supportsImages: z.boolean(),
+  maxImagesPerPrompt: z.number().int().min(1).max(1000).optional(),
+  cacheCapabilities: CacheCapabilitiesSchema.optional(),
+};
+
+type CapabilityIssueContext = {
+  addIssue: (issue: { code: "custom"; message: string; path: (string | number)[] }) => void;
+};
+
+function openAiCompatibleCapabilityIssues(
+  value: {
+    thinkingLevels: ThinkingLevel[];
+    defaultThinkingLevel: ThinkingLevel | null;
+    contextWindow: number;
+    maxTokens: number;
+    supportsImages: boolean;
+    maxImagesPerPrompt?: number | undefined;
+  },
+  ctx: CapabilityIssueContext,
+) {
+  const canonical = canonicalThinkingLevels(value.thinkingLevels);
+  if (
+    canonical.length !== value.thinkingLevels.length ||
+    canonical.some((level, index) => value.thinkingLevels[index] !== level)
+  ) {
+    ctx.addIssue({
+      code: "custom",
+      message: "Reasoning levels must be unique and in order",
+      path: ["thinkingLevels"],
+    });
+  }
+  if (value.defaultThinkingLevel !== null && !value.thinkingLevels.includes(value.defaultThinkingLevel)) {
+    ctx.addIssue({
+      code: "custom",
+      message: "Default reasoning effort must be a supported level",
+      path: ["defaultThinkingLevel"],
+    });
+  }
+  if (!modelOutputLeavesInputRoom(value.maxTokens, value.contextWindow)) {
+    ctx.addIssue({
+      code: "custom",
+      message: "Maximum output tokens must leave room for input",
+      path: ["maxTokens"],
+    });
+  }
+  if (!value.supportsImages && value.maxImagesPerPrompt !== undefined) {
+    ctx.addIssue({
+      code: "custom",
+      message: "Image limit requires image support",
+      path: ["maxImagesPerPrompt"],
+    });
+  }
+}
+
+export const OpenAiCompatibleModelCapabilitiesSchema = z
+  .object(openAiCompatibleModelCapabilitiesShape)
+  .superRefine(openAiCompatibleCapabilityIssues);
+export type OpenAiCompatibleModelCapabilities = z.infer<
+  typeof OpenAiCompatibleModelCapabilitiesSchema
+>;
+
+/** Exact opaque model id; never rewritten. Length of new ids is bounded by the save handler. */
+export const OpenAiCompatibleModelIdSchema = z
+  .string()
+  .min(1)
+  .max(MODEL_REFERENCE_MAX_LENGTH)
+  .refine((value) => value === value.trim(), "Model id must not have surrounding spaces");
+
+export const OpenAiCompatibleModelConfigSchema = z
+  .object({ modelId: OpenAiCompatibleModelIdSchema, ...openAiCompatibleModelCapabilitiesShape })
+  .superRefine(openAiCompatibleCapabilityIssues);
+export type OpenAiCompatibleModelConfig = z.infer<typeof OpenAiCompatibleModelConfigSchema>;
+
+export const OpenAiCompatibleDiscoveredModelSchema = z.object({
+  modelId: z.string(),
+  capabilities: OpenAiCompatibleModelCapabilitiesSchema.nullable(),
+});
+export type OpenAiCompatibleDiscoveredModel = z.infer<
+  typeof OpenAiCompatibleDiscoveredModelSchema
+>;
+
+export const ModelConfigurationUsageSchema = z.object({
+  kind: z.enum(["default", "bot", "routine", "backup", "run", "steering"]),
+  spaceId: z.string(),
+  spaceName: z.string(),
+  id: z.string(),
+  name: z.string(),
+  modelId: z.string(),
+  thinkingLevel: ThinkingLevelSchema.nullable(),
+});
+export type ModelConfigurationUsage = z.infer<typeof ModelConfigurationUsageSchema>;
+
+export const MODEL_CONFIGURATION_CONFLICT_MESSAGES = {
+  models_in_use: "Reassign models before disabling them.",
+  model_connection_in_use: "Reassign models before changing their connection.",
+  model_effort_in_use: "Change reasoning effort before changing supported levels.",
+  model_default_effort_in_use: "Change bot reasoning effort before changing the default model.",
+  model_configuration_changed: "Model settings changed; reload before saving.",
+} as const;
+
+const ModelConfigurationUsagesSchema = z.array(ModelConfigurationUsageSchema).min(1);
+
+export const ModelConfigurationConflictDataSchema = z.discriminatedUnion("reason", [
+  z.object({ reason: z.literal("models_in_use"), usages: ModelConfigurationUsagesSchema }),
+  z.object({ reason: z.literal("model_connection_in_use"), usages: ModelConfigurationUsagesSchema }),
+  z.object({ reason: z.literal("model_effort_in_use"), usages: ModelConfigurationUsagesSchema }),
+  z.object({ reason: z.literal("model_configuration_changed") }),
+]);
+export type ModelConfigurationConflictData = z.infer<typeof ModelConfigurationConflictDataSchema>;
+
+/** Hosted model ids keep their historical bounds; compatible ids are checked against membership. */
+export function hostedModelIdLengthIssue(
+  provider: string | null | undefined,
+  modelId: string | null | undefined,
+  maxLength: number,
+  ctx: CapabilityIssueContext,
+  path: (string | number)[],
+) {
+  if (!provider || provider === OPENAI_COMPATIBLE_PROVIDER_ID) return;
+  if (typeof modelId === "string" && modelId.length > maxLength) {
+    ctx.addIssue({ code: "custom", message: `Model id must be at most ${maxLength} characters`, path });
+  }
+}
+
+/**
+ * Compatible saves send the complete enabled set. Creating a connection names
+ * its initial space default; editing one carries the last-read version and
+ * never changes defaults.
+ */
+function openAiCompatibleConnectIssues(
+  value: {
+    baseUrl?: string | undefined;
+    modelId?: string | undefined;
+    thinkingLevel?: ThinkingLevel | null | undefined;
+    maxTokens?: number | null | undefined;
+    contextWindow?: number | undefined;
+    cacheCapabilities?: CacheCapabilities | undefined;
+    credentialId?: string | undefined;
+    expectedConfigurationVersion?: number | undefined;
+    models?: OpenAiCompatibleModelConfig[] | undefined;
+  },
+  ctx: CapabilityIssueContext,
+) {
+  if (!value.baseUrl?.trim()) {
+    ctx.addIssue({
+      code: "custom",
+      message: "Base URL is required for OpenAI-compatible models",
+      path: ["baseUrl"],
+    });
+  }
+  for (const field of ["maxTokens", "contextWindow", "cacheCapabilities"] as const) {
+    if (value[field] !== undefined) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Configure limits on each model",
+        path: [field],
+      });
+    }
+  }
+  const models = value.models ?? [];
+  if (models.length === 0) {
+    ctx.addIssue({ code: "custom", message: "Choose at least one model", path: ["models"] });
+  }
+  const seen = new Set<string>();
+  for (const [index, model] of models.entries()) {
+    if (seen.has(model.modelId)) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Models must be unique",
+        path: ["models", index, "modelId"],
+      });
+    }
+    seen.add(model.modelId);
+  }
+  if ((value.credentialId === undefined) !== (value.expectedConfigurationVersion === undefined)) {
+    ctx.addIssue({
+      code: "custom",
+      message: "Editing a connection requires its configuration version",
+      path: ["expectedConfigurationVersion"],
+    });
+  }
+  if (value.credentialId !== undefined) {
+    for (const field of ["modelId", "thinkingLevel"] as const) {
+      if (value[field] !== undefined) {
+        ctx.addIssue({
+          code: "custom",
+          message: "Choose the default model separately",
+          path: [field],
+        });
+      }
+    }
+    return;
+  }
+  const initial = models.find((model) => model.modelId === value.modelId);
+  if (!initial) {
+    ctx.addIssue({
+      code: "custom",
+      message: "Choose a default model from the enabled models",
+      path: ["modelId"],
+    });
+    return;
+  }
+  if (
+    value.thinkingLevel !== undefined &&
+    value.thinkingLevel !== null &&
+    !initial.thinkingLevels.includes(value.thinkingLevel)
+  ) {
+    ctx.addIssue({
+      code: "custom",
+      message: "Reasoning effort is not supported by this model",
+      path: ["thinkingLevel"],
+    });
+  }
+}
 
 export const ModelConnectInputSchema = z
   .object({
@@ -1077,11 +1370,14 @@ export const ModelConnectInputSchema = z
     baseUrl: z.string().optional(),
     label: z.string().optional(),
     modelId: z.string().optional(),
-    reasoning: z.boolean().optional(),
     thinkingLevel: ThinkingLevelSchema.nullable().optional(),
     maxTokens: z.number().int().min(1).max(MAX_MODEL_MAX_TOKENS).nullable().optional(),
-    supportsImages: z.boolean().optional(),
-    maxImagesPerPrompt: z.number().int().min(1).max(1000).nullable().optional(),
+    /** Existing OpenAI-compatible connection being edited. */
+    credentialId: Id.optional(),
+    /** `configurationVersion` last read for `credentialId`. */
+    expectedConfigurationVersion: z.number().int().nonnegative().optional(),
+    /** Complete set of enabled OpenAI-compatible models. */
+    models: z.array(OpenAiCompatibleModelConfigSchema).optional(),
   })
   .superRefine((value, ctx) => {
     if (!modelOutputLeavesInputRoom(value.maxTokens, value.contextWindow)) {
@@ -1108,21 +1404,17 @@ export const ModelConnectInputSchema = z
       }
     }
     if (value.provider === OPENAI_COMPATIBLE_PROVIDER_ID) {
-      if (!value.baseUrl?.trim()) {
-        ctx.addIssue({
-          code: "custom",
-          message: "Base URL is required for OpenAI-compatible models",
-          path: ["baseUrl"],
-        });
-      }
-      if (!value.modelId?.trim()) {
-        ctx.addIssue({
-          code: "custom",
-          message: "Model id is required for OpenAI-compatible models",
-          path: ["modelId"],
-        });
-      }
+      openAiCompatibleConnectIssues(value, ctx);
       return;
+    }
+    for (const field of ["credentialId", "expectedConfigurationVersion", "models"] as const) {
+      if (value[field] !== undefined) {
+        ctx.addIssue({
+          code: "custom",
+          message: "Only OpenAI-compatible connections configure models",
+          path: [field],
+        });
+      }
     }
     const apiKey = value.apiKey?.trim() ?? "";
     if (apiKey.length > 0 && apiKey.length < 8) {
@@ -1186,6 +1478,8 @@ export const ModelCatalogEntrySchema = z.object({
   signIn: ModelOAuthSignInModeSchema.optional(),
   reasoning: z.boolean().optional(),
   thinkingLevels: z.array(ThinkingLevelSchema).optional(),
+  /** Actor-scoped effective default effort preference; null lets the runtime choose. */
+  defaultThinkingLevel: ThinkingLevelSchema.nullable().optional(),
   /** Catalog stand-in so a provider appears before the user enters a real model id. */
   placeholder: z.boolean().optional(),
   /** Models share one pinned HTTPS models-list URL that can be probed. */
