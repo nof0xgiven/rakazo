@@ -351,29 +351,27 @@ leave Rakazo through this URL. Leave `RAKAZO_LOCAL_MODELS` blank to disable the 
 
 Each user can also connect their own OpenAI-compatible endpoint from **Connect a model** /
 **Settings → Models** on web and mobile. Choose **OpenAI-compatible**, enter the server base URL
-(for example `http://127.0.0.1:8000/v1`), the exact model id, and an optional API key.
-Public hosts and ordinary hostnames need `RAKAZO_OPENAI_COMPAT_ALLOW_PUBLIC=1` and HTTPS.
-Literal private IP, loopback, and `host.docker.internal` targets do not. If that endpoint's model
-accepts images, enable **Supports images** under **Advanced** when connecting so attachments and
-screenshot computer tools stay available. Existing connections default to disabled. For centrally
-managed endpoints, the deployment-wide fallback remains
-`RAKAZO_OPENAI_COMPATIBLE_VISION_MODELS=gpt4o-vision,llava`.
+(for example `http://127.0.0.1:8000/v1`) and an optional API key, then **Find models** and check
+the models bots may use. Nothing is enabled until it is checked; **Other model…** adds an exact
+model id when the server does not list it. Public hosts and ordinary hostnames need
+`RAKAZO_OPENAI_COMPAT_ALLOW_PUBLIC=1` and HTTPS. Literal private IP, loopback, and
+`host.docker.internal` targets do not. A saved key is reused only for the same endpoint; changing
+the URL requires entering the key again.
 
-Remote MCP servers and installed API / GraphQL connectors default to public HTTPS. The deployment
-owner can attach one on localhost, the same LAN, or a Docker network. Set
-`MCP_ALLOW_PRIVATE_ENDPOINT=true` on the API and worker to allow these for every user. Cloud
-metadata addresses stay blocked. Leave the flag unset on public installs.
+Each checked model has its own settings under **Advanced**: whether it supports thinking and which
+reasoning levels it accepts, its default reasoning effort, context window, output limit, and image
+support. Models Rakazo recognizes by exact id start with suggested settings; any other model must be
+set up and applied before saving. Only checked models appear in bot, routine and backup model
+pickers, and each bot picks one of that model's supported levels. Rakazo sends standard
+`reasoning_effort` (`minimal`, `low`, `medium`, `high`, `xhigh`, `max`, or `none` when off); the
+server owns model-specific translation. Effort is not a separate reasoning-token budget.
 
-For servers that accept standard `reasoning_effort`, enable **Supports thinking** under
-**Advanced** when connecting. The setting is saved on the connection (no env var or restart).
-Existing connections default to disabled. Reconnect former Qwen-list or deployment-local models
-via **Settings → Models** and turn it on; the old environment list is no longer read.
-
-Enabled connections default to medium thinking. Web and desktop expose **Thinking** in a bot's
-advanced settings; mobile inherits the same backend policy. Rakazo sends standard
-`reasoning_effort` (`minimal`, `low`, `medium`, `high`, or `none` when off); the server owns
-model-specific translation. Leave **Supports thinking** off when the server lacks standard effort
-support. Existing token limits still apply; effort is not a separate reasoning-token budget.
+A model cannot be unchecked, and a supported level cannot be removed, while a bot, routine, backup,
+space default or queued run still uses it; settings list those uses so they can be reassigned
+first. Connections created before per-model settings keep exactly the models that were already
+selected, with their previous thinking and limits. For centrally managed endpoints, the
+deployment-wide image fallback remains `RAKAZO_OPENAI_COMPATIBLE_VISION_MODELS=gpt4o-vision,llava`;
+a model whose image support is turned off in its settings stays text-only.
 
 Do not commit `.env`. Never put `COMPOSIO_API_KEY`, OpenRouter keys, or provider tokens in git, logs, or chat.
 
