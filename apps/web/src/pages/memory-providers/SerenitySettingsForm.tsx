@@ -24,7 +24,7 @@ export function SerenitySettingsForm({ busy, onConnect }: MemoryProviderSettings
     }
     if (token.trim().length < 8) return;
     setEndpointError(null);
-    if (await onConnect(result.draft)) setToken("");
+    if ((await onConnect(result.draft)).ok) setToken("");
   }
 
   return (

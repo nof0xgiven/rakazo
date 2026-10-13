@@ -510,6 +510,7 @@ msgstr ""
 #: src/components/AskCard.tsx
 #: src/components/integrations/IntegrationSetup.tsx
 #: src/lib/localized-provider-hint.ts
+#: src/pages/memory-providers/HindsightSettingsForm.tsx
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
 #: src/pages/VoiceSettingsOverlay.tsx
@@ -668,6 +669,7 @@ msgstr ""
 #: src/pages/Board.tsx
 #: src/pages/PluginsOverlay.tsx
 #: src/pages/RoutineEditor.tsx
+#: src/pages/shell/bot-memory-bank.tsx
 msgid "Back"
 msgstr ""
 
@@ -686,6 +688,19 @@ msgstr "बैकअप मॉडल का क्रम"
 #: src/pages/ModelBackupsSettings.tsx
 msgid "Backup models saved."
 msgstr "बैकअप मॉडल सहेजे गए।"
+
+#: src/pages/memory-providers/HindsightSettingsForm.tsx
+#: src/pages/shell/bot-memory-bank.tsx
+msgid "Bank ID"
+msgstr "बैंक ID"
+
+#: src/pages/shell/bot-memory-bank.tsx
+msgid "Bank name"
+msgstr "बैंक का नाम"
+
+#: src/pages/MemorySettingsOverlay.tsx
+msgid "Banks stay in Hindsight Cloud. Pending memory work stops; processing already started may finish."
+msgstr "बैंक Hindsight Cloud में बने रहते हैं। लंबित मेमोरी कार्य रुक जाता है; पहले से शुरू हुई प्रोसेसिंग पूरी हो सकती है।"
 
 #: src/pages/memory-providers/SupermemorySettingsForm.tsx
 msgid "Base URL"
@@ -766,6 +781,14 @@ msgstr ""
 msgid "Bots are working"
 msgstr "बॉट काम कर रहे हैं"
 
+#: src/pages/memory-providers/HindsightSettingsForm.tsx
+msgid "Bots in this Space can use banks this key can access."
+msgstr "इस स्पेस के बॉट वे सभी बैंक इस्तेमाल कर सकते हैं जिन तक यह कुंजी पहुंच सकती है।"
+
+#: src/pages/shell/bot-memory-bank.tsx
+msgid "Bots using the same bank share memory."
+msgstr "एक ही बैंक इस्तेमाल करने वाले बॉट मेमोरी साझा करते हैं।"
+
 #: src/pages/Paywall.tsx
 msgid "Bots with their own computer and browser"
 msgstr ""
@@ -783,6 +806,7 @@ msgid "Browser"
 msgstr ""
 
 #: src/pages/KnowledgeSection.tsx
+#: src/pages/shell/bot-memory-bank.tsx
 msgid "Built-in"
 msgstr "अंतर्निहित"
 
@@ -801,6 +825,7 @@ msgstr "सर्वर तक नहीं पहुंचा जा सका�
 #: src/pages/Onboarding.tsx
 #: src/pages/PluginsOverlay.tsx
 #: src/pages/shell/bot-credentials.tsx
+#: src/pages/shell/bot-memory-bank.tsx
 #: src/pages/shell/dialogs.tsx
 msgid "Cancel"
 msgstr "रद्द करें"
@@ -833,6 +858,14 @@ msgstr "रद्द किया गया"
 #: src/pages/Artifacts.tsx
 msgid "Card view"
 msgstr ""
+
+#: src/pages/shell/bot-memory-bank.tsx
+msgid "Change"
+msgstr "बदलें"
+
+#: src/pages/shell/bot-memory-bank.tsx
+msgid "Change memory bank?"
+msgstr "मेमोरी बैंक बदलें?"
 
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Change password"
@@ -900,6 +933,7 @@ msgstr ""
 #: src/components/DesktopUpdates.tsx
 #: src/components/SoftwareUpdateSection.tsx
 #: src/pages/HostComputerPrompt.tsx
+#: src/pages/shell/bot-memory-bank.tsx
 msgid "Checking…"
 msgstr ""
 
@@ -1031,6 +1065,10 @@ msgstr "आवाज़ सेटिंग्स बंद करें"
 msgid "Cloud"
 msgstr "क्लाउड"
 
+#: src/pages/shell/dialogs.tsx
+msgid "Cloud memories stay in Hindsight Cloud."
+msgstr "क्लाउड मेमोरी Hindsight Cloud में बनी रहती है।"
+
 #: src/components/AskCard.tsx
 msgid "Code"
 msgstr "कोड"
@@ -1139,6 +1177,7 @@ msgid "Confirm the URL is reachable from this browser session, then test again."
 msgstr "पुष्टि करें कि यह URL इस ब्राउज़र सत्र से पहुँच योग्य है, फिर फिर से परीक्षण करें।"
 
 #: src/components/integrations/IntegrationSetup.tsx
+#: src/pages/memory-providers/HindsightSettingsForm.tsx
 #: src/pages/memory-providers/SerenitySettingsForm.tsx
 #: src/pages/memory-providers/SupermemorySettingsForm.tsx
 #: src/pages/VoiceSettingsOverlay.tsx
@@ -1208,6 +1247,7 @@ msgstr "कनेक्टेड। इसके टूल आपके अग�
 
 #: src/components/integrations/IntegrationSetup.tsx
 #: src/pages/McpServersOverlay.tsx
+#: src/pages/memory-providers/HindsightSettingsForm.tsx
 #: src/pages/memory-providers/SerenitySettingsForm.tsx
 #: src/pages/memory-providers/SupermemorySettingsForm.tsx
 #: src/pages/shell/message-cards.tsx
@@ -1456,6 +1496,10 @@ msgstr ""
 msgid "Could not load backup models"
 msgstr "बैकअप मॉडल लोड नहीं हो सके।"
 
+#: src/pages/shell/bot-memory-bank.tsx
+msgid "Could not load banks."
+msgstr "बैंक लोड नहीं हो सके।"
+
 #: src/pages/BillingSettingsPanel.tsx
 msgid "Could not load billing"
 msgstr ""
@@ -1480,6 +1524,11 @@ msgstr "इंटीग्रेशन लोड नहीं हो सके"
 #: src/pages/McpServersOverlay.tsx
 msgid "Could not load MCP servers"
 msgstr "MCP सर्वर लोड नहीं हो सके"
+
+#: src/pages/MemorySettingsOverlay.tsx
+#: src/pages/shell/bot-panel.tsx
+msgid "Could not load memory settings."
+msgstr "मेमोरी सेटिंग्स लोड नहीं हो सकीं।"
 
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "Could not load model settings"
@@ -1718,6 +1767,7 @@ msgstr ""
 
 #: src/pages/Board.tsx
 #: src/pages/Shell.tsx
+#: src/pages/shell/bot-memory-bank.tsx
 #: src/pages/shell/bot-panel.tsx
 #: src/pages/shell/dialogs.tsx
 msgid "Create"
@@ -1731,6 +1781,10 @@ msgstr "एक सेक्शन बनाएं और {0} को उसमे
 #: src/pages/Auth.tsx
 msgid "Create account"
 msgstr "खाता बनाएं"
+
+#: src/pages/shell/bot-memory-bank.tsx
+msgid "Create bank"
+msgstr "बैंक बनाएं"
 
 #: src/pages/GroupPanel.tsx
 msgid "Create group"
@@ -1766,7 +1820,12 @@ msgstr "अपना Rakazo बनाएं"
 msgid "Created"
 msgstr ""
 
+#: src/pages/shell/bot-memory-bank.tsx
+msgid "Creates a bank in Hindsight Cloud."
+msgstr "Hindsight Cloud में एक बैंक बनाता है।"
+
 #: src/pages/GroupPanel.tsx
+#: src/pages/shell/bot-memory-bank.tsx
 #: src/pages/shell/bot-panel.tsx
 #: src/pages/shell/dialogs.tsx
 msgid "Creating…"
@@ -1895,6 +1954,10 @@ msgstr "खाता हटाएँ"
 #: src/pages/GroupPanel.tsx
 msgid "Delete group"
 msgstr "समूह डिलीट करें"
+
+#: src/pages/shell/dialogs.tsx
+msgid "Delete local notes"
+msgstr "लोकल नोट्स हटाएं"
 
 #: src/pages/shell/dialogs.tsx
 msgid "Delete memories too"
@@ -2161,6 +2224,10 @@ msgstr "हर सप्ताह"
 msgid "Executor token"
 msgstr "Executor टोकन"
 
+#: src/pages/shell/bot-memory-bank.tsx
+msgid "Existing memories stay in their current bank; processing already started may finish."
+msgstr "मौजूदा मेमोरी अपने मौजूदा बैंक में बनी रहती है; पहले से शुरू हुई प्रोसेसिंग पूरी हो सकती है।"
+
 #: src/pages/shell/message-cards.tsx
 msgid "Expand"
 msgstr "विस्तृत करें"
@@ -2396,6 +2463,30 @@ msgstr "उच्च"
 msgid "High"
 msgstr ""
 
+#: src/lib/memory-provider.ts
+msgid "Hindsight Cloud is out of credits."
+msgstr "Hindsight Cloud के क्रेडिट खत्म हो गए हैं।"
+
+#: src/lib/memory-provider.ts
+msgid "Hindsight Cloud is temporarily unavailable."
+msgstr "Hindsight Cloud अस्थायी रूप से उपलब्ध नहीं है।"
+
+#: src/lib/memory-provider.ts
+msgid "Hindsight Cloud rejected this API key."
+msgstr "Hindsight Cloud ने यह API कुंजी अस्वीकार कर दी।"
+
+#: src/lib/memory-provider.ts
+msgid "Hindsight Cloud rejected this request."
+msgstr "Hindsight Cloud ने यह अनुरोध अस्वीकार कर दिया।"
+
+#: src/lib/memory-provider.ts
+msgid "Hindsight Cloud reported a conflict."
+msgstr "Hindsight Cloud ने एक टकराव की सूचना दी।"
+
+#: src/lib/memory-provider.ts
+msgid "Hindsight Cloud returned an unexpected response."
+msgstr "Hindsight Cloud ने अनपेक्षित जवाब दिया।"
+
 #: src/pages/RoutineSchedule.tsx
 msgid "hour"
 msgstr "घंटा"
@@ -2518,6 +2609,10 @@ msgid "just now"
 msgstr "अभी-अभी"
 
 #: src/pages/shell/dialogs.tsx
+msgid "Keep local notes"
+msgstr "लोकल नोट्स रखें"
+
+#: src/pages/shell/dialogs.tsx
 msgid "Keep memories"
 msgstr "मेमोरी रखें"
 
@@ -2578,6 +2673,7 @@ msgid "Load earlier messages"
 msgstr "पुराने संदेश लोड करें"
 
 #: src/pages/Artifacts.tsx
+#: src/pages/shell/bot-memory-bank.tsx
 msgid "Load more"
 msgstr ""
 
@@ -2598,6 +2694,7 @@ msgid "Loading integrations…"
 msgstr "इंटीग्रेशन लोड हो रहे हैं…"
 
 #: src/pages/MemorySettingsOverlay.tsx
+#: src/pages/shell/bot-panel.tsx
 msgid "Loading memory settings…"
 msgstr "मेमोरी सेटिंग्स लोड हो रही हैं…"
 
@@ -2630,6 +2727,7 @@ msgstr "आवाज़ प्रोवाइडर्स लोड हो र�
 #: src/pages/PeerMessagesOverlay.tsx
 #: src/pages/RoutineRunHistory.tsx
 #: src/pages/Shell.tsx
+#: src/pages/shell/bot-memory-bank.tsx
 msgid "Loading…"
 msgstr "लोड हो रहा है…"
 
@@ -2762,12 +2860,21 @@ msgstr "सदस्य ({GROUP_MEMBER_MIN}–{GROUP_MEMBER_MAX} चुनें
 #: src/pages/KnowledgeSection.tsx
 #: src/pages/MemorySettingsOverlay.tsx
 #: src/pages/SettingsOverlay.tsx
+#: src/pages/shell/bot-memory-bank.tsx
 msgid "Memory"
 msgstr "मेमोरी"
+
+#: src/pages/shell/bot-memory-bank.tsx
+msgid "Memory bank"
+msgstr "मेमोरी बैंक"
 
 #: src/pages/shell/bot-panel.tsx
 msgid "Memory scope"
 msgstr "मेमोरी स्कोप"
+
+#: src/lib/memory-provider.ts
+msgid "Memory settings changed. Review and try again."
+msgstr "मेमोरी सेटिंग्स बदल गई हैं। जांचें और फिर से कोशिश करें।"
 
 #: src/pages/Shell.tsx
 msgid "Mentions"
@@ -3020,6 +3127,14 @@ msgstr "कोई प्रमाणीकरण नहीं"
 #: src/pages/PluginsOverlay.tsx
 msgid "No authentication"
 msgstr "कोई प्रमाणीकरण नहीं"
+
+#: src/pages/shell/bot-memory-bank.tsx
+msgid "No banks found."
+msgstr "कोई बैंक नहीं मिला।"
+
+#: src/pages/shell/bot-memory-bank.tsx
+msgid "No banks yet."
+msgstr "अभी तक कोई बैंक नहीं है।"
 
 #: src/components/computer/TerminalApp.tsx
 msgid "No bot activity yet."
@@ -3724,7 +3839,10 @@ msgstr ""
 
 #: src/components/AccountAccess.tsx
 #: src/pages/Auth.tsx
+#: src/pages/MemorySettingsOverlay.tsx
 #: src/pages/ModelBackupsSettings.tsx
+#: src/pages/shell/bot-memory-bank.tsx
+#: src/pages/shell/bot-panel.tsx
 msgid "Retry"
 msgstr "फिर कोशिश करें"
 
@@ -3877,6 +3995,7 @@ msgstr ""
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/RoutineEditor.tsx
 #: src/pages/shell/bot-credentials.tsx
+#: src/pages/shell/bot-memory-bank.tsx
 #: src/pages/shell/dialogs.tsx
 msgid "Saving…"
 msgstr "सहेजा जा रहा है…"
@@ -3905,6 +4024,10 @@ msgstr "ऐप खोजें"
 #: src/pages/Artifacts.tsx
 msgid "Search artifacts…"
 msgstr ""
+
+#: src/pages/shell/bot-memory-bank.tsx
+msgid "Search banks"
+msgstr "बैंक खोजें"
 
 #: src/pages/shell/command-palette.tsx
 msgid "Search bots and switch conversations"
@@ -4150,6 +4273,7 @@ msgstr ""
 
 #: src/App.tsx
 #: src/lib/user-error.ts
+#: src/pages/shell/bot-memory-bank.tsx
 msgid "Something went wrong. Try again."
 msgstr "कुछ गलत हो गया। फिर से कोशिश करें।"
 
@@ -4353,6 +4477,10 @@ msgstr ""
 msgid "The connection timed out."
 msgstr "कनेक्शन का समय समाप्त हो गया।"
 
+#: src/lib/memory-provider.ts
+msgid "The memory connection changed. Choose a bank again."
+msgstr "मेमोरी कनेक्शन बदल गया है। फिर से बैंक चुनें।"
+
 #: src/lib/model-connection-preflight.ts
 msgid "The provider is rate-limiting requests."
 msgstr "प्रोवाइडर अनुरोधों की दर सीमित कर रहा है।"
@@ -4375,6 +4503,10 @@ msgstr "सोच रहा है"
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "Thinking: {activeThinkingLabel}"
 msgstr ""
+
+#: src/lib/memory-provider.ts
+msgid "This bank is unavailable."
+msgstr "यह बैंक उपलब्ध नहीं है।"
 
 #: src/pages/Shell.tsx
 msgid "This bot runs on this computer, not a Linux desktop. Shell and files use your home folder."
@@ -4404,6 +4536,18 @@ msgstr ""
 #: src/components/ArtifactFileCard.tsx
 msgid "This file is not valid UTF-8 text."
 msgstr ""
+
+#: src/lib/memory-provider.ts
+msgid "This key can't create banks."
+msgstr "यह कुंजी बैंक नहीं बना सकती।"
+
+#: src/lib/memory-provider.ts
+msgid "This key can't list banks. Use bank ID."
+msgstr "यह कुंजी बैंकों की सूची नहीं देख सकती। बैंक ID इस्तेमाल करें।"
+
+#: src/lib/memory-provider.ts
+msgid "This key cannot access this bank."
+msgstr "यह कुंजी इस बैंक तक नहीं पहुंच सकती।"
 
 #: src/pages/HostComputerPrompt.tsx
 msgid "this Mac"
@@ -4649,6 +4793,14 @@ msgstr "{hostLabel} का उपयोग करें"
 #: src/pages/Onboarding.tsx
 msgid "Use a found model"
 msgstr "मिला हुआ मॉडल उपयोग करें"
+
+#: src/pages/shell/bot-memory-bank.tsx
+msgid "Use bank"
+msgstr "बैंक इस्तेमाल करें"
+
+#: src/pages/shell/bot-memory-bank.tsx
+msgid "Use bank ID"
+msgstr "बैंक ID इस्तेमाल करें"
 
 #: src/lib/model-connection-preflight.ts
 msgid "Use Connect to verify the key."

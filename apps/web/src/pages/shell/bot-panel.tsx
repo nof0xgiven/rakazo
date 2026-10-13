@@ -4,6 +4,7 @@ import type {
   Bot,
   ComputerMode,
   Me,
+  MemoryBank,
   ModelCatalogEntry,
   ModelCredential,
   ThinkingLevel,
@@ -34,11 +35,14 @@ import { X } from "lucide-react";
 import { lazy, Suspense, useEffect, useId, useRef, useState } from "react";
 import { ErrorBoundary, SectionLoadFailed } from "../../components/ErrorBoundary";
 import { botProfilePatch } from "../../lib/bot-profile-patch";
+import type { MemoryConfigState } from "../../lib/memory-provider";
+import { memoryErrorText } from "../../lib/memory-provider";
 import { thinkingLevelLabel } from "../../lib/model-catalog";
 import { rpc } from "../../lib/rpc";
 import { errorText } from "../../lib/user-error";
 import { AvatarStudioPopover } from "./avatar-studio-popover";
 import { BotCredentialsSection } from "./bot-credentials";
+import { BotMemoryBankField } from "./bot-memory-bank";
 
 const ScratchpadSection = lazy(() =>
   import("../ScratchpadSection").then((module) => ({ default: module.ScratchpadSection })),
@@ -197,9 +201,24 @@ export function CreateBotForm({
   );
 }
 
+type BankChange = { configId: string; bankId: string | null; generation: number };
+
+type SaveOverrides = {
+  name?: string;
+  title?: string;
+  description?: string;
+  color?: string;
+  notifyOnFinish?: boolean;
+  disabledBuiltinTools?: string[];
+  baseDisabledBuiltinTools?: string[];
+  memoryBank?: BankChange;
+};
+
 export function BotSettings({
   bot,
-  memoryProviderConfigured,
+  memoryConfig,
+  onMemoryConfigReload,
+  onMemoryRefresh,
   onSkillsChange,
   onSave,
   onExport,
@@ -207,7 +226,9 @@ export function BotSettings({
 }: {
   bot: Bot;
   onSkillsChange: (skills: AgentSkillCatalogEntry[]) => void;
-  memoryProviderConfigured: boolean;
+  memoryConfig: MemoryConfigState;
+  onMemoryConfigReload: () => Promise<void>;
+  onMemoryRefresh: () => Promise<void>;
   onSave: (patch: {
     name?: string;
     title?: string;
@@ -217,13 +238,14 @@ export function BotSettings({
     notifyOnFinish?: boolean;
     computerMode: ComputerMode;
     memoryScope?: "isolated" | "shared" | null;
+    memoryBank?: { configId: string; expectedBindingId: string | null; bankId: string | null };
     autoSpeak?: boolean;
     voiceId?: string | null;
     modelProvider?: string | null;
     modelId?: string | null;
     thinkingLevel?: ThinkingLevel | null;
     disabledBuiltinTools?: string[];
-  }) => Promise<void>;
+  }) => Promise<Bot>;
   onExport: () => Promise<void>;
   onClear: () => void;
 }) {
@@ -242,6 +264,13 @@ export function BotSettings({
   const [notifyOnFinish, setNotifyOnFinish] = useState(bot.notifyOnFinish ?? true);
   const [computerMode, setComputerMode] = useState(bot.computerMode);
   const [memoryScope, setMemoryScope] = useState(bot.memoryScope);
+  const [committedBank, setCommittedBank] = useState(bot.memoryBank);
+  const committedBankRef = useRef(bot.memoryBank);
+  const serverBankRef = useRef(bot.memoryBank);
+  const [pendingBank, setPendingBank] = useState<{ bank: MemoryBank | null } | null>(null);
+  const pendingBankSavesRef = useRef(0);
+  const bankGenerationRef = useRef(0);
+  const [bankGeneration, setBankGeneration] = useState(0);
   const [autoSpeak, setAutoSpeak] = useState(bot.autoSpeak);
   const [voiceId, setVoiceId] = useState(bot.voiceId ?? "");
   const [voices, setVoices] = useState<VoiceInfo[]>([]);
@@ -264,6 +293,14 @@ export function BotSettings({
     persistedDisabledToolsRef.current = next;
     if (pendingSavesRef.current === 0) setDisabledBuiltinTools(next);
   }, [bot.disabledBuiltinTools]);
+  useEffect(() => {
+    const next = bot.memoryBank;
+    if (serverBankRef.current === next) return;
+    serverBankRef.current = next;
+    if (pendingSavesRef.current > 0) return;
+    committedBankRef.current = next;
+    setCommittedBank(next);
+  }, [bot.memoryBank]);
   const [toolNameDraft, setToolNameDraft] = useState("");
   const [credentials, setCredentials] = useState<ModelCredential[]>([]);
   const [catalog, setCatalog] = useState<ModelCatalogEntry[]>([]);
@@ -272,17 +309,9 @@ export function BotSettings({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const saveQueueRef = useRef(Promise.resolve());
-  const executeSaveRef = useRef<
-    (patchOverrides?: {
-      name?: string;
-      title?: string;
-      description?: string;
-      color?: string;
-      notifyOnFinish?: boolean;
-      disabledBuiltinTools?: string[];
-      baseDisabledBuiltinTools?: string[];
-    }) => Promise<void>
-  >(async () => undefined);
+  const executeSaveRef = useRef<(patchOverrides?: SaveOverrides) => Promise<void>>(
+    async () => undefined,
+  );
   useEffect(() => {
     void rpc.voice
       .voices({})
@@ -332,15 +361,12 @@ export function BotSettings({
   ).filter((level) => level !== "off");
   const defaultThinkingLevel = effectiveCredential?.thinkingLevel ?? "medium";
 
-  async function executeSave(patchOverrides?: {
-    name?: string;
-    title?: string;
-    description?: string;
-    color?: string;
-    notifyOnFinish?: boolean;
-    disabledBuiltinTools?: string[];
-    baseDisabledBuiltinTools?: string[];
-  }) {
+  async function executeSave(patchOverrides?: SaveOverrides) {
+    const bankChange = patchOverrides?.memoryBank;
+    if (bankChange && bankChange.generation !== bankGenerationRef.current) {
+      finishSave(bankChange);
+      return;
+    }
     const selected = selectedModel;
     const nextName = (patchOverrides?.name !== undefined ? patchOverrides.name : name).trim();
     const nextTitle = (patchOverrides?.title !== undefined ? patchOverrides.title : title).trim();
@@ -401,10 +427,21 @@ export function BotSettings({
                 ),
               ];
         // Unrelated saves omit the list, preserving changes from other sessions.
-        await onSave({
+        const updated = await onSave({
           ...patch,
+          ...(bankChange
+            ? {
+                memoryBank: {
+                  configId: bankChange.configId,
+                  expectedBindingId: committedBankRef.current?.id ?? null,
+                  bankId: bankChange.bankId,
+                },
+              }
+            : {}),
           ...(nextTools !== undefined ? { disabledBuiltinTools: nextTools } : {}),
         });
+        committedBankRef.current = updated.memoryBank;
+        setCommittedBank(updated.memoryBank);
         if (nextTools === undefined) break;
         if (
           serverTools !== serverDisabledToolsRef.current &&
@@ -416,16 +453,44 @@ export function BotSettings({
       }
       savedDescriptionRef.current = nextDescription;
     } catch (err) {
-      setError(errorText(err, t`Could not save`));
-    } finally {
-      pendingSavesRef.current -= 1;
-      if (pendingSavesRef.current === 0) {
-        setDisabledBuiltinTools([...persistedDisabledToolsRef.current]);
+      if (bankChange) {
+        bankGenerationRef.current += 1;
+        setBankGeneration(bankGenerationRef.current);
+        setError(memoryErrorText(err, t`Could not save`));
+        void onMemoryRefresh().catch(() => undefined);
+      } else {
+        setError(errorText(err, t`Could not save`));
       }
-      setSaving(pendingSavesRef.current > 0);
+    } finally {
+      finishSave(bankChange);
     }
   }
   executeSaveRef.current = executeSave;
+
+  function finishSave(bankChange: BankChange | undefined) {
+    pendingSavesRef.current -= 1;
+    if (bankChange) {
+      pendingBankSavesRef.current -= 1;
+      if (pendingBankSavesRef.current === 0) setPendingBank(null);
+    }
+    if (pendingSavesRef.current === 0) {
+      setDisabledBuiltinTools([...persistedDisabledToolsRef.current]);
+    }
+    setSaving(pendingSavesRef.current > 0);
+  }
+
+  function chooseBank(configId: string, bank: MemoryBank | null) {
+    setError(null);
+    pendingBankSavesRef.current += 1;
+    setPendingBank({ bank });
+    void enqueueSave({
+      memoryBank: {
+        configId,
+        bankId: bank?.bankId ?? null,
+        generation: bankGenerationRef.current,
+      },
+    });
+  }
 
   function disableBuiltinTool(raw: string) {
     const name = raw.trim();
@@ -442,14 +507,7 @@ export function BotSettings({
     void enqueueSave({ disabledBuiltinTools: next });
   }
 
-  function enqueueSave(patchOverrides?: {
-    name?: string;
-    title?: string;
-    description?: string;
-    color?: string;
-    notifyOnFinish?: boolean;
-    disabledBuiltinTools?: string[];
-  }) {
+  function enqueueSave(patchOverrides?: Omit<SaveOverrides, "baseDisabledBuiltinTools">) {
     // Serialize full-object auto-saves so an older in-flight request cannot
     // finish after a newer one and clobber fields. Always call through a ref so
     // queued work reads the latest field values, not a stale render closure.
@@ -617,7 +675,35 @@ export function BotSettings({
             </NativeSelect>
           </label>
         ) : null}
-        {memoryProviderConfigured ? (
+        {memoryConfig.status === "loading" ? (
+          <p className="mt-4 text-[13px] text-muted-foreground">
+            <Trans>Loading memory settings…</Trans>
+          </p>
+        ) : memoryConfig.status === "error" ? (
+          <div className="mt-4 flex items-center justify-between gap-3 text-[13px] text-muted-foreground">
+            <Trans>Could not load memory settings.</Trans>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => void onMemoryConfigReload()}
+            >
+              <Trans>Retry</Trans>
+            </Button>
+          </div>
+        ) : memoryConfig.config?.capabilities.banks ? (
+          <BotMemoryBankField
+            botId={bot.id}
+            configId={memoryConfig.config.id}
+            committed={committedBank}
+            current={pendingBank ? pendingBank.bank : committedBank}
+            saving={pendingBank !== null}
+            resetKey={bankGeneration}
+            onOpen={() => void onMemoryConfigReload()}
+            onConflict={() => void onMemoryRefresh().catch(() => undefined)}
+            onChoose={chooseBank}
+          />
+        ) : memoryConfig.config ? (
           <div className="mt-4 text-[14px] text-muted-foreground">
             <Trans>Memory scope</Trans>
             <div className="mt-2 flex gap-2">

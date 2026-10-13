@@ -510,6 +510,7 @@ msgstr "API가 다시 작동하지만 업데이트가 완료되지 않았습니�
 #: src/components/AskCard.tsx
 #: src/components/integrations/IntegrationSetup.tsx
 #: src/lib/localized-provider-hint.ts
+#: src/pages/memory-providers/HindsightSettingsForm.tsx
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
 #: src/pages/VoiceSettingsOverlay.tsx
@@ -668,6 +669,7 @@ msgstr "아바타"
 #: src/pages/Board.tsx
 #: src/pages/PluginsOverlay.tsx
 #: src/pages/RoutineEditor.tsx
+#: src/pages/shell/bot-memory-bank.tsx
 msgid "Back"
 msgstr "뒤로"
 
@@ -686,6 +688,19 @@ msgstr "백업 모델 순서"
 #: src/pages/ModelBackupsSettings.tsx
 msgid "Backup models saved."
 msgstr "백업 모델을 저장했습니다."
+
+#: src/pages/memory-providers/HindsightSettingsForm.tsx
+#: src/pages/shell/bot-memory-bank.tsx
+msgid "Bank ID"
+msgstr "뱅크 ID"
+
+#: src/pages/shell/bot-memory-bank.tsx
+msgid "Bank name"
+msgstr "뱅크 이름"
+
+#: src/pages/MemorySettingsOverlay.tsx
+msgid "Banks stay in Hindsight Cloud. Pending memory work stops; processing already started may finish."
+msgstr "뱅크는 Hindsight Cloud에 그대로 남습니다. 대기 중인 기억 작업은 중단되며, 이미 시작된 처리는 완료될 수 있습니다."
 
 #: src/pages/memory-providers/SupermemorySettingsForm.tsx
 msgid "Base URL"
@@ -766,6 +781,14 @@ msgstr ""
 msgid "Bots are working"
 msgstr "봇 작업 중"
 
+#: src/pages/memory-providers/HindsightSettingsForm.tsx
+msgid "Bots in this Space can use banks this key can access."
+msgstr "이 스페이스의 봇은 이 키로 접근할 수 있는 모든 뱅크를 사용할 수 있습니다."
+
+#: src/pages/shell/bot-memory-bank.tsx
+msgid "Bots using the same bank share memory."
+msgstr "같은 뱅크를 사용하는 봇은 기억을 공유합니다."
+
 #: src/pages/Paywall.tsx
 msgid "Bots with their own computer and browser"
 msgstr ""
@@ -783,6 +806,7 @@ msgid "Browser"
 msgstr ""
 
 #: src/pages/KnowledgeSection.tsx
+#: src/pages/shell/bot-memory-bank.tsx
 msgid "Built-in"
 msgstr "기본 제공"
 
@@ -801,6 +825,7 @@ msgstr "서버에 연결할 수 없습니다."
 #: src/pages/Onboarding.tsx
 #: src/pages/PluginsOverlay.tsx
 #: src/pages/shell/bot-credentials.tsx
+#: src/pages/shell/bot-memory-bank.tsx
 #: src/pages/shell/dialogs.tsx
 msgid "Cancel"
 msgstr "취소"
@@ -833,6 +858,14 @@ msgstr "취소됨"
 #: src/pages/Artifacts.tsx
 msgid "Card view"
 msgstr ""
+
+#: src/pages/shell/bot-memory-bank.tsx
+msgid "Change"
+msgstr "변경"
+
+#: src/pages/shell/bot-memory-bank.tsx
+msgid "Change memory bank?"
+msgstr "기억 뱅크를 변경할까요?"
 
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Change password"
@@ -900,6 +933,7 @@ msgstr ""
 #: src/components/DesktopUpdates.tsx
 #: src/components/SoftwareUpdateSection.tsx
 #: src/pages/HostComputerPrompt.tsx
+#: src/pages/shell/bot-memory-bank.tsx
 msgid "Checking…"
 msgstr "확인 중…"
 
@@ -1031,6 +1065,10 @@ msgstr "음성 설정 닫기"
 msgid "Cloud"
 msgstr "클라우드"
 
+#: src/pages/shell/dialogs.tsx
+msgid "Cloud memories stay in Hindsight Cloud."
+msgstr "클라우드 기억은 Hindsight Cloud에 그대로 남습니다."
+
 #: src/components/AskCard.tsx
 msgid "Code"
 msgstr "코드"
@@ -1139,6 +1177,7 @@ msgid "Confirm the URL is reachable from this browser session, then test again."
 msgstr "이 브라우저 세션에서 URL에 연결할 수 있는지 확인한 뒤 다시 테스트하세요."
 
 #: src/components/integrations/IntegrationSetup.tsx
+#: src/pages/memory-providers/HindsightSettingsForm.tsx
 #: src/pages/memory-providers/SerenitySettingsForm.tsx
 #: src/pages/memory-providers/SupermemorySettingsForm.tsx
 #: src/pages/VoiceSettingsOverlay.tsx
@@ -1208,6 +1247,7 @@ msgstr "연결되었습니다. 다음 메시지부터 이 도구를 사용할 �
 
 #: src/components/integrations/IntegrationSetup.tsx
 #: src/pages/McpServersOverlay.tsx
+#: src/pages/memory-providers/HindsightSettingsForm.tsx
 #: src/pages/memory-providers/SerenitySettingsForm.tsx
 #: src/pages/memory-providers/SupermemorySettingsForm.tsx
 #: src/pages/shell/message-cards.tsx
@@ -1456,6 +1496,10 @@ msgstr ""
 msgid "Could not load backup models"
 msgstr "백업 모델을 불러오지 못했습니다."
 
+#: src/pages/shell/bot-memory-bank.tsx
+msgid "Could not load banks."
+msgstr "뱅크를 불러오지 못했습니다."
+
 #: src/pages/BillingSettingsPanel.tsx
 msgid "Could not load billing"
 msgstr ""
@@ -1480,6 +1524,11 @@ msgstr "연동 목록을 불러오지 못했습니다."
 #: src/pages/McpServersOverlay.tsx
 msgid "Could not load MCP servers"
 msgstr "MCP 서버 목록을 불러오지 못했습니다."
+
+#: src/pages/MemorySettingsOverlay.tsx
+#: src/pages/shell/bot-panel.tsx
+msgid "Could not load memory settings."
+msgstr "기억 설정을 불러오지 못했습니다."
 
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "Could not load model settings"
@@ -1718,6 +1767,7 @@ msgstr "메시징 설정을 업데이트할 수 없습니다"
 
 #: src/pages/Board.tsx
 #: src/pages/Shell.tsx
+#: src/pages/shell/bot-memory-bank.tsx
 #: src/pages/shell/bot-panel.tsx
 #: src/pages/shell/dialogs.tsx
 msgid "Create"
@@ -1731,6 +1781,10 @@ msgstr "새 섹션을 만들고 {0}을 옮깁니다."
 #: src/pages/Auth.tsx
 msgid "Create account"
 msgstr "계정 만들기"
+
+#: src/pages/shell/bot-memory-bank.tsx
+msgid "Create bank"
+msgstr "뱅크 만들기"
 
 #: src/pages/GroupPanel.tsx
 msgid "Create group"
@@ -1766,7 +1820,12 @@ msgstr "Rakazo 계정 만들기"
 msgid "Created"
 msgstr "생성됨"
 
+#: src/pages/shell/bot-memory-bank.tsx
+msgid "Creates a bank in Hindsight Cloud."
+msgstr "Hindsight Cloud에 뱅크를 만듭니다."
+
 #: src/pages/GroupPanel.tsx
+#: src/pages/shell/bot-memory-bank.tsx
 #: src/pages/shell/bot-panel.tsx
 #: src/pages/shell/dialogs.tsx
 msgid "Creating…"
@@ -1895,6 +1954,10 @@ msgstr "계정 삭제"
 #: src/pages/GroupPanel.tsx
 msgid "Delete group"
 msgstr "그룹 삭제"
+
+#: src/pages/shell/dialogs.tsx
+msgid "Delete local notes"
+msgstr "로컬 메모 삭제"
 
 #: src/pages/shell/dialogs.tsx
 msgid "Delete memories too"
@@ -2161,6 +2224,10 @@ msgstr "매주"
 msgid "Executor token"
 msgstr "Executor 토큰"
 
+#: src/pages/shell/bot-memory-bank.tsx
+msgid "Existing memories stay in their current bank; processing already started may finish."
+msgstr "기존 기억은 현재 뱅크에 그대로 남으며, 이미 시작된 처리는 완료될 수 있습니다."
+
 #: src/pages/shell/message-cards.tsx
 msgid "Expand"
 msgstr "펼치기"
@@ -2396,6 +2463,30 @@ msgstr "높음"
 msgid "High"
 msgstr ""
 
+#: src/lib/memory-provider.ts
+msgid "Hindsight Cloud is out of credits."
+msgstr "Hindsight Cloud 크레딧이 모두 소진되었습니다."
+
+#: src/lib/memory-provider.ts
+msgid "Hindsight Cloud is temporarily unavailable."
+msgstr "Hindsight Cloud를 일시적으로 사용할 수 없습니다."
+
+#: src/lib/memory-provider.ts
+msgid "Hindsight Cloud rejected this API key."
+msgstr "Hindsight Cloud가 이 API 키를 거부했습니다."
+
+#: src/lib/memory-provider.ts
+msgid "Hindsight Cloud rejected this request."
+msgstr "Hindsight Cloud가 이 요청을 거부했습니다."
+
+#: src/lib/memory-provider.ts
+msgid "Hindsight Cloud reported a conflict."
+msgstr "Hindsight Cloud에서 충돌이 보고되었습니다."
+
+#: src/lib/memory-provider.ts
+msgid "Hindsight Cloud returned an unexpected response."
+msgstr "Hindsight Cloud에서 예기치 않은 응답을 반환했습니다."
+
 #: src/pages/RoutineSchedule.tsx
 msgid "hour"
 msgstr "시간"
@@ -2518,6 +2609,10 @@ msgid "just now"
 msgstr "방금"
 
 #: src/pages/shell/dialogs.tsx
+msgid "Keep local notes"
+msgstr "로컬 메모 유지"
+
+#: src/pages/shell/dialogs.tsx
 msgid "Keep memories"
 msgstr "기억은 유지"
 
@@ -2578,6 +2673,7 @@ msgid "Load earlier messages"
 msgstr "이전 메시지 불러오기"
 
 #: src/pages/Artifacts.tsx
+#: src/pages/shell/bot-memory-bank.tsx
 msgid "Load more"
 msgstr ""
 
@@ -2598,6 +2694,7 @@ msgid "Loading integrations…"
 msgstr "연동 목록을 불러오는 중…"
 
 #: src/pages/MemorySettingsOverlay.tsx
+#: src/pages/shell/bot-panel.tsx
 msgid "Loading memory settings…"
 msgstr "기억 설정을 불러오는 중…"
 
@@ -2630,6 +2727,7 @@ msgstr "음성 서비스를 불러오는 중…"
 #: src/pages/PeerMessagesOverlay.tsx
 #: src/pages/RoutineRunHistory.tsx
 #: src/pages/Shell.tsx
+#: src/pages/shell/bot-memory-bank.tsx
 msgid "Loading…"
 msgstr "불러오는 중…"
 
@@ -2762,12 +2860,21 @@ msgstr "참여 Bot ({GROUP_MEMBER_MIN}~{GROUP_MEMBER_MAX}개 선택)"
 #: src/pages/KnowledgeSection.tsx
 #: src/pages/MemorySettingsOverlay.tsx
 #: src/pages/SettingsOverlay.tsx
+#: src/pages/shell/bot-memory-bank.tsx
 msgid "Memory"
 msgstr "기억"
+
+#: src/pages/shell/bot-memory-bank.tsx
+msgid "Memory bank"
+msgstr "기억 뱅크"
 
 #: src/pages/shell/bot-panel.tsx
 msgid "Memory scope"
 msgstr "기억 사용 범위"
+
+#: src/lib/memory-provider.ts
+msgid "Memory settings changed. Review and try again."
+msgstr "기억 설정이 변경되었습니다. 확인한 후 다시 시도하세요."
 
 #: src/pages/Shell.tsx
 msgid "Mentions"
@@ -3020,6 +3127,14 @@ msgstr "인증 없음"
 #: src/pages/PluginsOverlay.tsx
 msgid "No authentication"
 msgstr "인증 없음"
+
+#: src/pages/shell/bot-memory-bank.tsx
+msgid "No banks found."
+msgstr "뱅크를 찾을 수 없습니다."
+
+#: src/pages/shell/bot-memory-bank.tsx
+msgid "No banks yet."
+msgstr "아직 뱅크가 없습니다."
 
 #: src/components/computer/TerminalApp.tsx
 msgid "No bot activity yet."
@@ -3724,7 +3839,10 @@ msgstr ""
 
 #: src/components/AccountAccess.tsx
 #: src/pages/Auth.tsx
+#: src/pages/MemorySettingsOverlay.tsx
 #: src/pages/ModelBackupsSettings.tsx
+#: src/pages/shell/bot-memory-bank.tsx
+#: src/pages/shell/bot-panel.tsx
 msgid "Retry"
 msgstr "다시 시도"
 
@@ -3877,6 +3995,7 @@ msgstr ""
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/RoutineEditor.tsx
 #: src/pages/shell/bot-credentials.tsx
+#: src/pages/shell/bot-memory-bank.tsx
 #: src/pages/shell/dialogs.tsx
 msgid "Saving…"
 msgstr "저장 중…"
@@ -3905,6 +4024,10 @@ msgstr "앱 검색"
 #: src/pages/Artifacts.tsx
 msgid "Search artifacts…"
 msgstr ""
+
+#: src/pages/shell/bot-memory-bank.tsx
+msgid "Search banks"
+msgstr "뱅크 검색"
 
 #: src/pages/shell/command-palette.tsx
 msgid "Search bots and switch conversations"
@@ -4150,6 +4273,7 @@ msgstr "소프트웨어 업데이트"
 
 #: src/App.tsx
 #: src/lib/user-error.ts
+#: src/pages/shell/bot-memory-bank.tsx
 msgid "Something went wrong. Try again."
 msgstr "문제가 발생했습니다. 다시 시도하세요."
 
@@ -4353,6 +4477,10 @@ msgstr "API가 다시 작동하지 않습니다. 이 페이지를 새로 고침�
 msgid "The connection timed out."
 msgstr "연결 시간이 초과되었습니다."
 
+#: src/lib/memory-provider.ts
+msgid "The memory connection changed. Choose a bank again."
+msgstr "기억 연결이 변경되었습니다. 뱅크를 다시 선택하세요."
+
 #: src/lib/model-connection-preflight.ts
 msgid "The provider is rate-limiting requests."
 msgstr "서비스가 요청 속도를 제한하고 있습니다."
@@ -4375,6 +4503,10 @@ msgstr "생각 깊이"
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "Thinking: {activeThinkingLabel}"
 msgstr ""
+
+#: src/lib/memory-provider.ts
+msgid "This bank is unavailable."
+msgstr "이 뱅크를 사용할 수 없습니다."
 
 #: src/pages/Shell.tsx
 msgid "This bot runs on this computer, not a Linux desktop. Shell and files use your home folder."
@@ -4404,6 +4536,18 @@ msgstr ""
 #: src/components/ArtifactFileCard.tsx
 msgid "This file is not valid UTF-8 text."
 msgstr ""
+
+#: src/lib/memory-provider.ts
+msgid "This key can't create banks."
+msgstr "이 키로는 뱅크를 만들 수 없습니다."
+
+#: src/lib/memory-provider.ts
+msgid "This key can't list banks. Use bank ID."
+msgstr "이 키로는 뱅크 목록을 볼 수 없습니다. 뱅크 ID를 사용하세요."
+
+#: src/lib/memory-provider.ts
+msgid "This key cannot access this bank."
+msgstr "이 키로는 이 뱅크에 접근할 수 없습니다."
 
 #: src/pages/HostComputerPrompt.tsx
 msgid "this Mac"
@@ -4649,6 +4793,14 @@ msgstr "{hostLabel} 사용"
 #: src/pages/Onboarding.tsx
 msgid "Use a found model"
 msgstr "찾은 모델 중에서 선택"
+
+#: src/pages/shell/bot-memory-bank.tsx
+msgid "Use bank"
+msgstr "뱅크 사용"
+
+#: src/pages/shell/bot-memory-bank.tsx
+msgid "Use bank ID"
+msgstr "뱅크 ID 사용"
 
 #: src/lib/model-connection-preflight.ts
 msgid "Use Connect to verify the key."

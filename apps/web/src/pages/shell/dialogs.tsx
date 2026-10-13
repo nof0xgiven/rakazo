@@ -343,10 +343,12 @@ export function RenameBotSectionDialog({
 
 export function ClearConversationDialog({
   bot,
+  cloudMemory = false,
   onCancel,
   onConfirm,
 }: {
   bot: Pick<Bot, "name">;
+  cloudMemory?: boolean;
   onCancel: () => void;
   onConfirm: () => Promise<void>;
 }) {
@@ -366,6 +368,12 @@ export function ClearConversationDialog({
               This permanently removes every message and stops current work. The chat remains
               available.
             </Trans>
+            {cloudMemory ? (
+              <>
+                {" "}
+                <Trans>Cloud memories stay in Hindsight Cloud.</Trans>
+              </>
+            ) : null}
           </AlertDialogDescription>
         </AlertDialogHeader>
         {error ? <p className="text-[13.5px] text-destructive">{error}</p> : null}
@@ -403,6 +411,7 @@ export function DeleteBotDialog({
   onConfirm: (deleteMemories: boolean) => Promise<void>;
 }) {
   const { t } = useLingui();
+  const cloudMemory = bot.memoryBank !== null;
   const [deleting, setDeleting] = useState(false);
   const [deleteMemories, setDeleteMemories] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -419,6 +428,12 @@ export function DeleteBotDialog({
               Its conversation, files, and routines will be permanently deleted. Bots it created
               stay in your list.
             </Trans>
+            {cloudMemory ? (
+              <>
+                {" "}
+                <Trans>Cloud memories stay in Hindsight Cloud.</Trans>
+              </>
+            ) : null}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <fieldset className="space-y-2">
@@ -434,7 +449,7 @@ export function DeleteBotDialog({
             />
             <span>
               <span className="block text-[14px] text-foreground">
-                <Trans>Keep memories</Trans>
+                {cloudMemory ? <Trans>Keep local notes</Trans> : <Trans>Keep memories</Trans>}
               </span>
               <span className="mt-0.5 block text-[12.5px] text-muted-foreground">
                 <Trans>Move them to your shared memory.</Trans>
@@ -450,7 +465,11 @@ export function DeleteBotDialog({
             />
             <span>
               <span className="block text-[14px] text-foreground">
-                <Trans>Delete memories too</Trans>
+                {cloudMemory ? (
+                  <Trans>Delete local notes</Trans>
+                ) : (
+                  <Trans>Delete memories too</Trans>
+                )}
               </span>
               <span className="mt-0.5 block text-[12.5px] text-muted-foreground">
                 <Trans>This cannot be undone.</Trans>

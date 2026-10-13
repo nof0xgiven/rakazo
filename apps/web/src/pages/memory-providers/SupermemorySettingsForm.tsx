@@ -21,7 +21,7 @@ export function SupermemorySettingsForm({ busy, onConnect }: MemoryProviderSetti
       },
       credentials: { apiKey: apiKey.trim() },
     };
-    if (await onConnect(draft)) setApiKey("");
+    if ((await onConnect(draft)).ok) setApiKey("");
   }
 
   return (

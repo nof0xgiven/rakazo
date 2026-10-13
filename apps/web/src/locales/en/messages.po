@@ -510,6 +510,7 @@ msgstr "API is back, but the update did not finish. Check the host logs."
 #: src/components/AskCard.tsx
 #: src/components/integrations/IntegrationSetup.tsx
 #: src/lib/localized-provider-hint.ts
+#: src/pages/memory-providers/HindsightSettingsForm.tsx
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
 #: src/pages/VoiceSettingsOverlay.tsx
@@ -668,6 +669,7 @@ msgstr "Avatars"
 #: src/pages/Board.tsx
 #: src/pages/PluginsOverlay.tsx
 #: src/pages/RoutineEditor.tsx
+#: src/pages/shell/bot-memory-bank.tsx
 msgid "Back"
 msgstr "Back"
 
@@ -686,6 +688,19 @@ msgstr "Backup models order"
 #: src/pages/ModelBackupsSettings.tsx
 msgid "Backup models saved."
 msgstr "Backup models saved."
+
+#: src/pages/memory-providers/HindsightSettingsForm.tsx
+#: src/pages/shell/bot-memory-bank.tsx
+msgid "Bank ID"
+msgstr "Bank ID"
+
+#: src/pages/shell/bot-memory-bank.tsx
+msgid "Bank name"
+msgstr "Bank name"
+
+#: src/pages/MemorySettingsOverlay.tsx
+msgid "Banks stay in Hindsight Cloud. Pending memory work stops; processing already started may finish."
+msgstr "Banks stay in Hindsight Cloud. Pending memory work stops; processing already started may finish."
 
 #: src/pages/memory-providers/SupermemorySettingsForm.tsx
 msgid "Base URL"
@@ -766,6 +781,14 @@ msgstr "Bots"
 msgid "Bots are working"
 msgstr "Bots are working"
 
+#: src/pages/memory-providers/HindsightSettingsForm.tsx
+msgid "Bots in this Space can use banks this key can access."
+msgstr "Bots in this Space can use banks this key can access."
+
+#: src/pages/shell/bot-memory-bank.tsx
+msgid "Bots using the same bank share memory."
+msgstr "Bots using the same bank share memory."
+
 #: src/pages/Paywall.tsx
 msgid "Bots with their own computer and browser"
 msgstr "Bots with their own computer and browser"
@@ -783,6 +806,7 @@ msgid "Browser"
 msgstr "Browser"
 
 #: src/pages/KnowledgeSection.tsx
+#: src/pages/shell/bot-memory-bank.tsx
 msgid "Built-in"
 msgstr "Built-in"
 
@@ -801,6 +825,7 @@ msgstr "Can't reach the server."
 #: src/pages/Onboarding.tsx
 #: src/pages/PluginsOverlay.tsx
 #: src/pages/shell/bot-credentials.tsx
+#: src/pages/shell/bot-memory-bank.tsx
 #: src/pages/shell/dialogs.tsx
 msgid "Cancel"
 msgstr "Cancel"
@@ -833,6 +858,14 @@ msgstr "Cancelled"
 #: src/pages/Artifacts.tsx
 msgid "Card view"
 msgstr "Card view"
+
+#: src/pages/shell/bot-memory-bank.tsx
+msgid "Change"
+msgstr "Change"
+
+#: src/pages/shell/bot-memory-bank.tsx
+msgid "Change memory bank?"
+msgstr "Change memory bank?"
 
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Change password"
@@ -900,6 +933,7 @@ msgstr "Checking computer setup…"
 #: src/components/DesktopUpdates.tsx
 #: src/components/SoftwareUpdateSection.tsx
 #: src/pages/HostComputerPrompt.tsx
+#: src/pages/shell/bot-memory-bank.tsx
 msgid "Checking…"
 msgstr "Checking…"
 
@@ -1031,6 +1065,10 @@ msgstr "Close voice settings"
 msgid "Cloud"
 msgstr "Cloud"
 
+#: src/pages/shell/dialogs.tsx
+msgid "Cloud memories stay in Hindsight Cloud."
+msgstr "Cloud memories stay in Hindsight Cloud."
+
 #: src/components/AskCard.tsx
 msgid "Code"
 msgstr "Code"
@@ -1139,6 +1177,7 @@ msgid "Confirm the URL is reachable from this browser session, then test again."
 msgstr "Confirm the URL is reachable from this browser session, then test again."
 
 #: src/components/integrations/IntegrationSetup.tsx
+#: src/pages/memory-providers/HindsightSettingsForm.tsx
 #: src/pages/memory-providers/SerenitySettingsForm.tsx
 #: src/pages/memory-providers/SupermemorySettingsForm.tsx
 #: src/pages/VoiceSettingsOverlay.tsx
@@ -1208,6 +1247,7 @@ msgstr "Connected. Its tools are available from your next message."
 
 #: src/components/integrations/IntegrationSetup.tsx
 #: src/pages/McpServersOverlay.tsx
+#: src/pages/memory-providers/HindsightSettingsForm.tsx
 #: src/pages/memory-providers/SerenitySettingsForm.tsx
 #: src/pages/memory-providers/SupermemorySettingsForm.tsx
 #: src/pages/shell/message-cards.tsx
@@ -1456,6 +1496,10 @@ msgstr "Could not load artifacts."
 msgid "Could not load backup models"
 msgstr "Could not load backup models"
 
+#: src/pages/shell/bot-memory-bank.tsx
+msgid "Could not load banks."
+msgstr "Could not load banks."
+
 #: src/pages/BillingSettingsPanel.tsx
 msgid "Could not load billing"
 msgstr "Could not load billing"
@@ -1480,6 +1524,11 @@ msgstr "Could not load integrations"
 #: src/pages/McpServersOverlay.tsx
 msgid "Could not load MCP servers"
 msgstr "Could not load MCP servers"
+
+#: src/pages/MemorySettingsOverlay.tsx
+#: src/pages/shell/bot-panel.tsx
+msgid "Could not load memory settings."
+msgstr "Could not load memory settings."
 
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "Could not load model settings"
@@ -1718,6 +1767,7 @@ msgstr "Couldn't update messaging settings"
 
 #: src/pages/Board.tsx
 #: src/pages/Shell.tsx
+#: src/pages/shell/bot-memory-bank.tsx
 #: src/pages/shell/bot-panel.tsx
 #: src/pages/shell/dialogs.tsx
 msgid "Create"
@@ -1731,6 +1781,10 @@ msgstr "Create a section and move {0} into it."
 #: src/pages/Auth.tsx
 msgid "Create account"
 msgstr "Create account"
+
+#: src/pages/shell/bot-memory-bank.tsx
+msgid "Create bank"
+msgstr "Create bank"
 
 #: src/pages/GroupPanel.tsx
 msgid "Create group"
@@ -1766,7 +1820,12 @@ msgstr "Create your Rakazo"
 msgid "Created"
 msgstr "Created"
 
+#: src/pages/shell/bot-memory-bank.tsx
+msgid "Creates a bank in Hindsight Cloud."
+msgstr "Creates a bank in Hindsight Cloud."
+
 #: src/pages/GroupPanel.tsx
+#: src/pages/shell/bot-memory-bank.tsx
 #: src/pages/shell/bot-panel.tsx
 #: src/pages/shell/dialogs.tsx
 msgid "Creating…"
@@ -1895,6 +1954,10 @@ msgstr "Delete account"
 #: src/pages/GroupPanel.tsx
 msgid "Delete group"
 msgstr "Delete group"
+
+#: src/pages/shell/dialogs.tsx
+msgid "Delete local notes"
+msgstr "Delete local notes"
 
 #: src/pages/shell/dialogs.tsx
 msgid "Delete memories too"
@@ -2161,6 +2224,10 @@ msgstr "Every week"
 msgid "Executor token"
 msgstr "Executor token"
 
+#: src/pages/shell/bot-memory-bank.tsx
+msgid "Existing memories stay in their current bank; processing already started may finish."
+msgstr "Existing memories stay in their current bank; processing already started may finish."
+
 #: src/pages/shell/message-cards.tsx
 msgid "Expand"
 msgstr "Expand"
@@ -2396,6 +2463,30 @@ msgstr "High"
 msgid "High"
 msgstr "High"
 
+#: src/lib/memory-provider.ts
+msgid "Hindsight Cloud is out of credits."
+msgstr "Hindsight Cloud is out of credits."
+
+#: src/lib/memory-provider.ts
+msgid "Hindsight Cloud is temporarily unavailable."
+msgstr "Hindsight Cloud is temporarily unavailable."
+
+#: src/lib/memory-provider.ts
+msgid "Hindsight Cloud rejected this API key."
+msgstr "Hindsight Cloud rejected this API key."
+
+#: src/lib/memory-provider.ts
+msgid "Hindsight Cloud rejected this request."
+msgstr "Hindsight Cloud rejected this request."
+
+#: src/lib/memory-provider.ts
+msgid "Hindsight Cloud reported a conflict."
+msgstr "Hindsight Cloud reported a conflict."
+
+#: src/lib/memory-provider.ts
+msgid "Hindsight Cloud returned an unexpected response."
+msgstr "Hindsight Cloud returned an unexpected response."
+
 #: src/pages/RoutineSchedule.tsx
 msgid "hour"
 msgstr "hour"
@@ -2518,6 +2609,10 @@ msgid "just now"
 msgstr "just now"
 
 #: src/pages/shell/dialogs.tsx
+msgid "Keep local notes"
+msgstr "Keep local notes"
+
+#: src/pages/shell/dialogs.tsx
 msgid "Keep memories"
 msgstr "Keep memories"
 
@@ -2578,6 +2673,7 @@ msgid "Load earlier messages"
 msgstr "Load earlier messages"
 
 #: src/pages/Artifacts.tsx
+#: src/pages/shell/bot-memory-bank.tsx
 msgid "Load more"
 msgstr "Load more"
 
@@ -2598,6 +2694,7 @@ msgid "Loading integrations…"
 msgstr "Loading integrations…"
 
 #: src/pages/MemorySettingsOverlay.tsx
+#: src/pages/shell/bot-panel.tsx
 msgid "Loading memory settings…"
 msgstr "Loading memory settings…"
 
@@ -2630,6 +2727,7 @@ msgstr "Loading voice providers…"
 #: src/pages/PeerMessagesOverlay.tsx
 #: src/pages/RoutineRunHistory.tsx
 #: src/pages/Shell.tsx
+#: src/pages/shell/bot-memory-bank.tsx
 msgid "Loading…"
 msgstr "Loading…"
 
@@ -2762,12 +2860,21 @@ msgstr "Members (pick {GROUP_MEMBER_MIN}–{GROUP_MEMBER_MAX})"
 #: src/pages/KnowledgeSection.tsx
 #: src/pages/MemorySettingsOverlay.tsx
 #: src/pages/SettingsOverlay.tsx
+#: src/pages/shell/bot-memory-bank.tsx
 msgid "Memory"
 msgstr "Memory"
+
+#: src/pages/shell/bot-memory-bank.tsx
+msgid "Memory bank"
+msgstr "Memory bank"
 
 #: src/pages/shell/bot-panel.tsx
 msgid "Memory scope"
 msgstr "Memory scope"
+
+#: src/lib/memory-provider.ts
+msgid "Memory settings changed. Review and try again."
+msgstr "Memory settings changed. Review and try again."
 
 #: src/pages/Shell.tsx
 msgid "Mentions"
@@ -3020,6 +3127,14 @@ msgstr "no auth"
 #: src/pages/PluginsOverlay.tsx
 msgid "No authentication"
 msgstr "No authentication"
+
+#: src/pages/shell/bot-memory-bank.tsx
+msgid "No banks found."
+msgstr "No banks found."
+
+#: src/pages/shell/bot-memory-bank.tsx
+msgid "No banks yet."
+msgstr "No banks yet."
 
 #: src/components/computer/TerminalApp.tsx
 msgid "No bot activity yet."
@@ -3724,7 +3839,10 @@ msgstr "Restoring your workspace"
 
 #: src/components/AccountAccess.tsx
 #: src/pages/Auth.tsx
+#: src/pages/MemorySettingsOverlay.tsx
 #: src/pages/ModelBackupsSettings.tsx
+#: src/pages/shell/bot-memory-bank.tsx
+#: src/pages/shell/bot-panel.tsx
 msgid "Retry"
 msgstr "Retry"
 
@@ -3877,6 +3995,7 @@ msgstr "Saving..."
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/RoutineEditor.tsx
 #: src/pages/shell/bot-credentials.tsx
+#: src/pages/shell/bot-memory-bank.tsx
 #: src/pages/shell/dialogs.tsx
 msgid "Saving…"
 msgstr "Saving…"
@@ -3905,6 +4024,10 @@ msgstr "Search apps"
 #: src/pages/Artifacts.tsx
 msgid "Search artifacts…"
 msgstr "Search artifacts…"
+
+#: src/pages/shell/bot-memory-bank.tsx
+msgid "Search banks"
+msgstr "Search banks"
 
 #: src/pages/shell/command-palette.tsx
 msgid "Search bots and switch conversations"
@@ -4150,6 +4273,7 @@ msgstr "Software update"
 
 #: src/App.tsx
 #: src/lib/user-error.ts
+#: src/pages/shell/bot-memory-bank.tsx
 msgid "Something went wrong. Try again."
 msgstr "Something went wrong. Try again."
 
@@ -4353,6 +4477,10 @@ msgstr "The API did not come back. Refresh this page."
 msgid "The connection timed out."
 msgstr "The connection timed out."
 
+#: src/lib/memory-provider.ts
+msgid "The memory connection changed. Choose a bank again."
+msgstr "The memory connection changed. Choose a bank again."
+
 #: src/lib/model-connection-preflight.ts
 msgid "The provider is rate-limiting requests."
 msgstr "The provider is rate-limiting requests."
@@ -4375,6 +4503,10 @@ msgstr "Thinking"
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "Thinking: {activeThinkingLabel}"
 msgstr "Thinking: {activeThinkingLabel}"
+
+#: src/lib/memory-provider.ts
+msgid "This bank is unavailable."
+msgstr "This bank is unavailable."
 
 #: src/pages/Shell.tsx
 msgid "This bot runs on this computer, not a Linux desktop. Shell and files use your home folder."
@@ -4404,6 +4536,18 @@ msgstr "This deletes all {0} versions of this artifact. This can't be undone."
 #: src/components/ArtifactFileCard.tsx
 msgid "This file is not valid UTF-8 text."
 msgstr "This file is not valid UTF-8 text."
+
+#: src/lib/memory-provider.ts
+msgid "This key can't create banks."
+msgstr "This key can't create banks."
+
+#: src/lib/memory-provider.ts
+msgid "This key can't list banks. Use bank ID."
+msgstr "This key can't list banks. Use bank ID."
+
+#: src/lib/memory-provider.ts
+msgid "This key cannot access this bank."
+msgstr "This key cannot access this bank."
 
 #: src/pages/HostComputerPrompt.tsx
 msgid "this Mac"
@@ -4649,6 +4793,14 @@ msgstr "Use {hostLabel}"
 #: src/pages/Onboarding.tsx
 msgid "Use a found model"
 msgstr "Use a found model"
+
+#: src/pages/shell/bot-memory-bank.tsx
+msgid "Use bank"
+msgstr "Use bank"
+
+#: src/pages/shell/bot-memory-bank.tsx
+msgid "Use bank ID"
+msgstr "Use bank ID"
 
 #: src/lib/model-connection-preflight.ts
 msgid "Use Connect to verify the key."
