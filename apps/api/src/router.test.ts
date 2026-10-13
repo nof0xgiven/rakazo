@@ -3615,7 +3615,7 @@ describe("routines.update", () => {
         ...routine,
         ...ownModel,
         [column]: "concurrent-choice",
-      });
+      } as never);
       expect((await call({ thinkingLevel: "low" })).response.status).toBe(409);
       expect(update).not.toHaveBeenCalled();
       expect(enqueue).not.toHaveBeenCalled();
@@ -3624,7 +3624,7 @@ describe("routines.update", () => {
 
   it("returns not found if a model update races with a parent archive", async () => {
     const { call, findFirst } = fixture(false, true, ownModel);
-    findFirst.mockResolvedValueOnce({ ...routine, ...ownModel });
+    findFirst.mockResolvedValueOnce({ ...routine, ...ownModel } as never);
     expect((await call({ thinkingLevel: "low" })).response.status).toBe(404);
   });
 

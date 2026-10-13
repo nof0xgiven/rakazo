@@ -12,7 +12,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { createApp } from "../../../apps/api/src/app.ts";
 import { sessionCookieHeader } from "./index.js";
 
-type App = { request: (input: string, init?: RequestInit) => Promise<Response> };
+type App = { request: (input: string, init?: RequestInit) => Response | Promise<Response> };
 type AppHandles = Awaited<ReturnType<typeof createApp>>;
 type CatalogItem = { connectorId: string; slug: string; name: string; connected: boolean };
 type ConnectionRow = {
@@ -197,14 +197,18 @@ describeWithDatabase("Native Linear connection RPCs", () => {
       connectionId: connection.id,
       displayName: "Renamed",
     });
-    expect(renamed).toMatchObject({ displayName: "Renamed", capabilities: ["automation_triggers"] });
+    expect(renamed).toMatchObject({
+      displayName: "Renamed",
+      capabilities: ["automation_triggers"],
+    });
 
-    expect(
-      await rpc(app, cookie, "connections/revoke", { connectionId: connection.id }),
-    ).toEqual({ ok: true });
-    expect(
-      await rpc(app, cookie, "linear/status", { connectionId: connection.id }),
-    ).toMatchObject({ connectionStatus: "revoked", monitoring: "idle" });
+    expect(await rpc(app, cookie, "connections/revoke", { connectionId: connection.id })).toEqual({
+      ok: true,
+    });
+    expect(await rpc(app, cookie, "linear/status", { connectionId: connection.id })).toMatchObject({
+      connectionStatus: "revoked",
+      monitoring: "idle",
+    });
     const revokedSecrets = await handles.prisma.connection.findUniqueOrThrow({
       where: { id: connection.id },
     });
