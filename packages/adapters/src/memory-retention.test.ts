@@ -407,6 +407,22 @@ describe("createMemoryRetainHandler", () => {
     });
   });
 
+  it("keeps the polling floor when resolution is unavailable for accepted work", async () => {
+    resolve.mockResolvedValue({
+      kind: "unavailable",
+      capabilities: { recall: true, save: true, purgeHistory: false, sharedScope: false },
+      code: "unavailable",
+      error: "",
+    });
+    expect(await run(processing(120))).toMatchObject({
+      kind: "reschedule",
+      attemptCount: 1,
+      nextAttemptAt: later(600_000),
+    });
+    expect(await run(row())).toMatchObject({ attemptCount: 1, nextAttemptAt: later(5_000) });
+    expect(operationStatus).not.toHaveBeenCalled();
+  });
+
   it("maps terminal receipts and treats an unknown receipt as failure", async () => {
     const cases: Array<[SemanticMemoryOperationStatus, string, string | null]> = [
       ["completed", "completed", null],

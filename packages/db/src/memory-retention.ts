@@ -11,7 +11,6 @@ export const MEMORY_RETENTION_OCCURRED_SKEW_MS = 5 * 60_000;
 export const MEMORY_RETENTION_CONVERSATION_SOURCE_KEY = "conversation";
 
 export type MemoryRetentionDenial = "binding_retired" | "forbidden";
-export type MemoryRetentionState = "pending" | "processing" | "completed" | "failed";
 
 type RetentionClient = PrismaClient | Prisma.TransactionClient;
 

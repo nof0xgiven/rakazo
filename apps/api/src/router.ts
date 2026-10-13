@@ -1644,7 +1644,8 @@ export function createRouter(deps: RouterDeps) {
         const memoryBank = input.memoryBank;
         if (memoryBank) {
           const config = await findSpaceMemoryConfig(deps.prisma, context.actor.spaceId);
-          if (config && !memoryProviderCapabilities(config.provider).banks) {
+          if (!config || config.id !== memoryBank.configId) throw new ORPCError("CONFLICT");
+          if (!memoryProviderCapabilities(config.provider).banks) {
             throw new ORPCError("BAD_REQUEST", {
               message: "This memory connection does not use banks.",
             });

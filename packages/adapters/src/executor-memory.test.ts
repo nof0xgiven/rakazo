@@ -72,6 +72,8 @@ function fixture(
     historyCompactedUpToSeq?: number | null;
     resolvedSecrets?: string[];
     calls?: ToolCall[];
+    sourceIsSteering?: boolean;
+    claimSourceSteering?: boolean;
   } = {},
 ) {
   const runId = "run-1";
@@ -148,6 +150,9 @@ function fixture(
         async ({ where }: { where: { id: string } }) =>
           messages.find((message) => message.id === where.id) ?? null,
       ),
+    },
+    steeringMessage: {
+      findUnique: vi.fn(async () => (options.sourceIsSteering ? { id: "steering-0" } : null)),
     },
     task: {
       findUniqueOrThrow: vi.fn(async () => ({ id: "task-1", prompt: "Synthetic task prompt" })),
@@ -237,6 +242,9 @@ function fixture(
   const results: unknown[] = [];
   const runtimeRun = vi.fn(async function* (request: AgentRunRequest) {
     requests.push(request);
+    if (options.claimSourceSteering) {
+      await request.claimSteering?.([]);
+    }
     for (const call of options.calls ?? []) {
       results.push(await request.executeTool!(call.name, call.args, call.executionId));
     }
@@ -259,7 +267,15 @@ function fixture(
       exportMarkdown: async function* () {},
     },
     memoryProviders,
-    events: { append: vi.fn(async () => undefined), finalizeRun },
+    events: {
+      append: vi.fn(async () => undefined),
+      finalizeRun,
+      claimSteering: vi.fn(async () =>
+        options.claimSourceSteering
+          ? [{ id: "steering-0", messageId: `message-${sourceSeq}`, text: sourceText, blocks: [] }]
+          : [],
+      ),
+    },
     jobs: { enqueue },
     secrets: [],
   } as unknown as Parameters<typeof createRunExecutor>[0]);
@@ -452,6 +468,31 @@ describe("executor bank memory", () => {
       }),
     );
     expect(f.enqueue).toHaveBeenCalledWith(memoryRetainJob("retention-auto"));
+  });
+
+  it("omits a continuation source the runtime never claimed in this attempt", async () => {
+    const f = fixture({ sourceIsSteering: true });
+
+    await f.run();
+
+    expect(loadRetentionSourceMessages).toHaveBeenCalledWith(expect.anything(), {
+      runId: "run-1",
+      threadId: "thread-1",
+      messageIds: [],
+    });
+    expect(f.finalizeRun.mock.calls[0]?.[0]).not.toHaveProperty("memoryRetention");
+  });
+
+  it("includes a continuation source delivered through this attempt's steering claim", async () => {
+    const f = fixture({ sourceIsSteering: true, claimSourceSteering: true });
+
+    await f.run();
+
+    expect(loadRetentionSourceMessages).toHaveBeenCalledWith(expect.anything(), {
+      runId: "run-1",
+      threadId: "thread-1",
+      messageIds: ["message-0"],
+    });
   });
 
   it("fails memory tools safely without contacting the provider when the pin is unavailable", async () => {

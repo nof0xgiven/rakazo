@@ -1,6 +1,11 @@
 import type { MemoryBankPage, SemanticMemoryOperationStatus } from "@rakazo/adapter-kit";
 import type { MemoryBank, MemoryFailureCode } from "@rakazo/contracts";
-import { MemoryBankIdSchema, MemoryBankNameSchema, MemoryBankQuerySchema } from "@rakazo/contracts";
+import {
+  hasControlCharacter,
+  MemoryBankIdSchema,
+  MemoryBankNameSchema,
+  MemoryBankQuerySchema,
+} from "@rakazo/contracts";
 import { redactSecrets } from "@rakazo/core";
 import { z } from "zod";
 import { readBodyCapped, withAbort } from "./web-ssrf.js";
@@ -86,14 +91,6 @@ function cropUtf8(text: string, maxBytes: number): string {
   return text.slice(0, read);
 }
 
-function hasControlCharacter(value: string): boolean {
-  for (let index = 0; index < value.length; index += 1) {
-    const code = value.charCodeAt(index);
-    if (code <= 0x1f || code === 0x7f) return true;
-  }
-  return false;
-}
-
 export function validateHindsightBankId(value: unknown): string | null {
   const parsed = MemoryBankIdSchema.safeParse(value);
   if (!parsed.success) return null;
@@ -136,7 +133,11 @@ const BankListResponse = z.object({
   ),
   total: z.number().int().nonnegative(),
 });
-const BankProfileResponse = z.object({ bank_id: z.string(), name: DisplayText });
+const BankProfileResponse = z.object({
+  bank_id: z.string(),
+  name: DisplayText,
+  display_alias: DisplayText,
+});
 const RecallResponse = z.object({
   results: z.array(
     z.object({
@@ -224,15 +225,18 @@ export function credentialForms(apiKey: string): string[] {
   return [...new Set(forms)].sort((a, b) => b.length - a.length);
 }
 
-function stripForms(value: unknown, forms: string[]): unknown {
-  if (typeof value === "string") return redactSecrets(value, forms);
-  if (Array.isArray(value)) return value.map((item) => stripForms(item, forms));
-  if (typeof value === "object" && value !== null) {
-    return Object.fromEntries(
-      Object.entries(value).map(([key, nested]) => [key, stripForms(nested, forms)]),
-    );
+const FREE_TEXT_FIELDS: Record<string, true> = { content: true, query: true, q: true };
+
+function structuralValues(value: unknown, key = ""): string[] {
+  if (FREE_TEXT_FIELDS[key]) return [];
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return [String(value)];
   }
-  return value;
+  if (Array.isArray(value)) return value.flatMap((item) => structuralValues(item));
+  if (typeof value === "object" && value !== null) {
+    return Object.entries(value).flatMap(([nested, item]) => structuralValues(item, nested));
+  }
+  return [];
 }
 
 export class HindsightClient {
@@ -362,7 +366,7 @@ export class HindsightClient {
     const body = {
       items: [
         {
-          content: item.content,
+          content: this.strip(item.content),
           document_id: item.documentId,
           timestamp: item.timestamp,
           context: item.context,
@@ -405,8 +409,14 @@ export class HindsightClient {
     );
   }
 
-  private strip<T>(value: T): T {
-    return stripForms(value, this.forms) as T;
+  private strip(value: string): string {
+    return redactSecrets(value, this.forms);
+  }
+
+  private hasCredential(values: Array<string | undefined>): boolean {
+    return values.some(
+      (value) => value !== undefined && this.forms.some((form) => value.includes(form)),
+    );
   }
 
   private cleanText(value: string | null | undefined): string | undefined {
@@ -416,14 +426,19 @@ export class HindsightClient {
   private parseProfile(json: unknown, bankId: string): MemoryBank | undefined {
     const parsed = BankProfileResponse.safeParse(json);
     if (!parsed.success || parsed.data.bank_id !== bankId) return undefined;
-    return { bankId, name: displayName(bankId, this.cleanText(parsed.data.name)) };
+    return {
+      bankId,
+      name: displayName(
+        bankId,
+        this.cleanText(parsed.data.name),
+        this.cleanText(parsed.data.display_alias),
+      ),
+    };
   }
 
   private attribution(value: string | null | undefined): string | undefined {
     if (!value || utf8Length(value) > HINDSIGHT_METADATA_VALUE_MAX_BYTES) return undefined;
-    if (hasControlCharacter(value) || this.forms.some((form) => value.includes(form))) {
-      return undefined;
-    }
+    if (hasControlCharacter(value) || this.hasCredential([value])) return undefined;
     return value;
   }
 
@@ -434,9 +449,18 @@ export class HindsightClient {
     notFound?: T,
   ): Promise<HindsightResult<T>> {
     if (this.apiKey === null) return failure("unauthorized");
+    if (
+      this.hasCredential([
+        ...spec.path.split("/").map((segment) => decodeURIComponent(segment)),
+        ...[...(spec.query ?? [])].flatMap(([name, value]) => structuralValues(value, name)),
+        ...structuralValues(spec.body),
+      ])
+    ) {
+      return failure("invalid_request");
+    }
     let body: string | undefined;
     if (spec.body !== undefined) {
-      body = JSON.stringify(this.strip(spec.body));
+      body = JSON.stringify(spec.body);
       if (utf8Length(body) > HINDSIGHT_MAX_REQUEST_BYTES) return failure("invalid_request");
     }
     const url = new URL(spec.path, HINDSIGHT_CLOUD_ORIGIN);

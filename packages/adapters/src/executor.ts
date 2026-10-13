@@ -7255,12 +7255,22 @@ export function createRunExecutor(deps: ExecutorDeps) {
             assistantText
           ) {
             try {
+              const initialSourceMessageId =
+                run.sourceMessageId &&
+                !(await deps.prisma.steeringMessage.findUnique({
+                  where: {
+                    messageId_botId: { messageId: run.sourceMessageId, botId: run.botId },
+                  },
+                  select: { id: true },
+                }))
+                  ? run.sourceMessageId
+                  : null;
               const sources = await loadRetentionSourceMessages(deps.prisma, {
                 runId,
                 threadId: thread.id,
                 messageIds: [
                   ...new Set(
-                    [run.sourceMessageId, ...deliveredSteeringMessageIds].filter(
+                    [initialSourceMessageId, ...deliveredSteeringMessageIds].filter(
                       (id): id is string => Boolean(id),
                     ),
                   ),

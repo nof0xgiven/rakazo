@@ -454,6 +454,22 @@ describe("HindsightClient bank profile and creation", () => {
     });
   });
 
+  it("names a profile by name, then display alias, then bank ID", async () => {
+    const responses = [
+      json({ bank_id: "a", name: " Alpha ", display_alias: "alias-a" }),
+      json({ bank_id: "a", name: null, display_alias: "Alpha alias" }),
+      json({ bank_id: "a", name: "  " }),
+    ];
+    const { client } = harness(() => responses.shift() ?? json({}));
+
+    const names: Array<string | null> = [];
+    for (let index = 0; index < 3; index += 1) {
+      const result = await client.getBankProfile("a");
+      names.push(result.ok ? result.value.name : null);
+    }
+    expect(names).toEqual(["Alpha", "Alpha alias", "a"]);
+  });
+
   it("creates with a PUT carrying only the trimmed name", async () => {
     const { client, calls } = harness(() => json({ bank_id: "rakazo-abc", name: "Team notes" }));
 
@@ -684,22 +700,72 @@ describe("HindsightClient operation status", () => {
 });
 
 describe("HindsightClient key handling", () => {
-  it("strips the client's own key and encoded forms from outgoing payloads", async () => {
+  it("strips the client's own key and encoded forms from free-text fields", async () => {
     const { client, calls } = harness((call) =>
       call.url.pathname.endsWith("/recall") ? json({ results: [] }) : json(acceptedRetain),
     );
     const leaked = KEY_FORMS.join(" | ");
 
     await client.recall("bank-1", { query: `remember ${leaked}` });
-    await client.retain(
-      "bank-1",
-      retainInput({ content: `note ${leaked}`, metadata: { source_key: KEY } }),
-    );
+    await client.retain("bank-1", retainInput({ content: `note ${leaked}` }));
     expect(calls).toHaveLength(2);
     for (const call of calls) {
       expectNoKey(call.body);
       expect(String(call.init.body)).toContain("[redacted]");
     }
+    expect(calls[1]?.body).toMatchObject({
+      items: [{ document_id: "rakazo-doc-1", metadata: RETAIN_INPUT.metadata }],
+      operation_id: OPERATION_ID,
+    });
+  });
+
+  it.each([
+    ["metadata", { metadata: { source_key: KEY } }],
+    ["document ID", { documentId: `rakazo-${encodeURIComponent(KEY)}` }],
+  ])("rejects a credential form in retain %s without a request", async (_label, override) => {
+    const { client, calls } = harness(() => json(acceptedRetain));
+
+    await expect(client.retain("bank-1", retainInput(override))).resolves.toEqual({
+      ok: false,
+      code: "invalid_request",
+    });
+    expect(calls).toHaveLength(0);
+  });
+
+  it("rejects a credential form in a bank ID, bank name or operation ID without a request", async () => {
+    const { client, calls } = harness(() => json({}));
+    const credentialId = `bank-${encodeURIComponent(KEY)}`;
+    const failed = { ok: false, code: "invalid_request" };
+
+    await expect(client.getBankProfile(credentialId)).resolves.toEqual(failed);
+    await expect(client.putBank("bank-1", { name: `Notes ${KEY}` })).resolves.toEqual(failed);
+    await expect(client.putBank(credentialId, { name: "Notes" })).resolves.toEqual(failed);
+    await expect(
+      client.getBankProfile(`bank-${Buffer.from(KEY).toString("base64")}`),
+    ).resolves.toEqual(failed);
+    await expect(client.recall(credentialId, { query: "tea" })).resolves.toEqual(failed);
+    await expect(client.retain(credentialId, retainInput())).resolves.toEqual(failed);
+    await expect(client.operationStatus("bank-1", `op-${encodeURIComponent(KEY)}`)).resolves.toEqual(
+      failed,
+    );
+    expect(calls).toHaveLength(0);
+  });
+
+  it("rejects a key that matches a fixed protocol value without a request", async () => {
+    const calls: string[] = [];
+    const fetch: typeof globalThis.fetch = async (input) => {
+      calls.push(String(input));
+      return json(acceptedRetain);
+    };
+    const failed = { ok: false, code: "invalid_request" };
+
+    await expect(
+      new HindsightClient({ apiKey: "replace", fetch }).retain("bank-1", retainInput()),
+    ).resolves.toEqual(failed);
+    await expect(
+      new HindsightClient({ apiKey: "low", fetch }).recall("bank-1", { query: "tea" }),
+    ).resolves.toEqual(failed);
+    expect(calls).toHaveLength(0);
   });
 
   it("keeps the key out of returned facts, bank names and errors", async () => {

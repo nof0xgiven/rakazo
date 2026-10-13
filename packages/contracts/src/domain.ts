@@ -66,7 +66,7 @@ export const MEMORY_FAILURE_MESSAGES: Record<MemoryConnectionFailureReason, stri
   bank_create_forbidden: "This key can't create banks.",
 };
 
-function hasControlCharacter(value: string): boolean {
+export function hasControlCharacter(value: string): boolean {
   for (let index = 0; index < value.length; index += 1) {
     const code = value.charCodeAt(index);
     if (code <= 0x1f || code === 0x7f) return true;

@@ -1179,6 +1179,7 @@ async function finalizeRunOnce(
       },
     });
     if (terminal.count !== 1) return null;
+    await tx.bot.update({ where: { id: input.botId }, data: { updatedAt: now } });
 
     const attempt = await tx.attempt.updateMany({
       where: {
@@ -1268,7 +1269,6 @@ async function finalizeRunOnce(
       });
     }
     const continuationRunId = await createPendingSteeringRun(tx, input);
-    await tx.bot.update({ where: { id: input.botId }, data: { updatedAt: now } });
     return {
       threadId: lastEvent.threadId,
       seq: lastEvent.seq,

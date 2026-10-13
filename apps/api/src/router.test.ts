@@ -3197,6 +3197,7 @@ describe("bot model auth on save", () => {
       isDefault: boolean;
       modelId: string;
     } | null;
+    memoryConfig?: { id: string; provider: string };
   }) {
     const bot = storedBot(options.modelId);
     const preferenceFindFirst = vi.fn(options.preferences);
@@ -3227,6 +3228,9 @@ describe("bot model auth on save", () => {
         update: botUpdate,
       },
       spaceModelPreference: { findFirst: preferenceFindFirst },
+      spaceMemoryConfig: {
+        findUnique: vi.fn(async () => options.memoryConfig ?? null),
+      },
       userModelCredential: { findFirst: vi.fn(async () => null) },
       secret: { findFirst: secretFindFirst },
       $transaction: vi.fn(async (fn: (client: typeof tx) => unknown) => fn(tx)),
@@ -3343,6 +3347,46 @@ describe("bot model auth on save", () => {
         where: expect.objectContaining({ id: "secret-api", userId: actor.userId, spaceId: null }),
       }),
     );
+  });
+
+  it.each([
+    ["bind", "bank-a", null],
+    ["unbind", null, "binding-1"],
+  ])(
+    "returns CONFLICT for a stale %s after the connection became legacy",
+    async (_label, bankId, expectedBindingId) => {
+      const { botUpdate, handler } = saveDeps({
+        modelId: luna,
+        preferences: () => null,
+        memoryConfig: { id: "config-legacy", provider: "supermemory" },
+      });
+
+      const response = await call(handler, "bots/update", {
+        botId: "bot-1",
+        memoryBank: { configId: "config-hindsight", expectedBindingId, bankId },
+      });
+
+      expect(response.status).toBe(409);
+      await expect(response.json()).resolves.toEqual({
+        json: expect.objectContaining({ code: "CONFLICT" }),
+      });
+      expect(botUpdate).not.toHaveBeenCalled();
+    },
+  );
+
+  it("rejects a current legacy connection as not using banks", async () => {
+    const { handler } = saveDeps({
+      modelId: luna,
+      preferences: () => null,
+      memoryConfig: { id: "config-legacy", provider: "supermemory" },
+    });
+
+    const response = await call(handler, "bots/update", {
+      botId: "bot-1",
+      memoryBank: { configId: "config-legacy", expectedBindingId: null, bankId: "bank-a" },
+    });
+
+    expect(response.status).toBe(400);
   });
 });
 

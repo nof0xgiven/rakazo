@@ -38,8 +38,6 @@ const LEASE_MS = 120_000;
 const PENDING_TTL_MS = 24 * 60 * 60_000;
 const PROCESSING_TTL_MS = 48 * 60 * 60_000;
 const TRANSIENT_DELAYS_MS = [5_000, 30_000, 120_000, 300_000, 300_000];
-const RETRY_AFTER_MIN_MS = 1_000;
-const RETRY_AFTER_MAX_MS = 300_000;
 const RECONCILE_LIMIT = 100;
 const TRANSIENT_CODES: Record<string, true> = {
   timeout: true,
@@ -211,11 +209,11 @@ export function createMemoryRetainHandler(
   ): MemoryRetentionSettlement => {
     if (code !== undefined && !TRANSIENT_CODES[code]) return finish("failed", code);
     const attemptCount = Math.min(row.attemptCount + 1, TRANSIENT_DELAYS_MS.length);
-    const retryAfter =
-      retryAfterMs === undefined
-        ? 0
-        : Math.min(Math.max(retryAfterMs, RETRY_AFTER_MIN_MS), RETRY_AFTER_MAX_MS);
-    const delay = Math.max(TRANSIENT_DELAYS_MS[attemptCount - 1] ?? 0, floorMs, retryAfter);
+    const delay = Math.max(
+      TRANSIENT_DELAYS_MS[attemptCount - 1] ?? 0,
+      floorMs,
+      retryAfterMs ?? 0,
+    );
     return {
       kind: "reschedule",
       attemptCount,
@@ -274,7 +272,14 @@ export function createMemoryRetainHandler(
       },
     );
     if (resolution.kind === "native") return finish("failed", "binding_retired");
-    if (resolution.kind === "unavailable") return failure(row, resolution.code, undefined);
+    if (resolution.kind === "unavailable") {
+      return failure(
+        row,
+        resolution.code,
+        undefined,
+        pending ? 0 : pollDelayMs(clock().getTime() - (row.acceptedAt?.getTime() ?? 0)),
+      );
+    }
     const { provider } = resolution;
     const context: AdapterContext = {
       operationId: `memory.retain:${row.id}`,
@@ -370,8 +375,8 @@ export function createMemoryRetainHandler(
     }
     await deps.jobs
       .enqueue(memoryRetainJob(retentionId, settlement.nextAttemptAt))
-      .catch((error) =>
-        (deps.logger ?? getLogger()).error("memory.retain enqueue error", error, { retentionId }),
+      .catch(() =>
+        (deps.logger ?? getLogger()).error("memory.retain enqueue error", { retentionId }),
       );
   };
 }
