@@ -442,7 +442,8 @@ export function ModelConfigurationConflictNotice({
             <ul className="mt-1 space-y-0.5 text-muted-foreground">
               {group.usages.map((usage) => (
                 <li key={`${usage.kind}:${usage.id}:${usage.modelId}`}>
-                  {usageKindLabel(usage.kind)} · {usage.name} ·{" "}
+                  {usageKindLabel(usage.kind)} ·{" "}
+                  {usage.name === usage.modelId ? null : `${usage.name} · `}
                   <span className="break-all font-mono text-xs">{usage.modelId}</span>
                   {usage.thinkingLevel ? ` · ${thinkingLevelLabel(usage.thinkingLevel)}` : null}
                 </li>

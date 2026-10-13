@@ -422,7 +422,8 @@ describe("native OpenAI-compatible model setup", () => {
 
     expect(container.textContent).toContain("Reassign models before disabling them.");
     expect(container.textContent).toContain("Work");
-    expect(container.textContent).toContain("Backup model · model-a · model-a");
+    expect(container.textContent).toContain("Backup model · model-a");
+    expect(container.textContent).not.toContain("model-a · model-a");
     expect(enabled("model-a")).toBe(true);
   });
 });

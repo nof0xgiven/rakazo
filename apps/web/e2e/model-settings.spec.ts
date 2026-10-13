@@ -798,7 +798,8 @@ test("enabled endpoint models keep their own reasoning per bot, routine and back
     await expect(blockers).toBeVisible();
     await expect(blockers).toContainText(`Bot · ${bravo.name} · ${MODEL_B} · Low`);
     await expect(blockers).toContainText(`Routine · Pinned bravo · ${MODEL_B} · Medium`);
-    await expect(blockers).toContainText(`Backup model · ${MODEL_B} · ${MODEL_B}`);
+    await expect(blockers).toContainText(`Backup model · ${MODEL_B}`);
+    await expect(blockers).not.toContainText(`${MODEL_B} · ${MODEL_B}`);
     await expect(blockers).not.toContainText(apiKey);
     await expect(modelCheckbox(page, MODEL_B)).toBeChecked();
     await captureDesktopAndNarrow(page, testInfo, "openai-compatible-blockers", blockers, secrets);

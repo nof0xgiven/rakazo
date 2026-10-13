@@ -987,7 +987,9 @@ export default function Models() {
           {group.usages.map((usage) => (
             <View key={`${usage.kind}:${usage.id}:${usage.modelId}`} style={styles.blockerRow}>
               <Text style={styles.blockerLabel}>
-                {usageKindLabels[usage.kind]} · {usage.name} · {usage.modelId}
+                {usageKindLabels[usage.kind]} ·{" "}
+                {usage.name === usage.modelId ? "" : `${usage.name} · `}
+                {usage.modelId}
                 {usage.thinkingLevel ? ` · ${thinkingLevelLabel(usage.thinkingLevel, t)}` : ""}
               </Text>
               {usage.kind === "routine" ? (
