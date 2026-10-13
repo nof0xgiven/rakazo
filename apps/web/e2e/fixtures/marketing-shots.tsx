@@ -94,6 +94,7 @@ function inboxBot(): Bot {
     teamChatRules: "",
     webhookConfigured: false,
     spawnKey: null,
+    memoryBank: null,
   };
 }
 
@@ -145,9 +146,11 @@ function ModelShot() {
     >
       <BotSettings
         bot={inboxBot()}
-        memoryProviderConfigured={false}
+        memoryConfig={{ status: "ready", config: null }}
+        onMemoryConfigReload={async () => undefined}
+        onMemoryRefresh={async () => undefined}
         onSkillsChange={() => undefined}
-        onSave={async () => undefined}
+        onSave={async () => inboxBot()}
         onExport={async () => undefined}
         onClear={() => undefined}
       />

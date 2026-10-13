@@ -1,0 +1,7 @@
+appId: com.rakazo.app
+---
+# iOS 26 asks before handing a custom-scheme link to the app.
+- openLink: ${RAKAZO_LINK}
+- tapOn:
+    text: "Open"
+    optional: true

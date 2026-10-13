@@ -35,6 +35,7 @@ function handlers(): BackgroundJobHandlers {
     "messaging.deliver": vi.fn(async () => undefined),
     "cloud_agent.poll": vi.fn(async () => undefined),
     "linear.sync": vi.fn(async () => undefined),
+    "memory.retain": vi.fn(async () => undefined),
   };
 }
 

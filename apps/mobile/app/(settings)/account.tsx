@@ -520,6 +520,13 @@ export default function Account() {
             accessibilityRole="button"
             chevron="right"
             disabled={pending}
+            onPress={() => router.push("/memory")}
+            title={t("Memory")}
+          />
+          <SettingsRow
+            accessibilityRole="button"
+            chevron="right"
+            disabled={pending}
             onPress={() => router.push("/integrations")}
             title={t("Integrations")}
           />

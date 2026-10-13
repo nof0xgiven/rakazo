@@ -650,6 +650,11 @@ export const DE_MESSAGES: Record<string, string> = {
   "Saved {name} locally": "{name} lokal gespeichert",
   // lib/bot-lifecycle.ts
   "Could not delete bot": "Bot konnte nicht gelöscht werden",
+  "Delete local notes": "Lokale Notizen löschen",
+  "Its conversation, files, and routines will be permanently deleted. What should happen to its local notes?":
+    "Unterhaltung, Dateien und Routinen werden endgültig gelöscht. Was soll mit den lokalen Notizen geschehen?",
+  "Keep local notes": "Lokale Notizen behalten",
+  "Cloud memories stay in Hindsight Cloud.": "Cloud-Erinnerungen bleiben in Hindsight Cloud.",
   "Delete memories too": "Erinnerungen ebenfalls löschen",
   "Its conversation, files, and routines will be permanently deleted. What should happen to its memories?":
     "Unterhaltung, Dateien und Routinen werden endgültig gelöscht. Was soll mit den Erinnerungen geschehen?",
@@ -765,8 +770,8 @@ export const DE_MESSAGES: Record<string, string> = {
     "Nachrichten, Chatverlauf, Bot-Anweisungen, Erinnerungen, Anhänge, Screenshots und Inhalte verbundener Apps werden gesendet, um deine Bots auszuführen, einschließlich Routinen.",
   "Your recordings are sent for transcription, and text you play is sent to generate speech.":
     "Deine Aufnahmen werden zur Transkription gesendet, und Text, den du abspielst, wird zur Spracherzeugung gesendet.",
-  "Conversation summaries, memories, searches and bot and Space IDs are sent to store and recall context.":
-    "Gesprächszusammenfassungen, Erinnerungen, Suchanfragen sowie Bot- und Space-IDs werden gesendet, um Kontext zu speichern und abzurufen.",
+  "Conversation text and summaries, saved memories, searches, and bot and Space IDs are sent to store and recall context.":
+    "Gesprächstexte und -zusammenfassungen, gespeicherte Erinnerungen, Suchanfragen sowie Bot- und Space-IDs werden gesendet, um Kontext zu speichern und abzurufen.",
   "AI data sharing": "KI-Datenfreigabe",
   "Allow {name} on mobile": "{name} auf dem Handy erlauben",
   "Could not load permissions.": "Berechtigungen konnten nicht geladen werden.",
@@ -857,4 +862,50 @@ export const DE_MESSAGES: Record<string, string> = {
   Assignee: "Zuständig",
   Status: "Status",
   Labels: "Labels",
+  "Memory settings require a server update.":
+    "Für die Gedächtniseinstellungen ist ein Server-Update erforderlich.",
+  "Could not load memory settings.": "Gedächtniseinstellungen konnten nicht geladen werden.",
+  Isolated: "Isoliert",
+  Shared: "Geteilt",
+  "Inherit default": "Standard übernehmen",
+  "Default scope": "Standardbereich",
+  "Memory scope": "Gedächtnisbereich",
+  "Bank ID": "Bank-ID",
+  "Bots in this Space can use banks this key can access.":
+    "Bots in diesem Space können Banken nutzen, auf die dieser Schlüssel zugreifen kann.",
+  "Disconnect memory?": "Gedächtnis trennen?",
+  "Banks stay in Hindsight Cloud. Pending memory work stops; processing already started may finish.":
+    "Banken bleiben in Hindsight Cloud. Ausstehende Gedächtnisarbeit wird gestoppt; bereits begonnene Verarbeitung kann noch abgeschlossen werden.",
+  "Memory bank": "Gedächtnisbank",
+  "Search banks": "Banken suchen",
+  "Could not load banks.": "Banken konnten nicht geladen werden.",
+  "Load more": "Mehr laden",
+  "No banks yet.": "Noch keine Banken.",
+  "No banks found.": "Keine Banken gefunden.",
+  "Built-in": "Integriert",
+  "Bots using the same bank share memory.": "Bots mit derselben Bank teilen ihr Gedächtnis.",
+  "Use bank ID": "Bank-ID verwenden",
+  Use: "Verwenden",
+  "Create bank": "Bank erstellen",
+  "Bank name": "Bankname",
+  "Creates a bank in Hindsight Cloud.": "Erstellt eine Bank in Hindsight Cloud.",
+  "Could not create bank": "Bank konnte nicht erstellt werden",
+  "Change memory bank?": "Gedächtnisbank wechseln?",
+  "Existing memories stay in their current bank; processing already started may finish.":
+    "Bestehende Erinnerungen bleiben in ihrer aktuellen Bank; bereits begonnene Verarbeitung kann noch abgeschlossen werden.",
+  "Hindsight Cloud rejected this request.": "Hindsight Cloud hat diese Anfrage abgelehnt.",
+  "Hindsight Cloud rejected this API key.": "Hindsight Cloud hat diesen API-Schlüssel abgelehnt.",
+  "Hindsight Cloud is out of credits.": "Hindsight Cloud hat kein Guthaben mehr.",
+  "This key cannot access this bank.": "Dieser Schlüssel hat keinen Zugriff auf diese Bank.",
+  "This bank is unavailable.": "Diese Bank ist nicht verfügbar.",
+  "Hindsight Cloud reported a conflict.": "Hindsight Cloud hat einen Konflikt gemeldet.",
+  "Hindsight Cloud is temporarily unavailable.":
+    "Hindsight Cloud ist vorübergehend nicht verfügbar.",
+  "Hindsight Cloud returned an unexpected response.":
+    "Hindsight Cloud hat eine unerwartete Antwort gesendet.",
+  "The memory connection changed. Choose a bank again.":
+    "Die Gedächtnisverbindung hat sich geändert. Wähle erneut eine Bank.",
+  "This key can't list banks. Use bank ID.":
+    "Dieser Schlüssel kann keine Banken auflisten. Verwende die Bank-ID.",
+  "This key can't create banks.": "Dieser Schlüssel kann keine Banken erstellen.",
 };

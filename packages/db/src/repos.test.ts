@@ -27,6 +27,12 @@ const baseBot = {
   archivedAt: null,
   parentBotId: null,
   memoryScope: null as string | null,
+  memoryBank: null as {
+    id: string;
+    spaceMemoryConfigId: string;
+    bankId: string;
+    name: string;
+  } | null,
   createdAt: new Date("2026-08-19T00:00:00.000Z"),
   updatedAt: new Date("2026-08-19T00:00:00.000Z"),
   thread: { id: "thread-1", unread: false, messages: [], runs: [] },
@@ -95,6 +101,32 @@ describe("createRepos.listBots", () => {
   it("passes memoryScope through when set to shared", async () => {
     await expect(reposFor("shared").listBots(actor)).resolves.toEqual([
       expect.objectContaining({ memoryScope: "shared" }),
+    ]);
+  });
+
+  it("maps the bank binding to its connection identity", async () => {
+    const findMany = vi.fn(async () => [
+      {
+        ...baseBot,
+        memoryBank: {
+          id: "binding-1",
+          spaceMemoryConfigId: "config-1",
+          bankId: "bank-1",
+          name: "Research",
+        },
+      },
+    ]);
+    const repos = createRepos({
+      bot: { findMany },
+      run: { findMany: vi.fn(async () => []) },
+    } as unknown as PrismaClient);
+    await expect(repos.listBots(actor)).resolves.toEqual([
+      expect.objectContaining({
+        memoryBank: { id: "binding-1", configId: "config-1", bankId: "bank-1", name: "Research" },
+      }),
+    ]);
+    await expect(reposFor(null).listBots(actor)).resolves.toEqual([
+      expect.objectContaining({ memoryBank: null }),
     ]);
   });
 

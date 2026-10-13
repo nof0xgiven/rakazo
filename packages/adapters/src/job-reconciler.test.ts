@@ -51,14 +51,19 @@ describe("createJobReconciler", () => {
     const reconcileComputerUpdates = vi.fn(() => {
       throw new Error("queue unavailable");
     });
+    const reconcileMemoryRetention = vi.fn(async () => {
+      throw new Error("memory unavailable");
+    });
     await createJobReconciler({
       prisma,
       jobs,
       reconcileCloudAgents,
       reconcileComputerUpdates,
+      reconcileMemoryRetention,
     }).reconcileOnce();
     expect(reconcileCloudAgents).toHaveBeenCalledOnce();
     expect(reconcileComputerUpdates).toHaveBeenCalledOnce();
+    expect(reconcileMemoryRetention).toHaveBeenCalledOnce();
     expect(prisma.run.findMany).toHaveBeenCalled();
     expect(prisma.routine.findMany).toHaveBeenCalled();
     expect(prisma.computer.findMany).toHaveBeenCalled();

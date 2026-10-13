@@ -996,9 +996,13 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
       onPress: () =>
         Alert.alert(
           t("Clear conversation?"),
-          t(
-            "This removes every message and stops current work. The bot, computer, memory, and routines are kept.",
-          ),
+          currentBot?.memoryBank
+            ? `${t(
+                "This removes every message and stops current work. The bot, computer, memory, and routines are kept.",
+              )}\n\n${t("Cloud memories stay in Hindsight Cloud.")}`
+            : t(
+                "This removes every message and stops current work. The bot, computer, memory, and routines are kept.",
+              ),
           [
             { text: t("Cancel"), style: "cancel" },
             { text: t("Clear"), style: "destructive", onPress: clearConversation },
@@ -1017,7 +1021,15 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
     {
       text: t("Delete…"),
       destructive: true,
-      onPress: () => confirmDeleteBot({ id: botId ?? "", name: displayName || t("Bot") }, leaveBot),
+      onPress: () =>
+        confirmDeleteBot(
+          {
+            id: botId ?? "",
+            name: displayName || t("Bot"),
+            memoryBank: mentionBots.find((candidate) => candidate.id === botId)?.memoryBank,
+          },
+          leaveBot,
+        ),
     },
   ];
 

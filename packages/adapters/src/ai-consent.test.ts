@@ -47,4 +47,14 @@ describe("mobile AI recipient disclosure", () => {
     ).toContain("http://127.0.0.1:11434");
     expect(fetch).not.toHaveBeenCalled();
   });
+  it("names Hindsight Cloud memory with its privacy policy and fixed origin", () => {
+    const recipient = aiRecipient({
+      provider: "hindsight",
+      use: "memory",
+      baseUrl: "https://api.hindsight.vectorize.io",
+    });
+    expect(recipient?.name).toBe("Hindsight Cloud (https://api.hindsight.vectorize.io)");
+    expect(recipient?.privacyUrl).toBe("https://vectorize.io/privacy");
+    expect(recipient?.use).toBe("memory");
+  });
 });

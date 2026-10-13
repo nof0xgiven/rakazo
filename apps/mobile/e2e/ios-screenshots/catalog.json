@@ -33,5 +33,10 @@
     "id": "settings",
     "title": "Settings",
     "flow": "flows/settings.yaml"
+  },
+  {
+    "id": "memory",
+    "title": "Memory",
+    "flow": "flows/memory.yaml"
   }
 ]

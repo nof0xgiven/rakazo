@@ -80,6 +80,7 @@ const bot = {
   unread: false,
   parentBotId: null,
   memoryScope: null,
+  memoryBank: null,
   threadId: "thread-1",
   preview: "",
   status: "idle",
@@ -141,9 +142,14 @@ async function renderSettings(onSave: (patch: SavePatch) => Promise<void>, curre
     root.render(
       <BotSettings
         bot={currentBot}
-        memoryProviderConfigured={false}
+        memoryConfig={{ status: "ready", config: null }}
+        onMemoryConfigReload={async () => undefined}
+        onMemoryRefresh={async () => undefined}
         onSkillsChange={() => undefined}
-        onSave={onSave}
+        onSave={async (patch) => {
+          await onSave(patch);
+          return currentBot;
+        }}
         onExport={async () => undefined}
         onClear={() => undefined}
       />,

@@ -243,7 +243,7 @@ function fixture({
     run.status = "waiting_input";
     return true;
   });
-  const finalizeRun = vi.fn(async () => ({ continuationRunId: null }));
+  const finalizeRun = vi.fn(async () => ({ continuationRunId: null, memoryRetentionId: null }));
   const execute = vi.fn(async function* (call: ConnectorCall) {
     yield { type: "result" as const, data: { item: call.args.id } };
   });
@@ -308,7 +308,10 @@ function fixture({
       },
       commit,
     },
-    memoryProviders: { resolve: async () => null },
+    memoryProviders: {
+      select: async () => ({ kind: "native" }),
+      resolve: async () => ({ kind: "native" }),
+    },
     events: { append: vi.fn(async () => undefined), pauseRunForInput, finalizeRun },
     jobs: { enqueue: vi.fn(async () => undefined) },
     secrets,

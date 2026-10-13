@@ -19,6 +19,104 @@ export type ComputerMode = z.infer<typeof ComputerModeSchema>;
 export const MemoryScopeSchema = z.enum(["isolated", "shared"]);
 export type MemoryScopeValue = z.infer<typeof MemoryScopeSchema>;
 
+export const MEMORY_FAILURE_CODES = [
+  "invalid_request",
+  "unauthorized",
+  "quota",
+  "forbidden",
+  "not_found",
+  "conflict",
+  "rate_limited",
+  "unavailable",
+  "timeout",
+  "invalid_response",
+  "binding_retired",
+] as const;
+export type MemoryFailureCode = (typeof MEMORY_FAILURE_CODES)[number];
+
+export const MemoryConnectionFailureReasonSchema = z.enum([
+  ...MEMORY_FAILURE_CODES,
+  "bank_id_required",
+  "bank_list_forbidden",
+  "bank_create_forbidden",
+]);
+export type MemoryConnectionFailureReason = z.infer<typeof MemoryConnectionFailureReasonSchema>;
+
+export const MemoryConnectionErrorDataSchema = z.object({
+  reason: MemoryConnectionFailureReasonSchema,
+});
+export type MemoryConnectionErrorData = z.infer<typeof MemoryConnectionErrorDataSchema>;
+
+const HINDSIGHT_UNAVAILABLE_MESSAGE = "Hindsight Cloud is temporarily unavailable.";
+const BANK_LIST_FORBIDDEN_MESSAGE = "This key can't list banks. Use bank ID.";
+
+export const MEMORY_FAILURE_MESSAGES: Record<MemoryConnectionFailureReason, string> = {
+  invalid_request: "Hindsight Cloud rejected this request.",
+  unauthorized: "Hindsight Cloud rejected this API key.",
+  quota: "Hindsight Cloud is out of credits.",
+  forbidden: "This key cannot access this bank.",
+  not_found: "This bank is unavailable.",
+  conflict: "Hindsight Cloud reported a conflict.",
+  rate_limited: HINDSIGHT_UNAVAILABLE_MESSAGE,
+  unavailable: HINDSIGHT_UNAVAILABLE_MESSAGE,
+  timeout: HINDSIGHT_UNAVAILABLE_MESSAGE,
+  invalid_response: "Hindsight Cloud returned an unexpected response.",
+  binding_retired: "The memory connection changed. Choose a bank again.",
+  bank_id_required: BANK_LIST_FORBIDDEN_MESSAGE,
+  bank_list_forbidden: BANK_LIST_FORBIDDEN_MESSAGE,
+  bank_create_forbidden: "This key can't create banks.",
+};
+
+export function hasControlCharacter(value: string): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code <= 0x1f || code === 0x7f) return true;
+  }
+  return false;
+}
+
+export const MemoryBankIdSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(255)
+  .refine((value) => !hasControlCharacter(value), {
+    error: "Bank ID must not contain control characters",
+  })
+  .refine((value) => value !== "." && value !== "..", { error: "Invalid bank ID" });
+export const MemoryBankNameSchema = z.string().trim().min(1).max(80);
+export const MemoryBankQuerySchema = z.string().trim().max(200);
+
+export const MemoryBankSchema = z.object({ bankId: z.string(), name: z.string() });
+export type MemoryBank = z.infer<typeof MemoryBankSchema>;
+
+export const BotMemoryBankSchema = MemoryBankSchema.extend({ id: Id, configId: Id });
+export type BotMemoryBank = z.infer<typeof BotMemoryBankSchema>;
+
+export const MemorySelectionSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("native") }),
+  z.object({
+    kind: z.literal("legacy"),
+    configId: z.string(),
+    provider: z.string(),
+    scope: MemoryScopeSchema,
+  }),
+  z.object({
+    kind: z.literal("bank"),
+    configId: z.string(),
+    provider: z.string(),
+    bindingId: z.string(),
+    bankId: z.string(),
+  }),
+]);
+export type MemorySelection = z.infer<typeof MemorySelectionSchema>;
+
+export const MemoryProviderCapabilitiesSchema = z.object({
+  banks: z.boolean(),
+  sharedScope: z.boolean(),
+});
+export type MemoryProviderCapabilities = z.infer<typeof MemoryProviderCapabilitiesSchema>;
+
 export const AvatarStyleSchema = z.enum(["robot", "organic"]);
 export type AvatarStyle = z.infer<typeof AvatarStyleSchema>;
 
@@ -77,6 +175,7 @@ export const BotSchema = z.object({
   unread: z.boolean(),
   parentBotId: Id.nullable(),
   memoryScope: MemoryScopeSchema.nullable(),
+  memoryBank: BotMemoryBankSchema.nullable(),
   threadId: Id,
   preview: z.string(),
   status: z.string(),
@@ -351,6 +450,13 @@ export const UpdateBotInput = z
     color: BotAvatarValueSchema.optional(),
     pinned: z.boolean().optional(),
     memoryScope: MemoryScopeSchema.nullable().optional(),
+    memoryBank: z
+      .object({
+        configId: Id,
+        expectedBindingId: Id.nullable(),
+        bankId: MemoryBankIdSchema.nullable(),
+      })
+      .optional(),
     sectionId: Id.nullable().optional(),
     voiceId: z.string().max(120).nullable().optional(),
     autoSpeak: z.boolean().optional(),
@@ -1473,9 +1579,11 @@ export const ModelOAuthBeginSchema = z.discriminatedUnion("mode", [
 export type ModelOAuthBegin = z.infer<typeof ModelOAuthBeginSchema>;
 
 export const SpaceMemoryConfigSchema = z.object({
+  id: Id,
   provider: z.string(),
   settings: z.record(z.string(), z.string()),
   defaultMemoryScope: MemoryScopeSchema,
+  capabilities: MemoryProviderCapabilitiesSchema,
   updatedAt: z.string(),
 });
 export type SpaceMemoryConfig = z.infer<typeof SpaceMemoryConfigSchema>;

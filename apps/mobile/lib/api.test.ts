@@ -843,6 +843,37 @@ describe("mobile API authentication", () => {
     expect(error).not.toHaveProperty("data");
   });
 
+  it("keeps a recognized memory failure reason only for memory connection procedures", async () => {
+    const failure = (reason: string) =>
+      jsonResponse(
+        {
+          json: {
+            defined: true,
+            code: "BAD_REQUEST",
+            status: 400,
+            message: "This key can't list banks. Use bank ID.",
+            data: { reason },
+          },
+        },
+        { status: 400 },
+      );
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(failure("bank_id_required"))
+        .mockResolvedValueOnce(failure("bank_id_required"))
+        .mockResolvedValueOnce(failure("provider said something")),
+    );
+
+    await expect(rpc("memory/connectProvider", {})).rejects.toMatchObject({
+      status: 400,
+      code: "BAD_REQUEST",
+      reason: "bank_id_required",
+    });
+    await expect(rpc("bots/update", {})).rejects.not.toHaveProperty("reason");
+    await expect(rpc("memory/banks", {})).rejects.not.toHaveProperty("reason");
+  });
   it.each([
     ["an empty", new Response(null, { status: 404 })],
     [

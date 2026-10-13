@@ -1,6 +1,14 @@
 import { Trans, useLingui } from "@lingui/react/macro";
 import type { SpaceMemoryConfig } from "@rakazo/contracts";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
   Button,
   Dialog,
   DialogClose,
@@ -15,13 +23,17 @@ import {
 } from "@rakazo/ui-web";
 import { XIcon } from "lucide-react";
 import { useEffect, useId, useState } from "react";
+import type { MemoryConfigState } from "../lib/memory-provider";
+import { isConflictError, memoryErrorText, memoryFailureReason } from "../lib/memory-provider";
 import { rpc } from "../lib/rpc";
-import { errorText } from "../lib/user-error";
 import { SpaceMemorySection } from "./KnowledgeSection";
+import type {
+  MemoryProviderConnectionDraft,
+  MemoryProviderConnectResult,
+} from "./memory-providers/registry";
 import {
   defaultMemoryProviderSettings,
   MEMORY_PROVIDER_SETTINGS,
-  type MemoryProviderConnectionDraft,
   memoryProviderSettings,
 } from "./memory-providers/registry";
 
@@ -55,16 +67,60 @@ function ScopePicker({
   );
 }
 
+function ConfirmBankDisconnect({
+  name,
+  onCancel,
+  onConfirm,
+}: {
+  name: string;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const disconnectName = name;
+  return (
+    <AlertDialog
+      open
+      onOpenChange={(open) => {
+        if (!open) onCancel();
+      }}
+    >
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>
+            <Trans>Disconnect {disconnectName}?</Trans>
+          </AlertDialogTitle>
+          <AlertDialogDescription>
+            <Trans>
+              Banks stay in Hindsight Cloud. Pending memory work stops; processing already started
+              may finish.
+            </Trans>
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>
+            <Trans>Cancel</Trans>
+          </AlertDialogCancel>
+          <AlertDialogAction variant="destructive" onClick={onConfirm}>
+            <Trans>Disconnect</Trans>
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
 export function MemorySettingsOverlay({
   onClose,
-  config,
+  state,
   onConfigChange,
+  onReload,
   embedded = false,
   onBusyChange,
 }: {
   onClose: () => void;
-  config: SpaceMemoryConfig | null | undefined;
+  state: MemoryConfigState;
   onConfigChange: (config: SpaceMemoryConfig | null) => void;
+  onReload: () => Promise<void>;
   /** Render panel body only for the shared Settings shell. */
   embedded?: boolean;
   onBusyChange?: (busy: boolean) => void;
@@ -72,6 +128,7 @@ export function MemorySettingsOverlay({
   const { t } = useLingui();
   const providerSelectId = useId();
   const defaultRegistration = defaultMemoryProviderSettings();
+  const config = state.status === "ready" ? state.config : null;
   const [selectedProvider, setSelectedProvider] = useState(
     config?.provider ?? defaultRegistration.id,
   );
@@ -79,6 +136,10 @@ export function MemorySettingsOverlay({
     config?.defaultMemoryScope ?? "isolated",
   );
   const [pending, setPending] = useState<"connect" | "disconnect" | "scope" | null>(null);
+  const [confirmDisconnect, setConfirmDisconnect] = useState<{
+    configId: string;
+    name: string;
+  } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -87,10 +148,10 @@ export function MemorySettingsOverlay({
       setDefaultScope(config.defaultMemoryScope);
       return;
     }
-    if (config === null && !memoryProviderSettings(selectedProvider)) {
+    if (state.status === "ready" && !memoryProviderSettings(selectedProvider)) {
       setSelectedProvider(defaultRegistration.id);
     }
-  }, [config, defaultRegistration.id, selectedProvider]);
+  }, [config, state.status, defaultRegistration.id, selectedProvider]);
 
   const registration = memoryProviderSettings(config?.provider ?? selectedProvider);
   const busy = pending !== null;
@@ -104,48 +165,55 @@ export function MemorySettingsOverlay({
     onBusyChange?.(next !== null);
   }
 
-  async function connect(draft: MemoryProviderConnectionDraft) {
-    if (!registration) return false;
+  async function connect(
+    draft: MemoryProviderConnectionDraft,
+  ): Promise<MemoryProviderConnectResult> {
+    if (!registration) return { ok: false };
     setError(null);
     markPending("connect");
     try {
       const next = await rpc.memory.connectProvider({
         provider: registration.id,
         ...draft,
-        defaultMemoryScope: defaultScope,
+        defaultMemoryScope: registration.sharedScope ? defaultScope : "isolated",
+        expectedConfigId: config?.id ?? null,
       });
       onConfigChange(next);
-      return true;
+      return { ok: true };
     } catch (err) {
-      setError(errorText(err, t`Could not connect ${registration.name}`));
-      return false;
+      setError(memoryErrorText(err, t`Could not connect ${registration.name}`));
+      if (isConflictError(err)) void onReload();
+      const reason = memoryFailureReason(err);
+      return reason ? { ok: false, reason } : { ok: false };
     } finally {
       markPending(null);
     }
   }
 
-  async function disconnect() {
+  async function disconnect(configId: string) {
     setError(null);
     markPending("disconnect");
     try {
-      await rpc.memory.disconnectProvider();
+      await rpc.memory.disconnectProvider({ configId });
       onConfigChange(null);
     } catch (err) {
-      setError(errorText(err, t`Could not disconnect memory provider`));
+      setError(memoryErrorText(err, t`Could not disconnect memory provider`));
+      if (isConflictError(err)) void onReload();
     } finally {
       markPending(null);
     }
   }
 
-  async function updateDefaultScope(scope: "isolated" | "shared") {
+  async function updateDefaultScope(configId: string, scope: "isolated" | "shared") {
     if (scope === defaultScope) return;
     setError(null);
     markPending("scope");
     try {
-      const next = await rpc.memory.setDefaultScope({ defaultMemoryScope: scope });
+      const next = await rpc.memory.setDefaultScope({ configId, defaultMemoryScope: scope });
       onConfigChange(next);
     } catch (err) {
-      setError(errorText(err, t`Could not update the default memory scope`));
+      setError(memoryErrorText(err, t`Could not update the default memory scope`));
+      if (isConflictError(err)) void onReload();
     } finally {
       markPending(null);
     }
@@ -182,10 +250,17 @@ export function MemorySettingsOverlay({
       <div className="rk-scroll min-h-0 flex-1 overflow-y-auto px-6 py-6 sm:px-8">
         {error ? <p className="mb-4 text-sm text-destructive">{error}</p> : null}
 
-        {config === undefined ? (
+        {state.status === "loading" ? (
           <p className="text-sm text-muted-foreground">
             <Trans>Loading memory settings…</Trans>
           </p>
+        ) : state.status === "error" ? (
+          <div className="flex items-center gap-3 text-sm text-muted-foreground">
+            <Trans>Could not load memory settings.</Trans>
+            <Button type="button" variant="outline" size="sm" onClick={() => void onReload()}>
+              <Trans>Retry</Trans>
+            </Button>
+          </div>
         ) : config ? (
           <div className="rounded-xl border border-border px-4 py-3">
             <div className="text-[12.5px] uppercase tracking-[0.08em] text-muted-foreground/80">
@@ -194,23 +269,45 @@ export function MemorySettingsOverlay({
             <div className="mt-1 text-[15px] text-foreground">
               {registration?.connectedLabel(config) ?? config.provider}
             </div>
-            <div className="mt-3">
-              <ScopePicker
-                value={defaultScope}
-                disabled={busy}
-                onChange={(scope) => void updateDefaultScope(scope)}
-              />
-            </div>
+            {config.capabilities.sharedScope ? (
+              <div className="mt-3">
+                <ScopePicker
+                  value={defaultScope}
+                  disabled={busy}
+                  onChange={(scope) => void updateDefaultScope(config.id, scope)}
+                />
+              </div>
+            ) : null}
             <Button
               type="button"
               variant="outline"
               size="sm"
               disabled={busy}
-              onClick={() => void disconnect()}
+              onClick={() => {
+                if (config.capabilities.banks) {
+                  setConfirmDisconnect({
+                    configId: config.id,
+                    name: registration?.name ?? config.provider,
+                  });
+                  return;
+                }
+                void disconnect(config.id);
+              }}
               className="mt-3"
             >
               {pending === "disconnect" ? <Trans>Disconnecting…</Trans> : <Trans>Disconnect</Trans>}
             </Button>
+            {confirmDisconnect ? (
+              <ConfirmBankDisconnect
+                name={confirmDisconnect.name}
+                onCancel={() => setConfirmDisconnect(null)}
+                onConfirm={() => {
+                  const { configId } = confirmDisconnect;
+                  setConfirmDisconnect(null);
+                  void disconnect(configId);
+                }}
+              />
+            ) : null}
           </div>
         ) : registration ? (
           <>
@@ -235,11 +332,13 @@ export function MemorySettingsOverlay({
               </Field>
             ) : null}
 
-            <div className="mb-4">
-              <ScopePicker value={defaultScope} disabled={busy} onChange={setDefaultScope} />
-            </div>
+            {registration.sharedScope ? (
+              <div className="mb-4">
+                <ScopePicker value={defaultScope} disabled={busy} onChange={setDefaultScope} />
+              </div>
+            ) : null}
 
-            <registration.SettingsForm busy={busy} onConnect={connect} />
+            <registration.SettingsForm key={registration.id} busy={busy} onConnect={connect} />
           </>
         ) : (
           <p className="text-sm text-destructive">

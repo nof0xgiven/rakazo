@@ -3,6 +3,7 @@ import { isIP } from "node:net";
 import type {
   AdapterContext,
   DurableMemoryScope,
+  SemanticMemoryCapabilities,
   SemanticMemoryProvider,
   SemanticMemoryRecallRequest,
   SemanticMemoryResponse,
@@ -25,6 +26,12 @@ import {
 } from "./supermemory-client.js";
 
 export const SUPERMEMORY_PROVIDER_ID = "supermemory";
+export const SUPERMEMORY_CAPABILITIES = {
+  recall: true,
+  save: true,
+  purgeHistory: true,
+  sharedScope: true,
+} as const satisfies SemanticMemoryCapabilities;
 export { SUPERMEMORY_CLOUD_BASE_URL };
 
 const LOCAL_NETWORK_ERROR = "Local mode requires a loopback or private-network address.";
@@ -237,12 +244,7 @@ export class SupermemoryMemoryProvider implements SemanticMemoryProvider {
       id: SUPERMEMORY_PROVIDER_ID,
       contractVersion: "1",
       adapterVersion: "0.1.0",
-      capabilities: {
-        recall: true,
-        save: true,
-        purgeHistory: true,
-        sharedScope: true,
-      } as const,
+      capabilities: SUPERMEMORY_CAPABILITIES,
     };
   }
 
@@ -274,7 +276,7 @@ export class SupermemoryMemoryProvider implements SemanticMemoryProvider {
   async save(
     request: SemanticMemorySaveRequest,
     context: AdapterContext,
-  ): Promise<SemanticMemoryResponse> {
+  ): Promise<SemanticMemoryResponse<undefined>> {
     const blocked = await this.localBaseUrlBlock();
     if (blocked) return { ok: false, error: blocked };
     const tags =

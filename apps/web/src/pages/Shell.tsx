@@ -18,7 +18,6 @@ import type {
   Routine,
   SearchHit,
   Space,
-  SpaceMemoryConfig,
   TaughtSkill,
   ThreadMessage,
   ThreadSnapshot,
@@ -49,6 +48,7 @@ import {
   latestAnswerableAskMessageId,
   mentionChipKey,
   nestRosterByParent,
+  newClientId,
   plainTextFromMarkdown,
   projectMessageReactions,
   reorderBotTo,
@@ -180,7 +180,6 @@ import {
   shouldNotifyBrowser,
 } from "../lib/browser-notifications";
 import { startCall, useCallSession } from "../lib/call-session";
-import { newClientId } from "../lib/client-id";
 import {
   embeddableScreenUrl,
   loadComputerScreen,
@@ -190,6 +189,7 @@ import { publishComputerCommand } from "../lib/computer-workspace";
 import { desktopBridge } from "../lib/desktop";
 import { scheduleFocusPrompt } from "../lib/focus-prompt";
 import { localTimezone } from "../lib/local-timezone";
+import type { MemoryConfigState } from "../lib/memory-provider";
 import { copyableMessageText } from "../lib/message-text";
 import { messageProviderLabel } from "../lib/messaging";
 import {
@@ -566,10 +566,28 @@ export function ShellPage() {
   const [messagingSettingsOpen, setMessagingSettingsOpen] = useState(false);
   const [messagingSurfaceEnabled, setMessagingSurfaceEnabled] = useState(false);
   const [messagingProviders, setMessagingProviders] = useState<string[]>([]);
-  const [memoryProviderConfig, setMemoryProviderConfig] = useState<
-    SpaceMemoryConfig | null | undefined
-  >(undefined);
+  const [memoryProviderConfig, setMemoryProviderConfig] = useState<MemoryConfigState>({
+    status: "loading",
+  });
   const memoryProviderConfigRevision = useRef(0);
+  const reloadMemoryProviderConfig = useCallback(async () => {
+    const revision = ++memoryProviderConfigRevision.current;
+    setMemoryProviderConfig((current) =>
+      current.status === "error" ? { status: "loading" } : current,
+    );
+    try {
+      const config = await rpc.memory.providerConfig();
+      if (memoryProviderConfigRevision.current === revision) {
+        setMemoryProviderConfig({ status: "ready", config });
+      }
+    } catch {
+      if (memoryProviderConfigRevision.current === revision) {
+        setMemoryProviderConfig((current) =>
+          current.status === "ready" ? current : { status: "error" },
+        );
+      }
+    }
+  }, []);
   const call = useCallSession();
   const [voiceStatus, setVoiceStatus] = useState<VoiceStatus | null>(null);
   const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null);
@@ -1165,19 +1183,7 @@ export function ShellPage() {
 
   useEffect(() => {
     let cancelled = false;
-    const providerConfigRevision = memoryProviderConfigRevision.current;
-    void rpc.memory
-      .providerConfig()
-      .then((providerConfig) => {
-        if (!cancelled && memoryProviderConfigRevision.current === providerConfigRevision) {
-          setMemoryProviderConfig(providerConfig);
-        }
-      })
-      .catch(() => {
-        if (!cancelled && memoryProviderConfigRevision.current === providerConfigRevision) {
-          setMemoryProviderConfig(null);
-        }
-      });
+    void reloadMemoryProviderConfig();
     const appliedAtStart = botsRefreshApplied.current;
     void takeInitialBootstrap(botId)
       .then((bootstrap) => {
@@ -1254,6 +1260,14 @@ export function ShellPage() {
       document.removeEventListener("visibilitychange", refreshVisibleBots);
     };
   }, []);
+
+  const memorySettingsMounted = settingsOpen || panel === "settings";
+  useEffect(() => {
+    if (!memorySettingsMounted) return;
+    const revalidate = () => void reloadMemoryProviderConfig();
+    window.addEventListener("focus", revalidate);
+    return () => window.removeEventListener("focus", revalidate);
+  }, [memorySettingsMounted, reloadMemoryProviderConfig]);
 
   useEffect(() => {
     let cancelled = false;
@@ -3966,7 +3980,14 @@ export function ShellPage() {
               <BotSettings
                 key={active.id}
                 bot={active}
-                memoryProviderConfigured={memoryProviderConfig != null}
+                memoryConfig={memoryProviderConfig}
+                onMemoryConfigReload={reloadMemoryProviderConfig}
+                onMemoryRefresh={async () => {
+                  await Promise.all([
+                    reloadMemoryProviderConfig(),
+                    refreshBots().catch(() => undefined),
+                  ]);
+                }}
                 onSkillsChange={setAgentSkills}
                 onSave={async ({ computerMode, ...patch }) => {
                   if (computerMode !== active.computerMode) {
@@ -3981,6 +4002,7 @@ export function ShellPage() {
                   );
                   // Persistence succeeded; a failed navigation refresh must not undo the tool edit.
                   await refreshBots().catch(() => undefined);
+                  return updated;
                 }}
                 onExport={async () => {
                   const manifest = await rpc.export.bot({ botId: active.id });
@@ -4515,6 +4537,7 @@ export function ShellPage() {
         {clearTarget ? (
           <ClearConversationDialog
             bot={clearTarget.chat}
+            cloudMemory={clearTarget.kind === "bot" && clearTarget.chat.memoryBank !== null}
             onCancel={() => setClearTarget(null)}
             onConfirm={async () => {
               await rpc.threads.clear(
@@ -4604,9 +4627,11 @@ export function ShellPage() {
               setBootstrapMe(nextMe);
             }}
             memoryConfig={memoryProviderConfig}
+            onMemoryConfigReload={reloadMemoryProviderConfig}
             onMemoryConfigChange={(config) => {
               memoryProviderConfigRevision.current += 1;
-              setMemoryProviderConfig(config);
+              setMemoryProviderConfig({ status: "ready", config });
+              void refreshBots().catch(() => undefined);
             }}
             onVoiceStatusMaybeChanged={async () => {
               try {

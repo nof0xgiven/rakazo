@@ -15,6 +15,7 @@ import {
 import type { ComponentType } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { computersAreUnavailable } from "../components/ComputersUnavailableHint";
+import type { MemoryConfigState } from "../lib/memory-provider";
 import {
   ComputerSettingsPanel,
   GeneralSettingsPanels,
@@ -58,6 +59,7 @@ export function SettingsOverlay({
   onOpenMessaging,
   memoryConfig,
   onMemoryConfigChange,
+  onMemoryConfigReload,
   onClose,
   onVoiceStatusMaybeChanged,
 }: {
@@ -79,8 +81,9 @@ export function SettingsOverlay({
   onSandboxProviderChange?: (sandboxProvider: string) => void;
   messagingEnabled?: boolean;
   onOpenMessaging?: () => void;
-  memoryConfig: SpaceMemoryConfig | null | undefined;
+  memoryConfig: MemoryConfigState;
   onMemoryConfigChange: (config: SpaceMemoryConfig | null) => void;
+  onMemoryConfigReload: () => Promise<void>;
   onClose: () => void;
   onVoiceStatusMaybeChanged?: () => void | Promise<void>;
 }) {
@@ -286,8 +289,9 @@ export function SettingsOverlay({
                 <MemorySettingsOverlay
                   embedded
                   onClose={requestClose}
-                  config={memoryConfig}
+                  state={memoryConfig}
                   onConfigChange={onMemoryConfigChange}
+                  onReload={onMemoryConfigReload}
                   onBusyChange={setMemoryBusy}
                 />
               ) : null}

@@ -61,6 +61,11 @@ import {
   MAX_OPENAI_COMPATIBLE_ENABLED_MODELS,
   McpServerConfigInput,
   McpServerSchema,
+  MemoryBankIdSchema,
+  MemoryBankNameSchema,
+  MemoryBankQuerySchema,
+  MemoryBankSchema,
+  MemoryConnectionErrorDataSchema,
   MemoryDocumentSchema,
   MemoryScopeSchema,
   MeSchema,
@@ -129,6 +134,7 @@ const modelConfigurationErrors = {
   CONFLICT: { status: 409, data: ModelConfigurationConflictDataSchema },
 } as const;
 const groupId = z.object({ groupId: Id });
+const memoryConnectionErrors = { BAD_REQUEST: { data: MemoryConnectionErrorDataSchema } };
 
 const threadTarget = z
   .object({
@@ -518,19 +524,49 @@ export const appContract = {
     exportMarkdown: oc.input(z.object({ botId: Id.optional() })).output(z.string()),
     providerConfig: oc.output(SpaceMemoryConfigSchema.nullable()),
     connectProvider: oc
+      .errors(memoryConnectionErrors)
       .input(
         z.object({
           provider: z.string().min(1),
           settings: z.record(z.string(), z.string()),
           credentials: z.record(z.string(), z.string()),
           defaultMemoryScope: MemoryScopeSchema.default("isolated"),
+          expectedConfigId: Id.nullable(),
         }),
       )
       .output(SpaceMemoryConfigSchema),
     setDefaultScope: oc
-      .input(z.object({ defaultMemoryScope: MemoryScopeSchema }))
+      .input(z.object({ configId: Id, defaultMemoryScope: MemoryScopeSchema }))
       .output(SpaceMemoryConfigSchema),
-    disconnectProvider: oc.output(z.object({ ok: z.literal(true) })),
+    disconnectProvider: oc
+      .input(z.object({ configId: Id }))
+      .output(z.object({ ok: z.literal(true) })),
+    banks: oc
+      .errors(memoryConnectionErrors)
+      .input(
+        z.object({
+          botId: Id,
+          configId: Id,
+          q: MemoryBankQuerySchema.optional(),
+          offset: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
+        }),
+      )
+      .output(z.object({ banks: z.array(MemoryBankSchema), nextOffset: z.number().nullable() })),
+    bank: oc
+      .errors(memoryConnectionErrors)
+      .input(z.object({ botId: Id, configId: Id, bankId: MemoryBankIdSchema }))
+      .output(MemoryBankSchema),
+    createBank: oc
+      .errors(memoryConnectionErrors)
+      .input(
+        z.object({
+          botId: Id,
+          configId: Id,
+          requestId: z.uuid(),
+          name: MemoryBankNameSchema,
+        }),
+      )
+      .output(MemoryBankSchema),
   },
   routines: {
     list: oc.input(botId).output(z.array(RoutineSchema)),

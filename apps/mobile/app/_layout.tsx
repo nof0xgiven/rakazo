@@ -237,6 +237,10 @@ export default function Layout() {
                       name="bot-settings"
                       options={glassHeaderOptions(t("Chat settings"))}
                     />
+                    <Stack.Screen
+                      name="memory-bank"
+                      options={glassHeaderOptions(t("Memory bank"))}
+                    />
                     <Stack.Screen name="thread" options={{ title: t("Thread") }} />
                     <Stack.Screen name="routine" options={glassHeaderOptions(t("Routine"))} />
                     <Stack.Screen name="computer" options={{ title: t("Computer") }} />

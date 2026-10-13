@@ -1,0 +1,160 @@
+appId: com.rakazo.app
+name: Memory
+---
+- runFlow:
+    file: ../subflows/sign-in.yaml
+    env:
+      RAKAZO_ACTIVE_EMAIL: ${RAKAZO_SCREENSHOT_EMAIL}
+- runFlow:
+    file: ../subflows/open-link.yaml
+    env:
+      RAKAZO_LINK: "rakazo:///account"
+- extendedWaitUntil:
+    visible: ".*Change password.*"
+    timeout: 15000
+- scrollUntilVisible:
+    element: "Memory"
+    direction: DOWN
+    timeout: 10000
+- tapOn: "Memory"
+- extendedWaitUntil:
+    visible: "API key|Disconnect"
+    timeout: 25000
+# A previous run leaves the Space connected; disconnecting also drops its bank bindings.
+- runFlow:
+    when:
+      visible: "Disconnect"
+    commands:
+      - tapOn: "Disconnect"
+      - extendedWaitUntil:
+          visible: "Disconnect memory?"
+          timeout: 10000
+      - tapOn:
+          text: "Disconnect"
+          index: 1
+      - extendedWaitUntil:
+          visible: "API key"
+          timeout: 25000
+- tapOn: "API key"
+- inputText: ${RAKAZO_SCREENSHOT_HINDSIGHT_KEY}
+- hideKeyboard
+- assertVisible: "Bots in this Space can use banks this key can access."
+- takeScreenshot: 01-memory-connect
+- tapOn: "Connect"
+- extendedWaitUntil:
+    visible: "Disconnect"
+    timeout: 70000
+- assertVisible: "Hindsight Cloud"
+- takeScreenshot: 02-memory-connected
+
+- runFlow:
+    file: ../subflows/open-link.yaml
+    env:
+      RAKAZO_LINK: "rakazo:///bot-settings?botId=${RAKAZO_SCREENSHOT_BOT_ID}"
+- extendedWaitUntil:
+    visible: "Advanced"
+    timeout: 15000
+- tapOn: "Advanced"
+- scrollUntilVisible:
+    element: "Built-in"
+    direction: DOWN
+    timeout: 30000
+- tapOn: "Memory"
+- extendedWaitUntil:
+    visible: "Launch research, .*"
+    timeout: 30000
+- assertVisible: "Bots using the same bank share memory."
+- assertVisible: "Support replies, .*"
+- takeScreenshot: 03-bank-picker
+- tapOn: "Search banks"
+- inputText: "launch"
+- extendedWaitUntil:
+    visible: "Launch retrospective, .*"
+    timeout: 10000
+- extendedWaitUntil:
+    notVisible: "Support replies, .*"
+    timeout: 10000
+- assertVisible: "Launch research, .*"
+- takeScreenshot: 04-bank-search
+- tapOn: "Launch research, .*"
+- extendedWaitUntil:
+    notVisible: "Bots using the same bank share memory."
+    timeout: 10000
+- assertVisible: "Launch research"
+- takeScreenshot: 05-bot-settings-draft
+
+# Leaving the picker without a choice keeps the draft.
+- tapOn: "Memory"
+- extendedWaitUntil:
+    visible: "Use bank ID"
+    timeout: 15000
+- tapOn:
+    id: "BackButton"
+- extendedWaitUntil:
+    notVisible: "Use bank ID"
+    timeout: 10000
+- assertVisible: "Launch research"
+- takeScreenshot: 06-picker-cancel-keeps-draft
+- scrollUntilVisible:
+    element: "Save"
+    direction: DOWN
+    timeout: 10000
+- tapOn: "Save"
+- extendedWaitUntil:
+    notVisible: "Save"
+    timeout: 70000
+
+- runFlow:
+    file: ../subflows/open-link.yaml
+    env:
+      RAKAZO_LINK: "rakazo:///bot-settings?botId=${RAKAZO_SCREENSHOT_BOT_ID}"
+- extendedWaitUntil:
+    visible: "Advanced"
+    timeout: 15000
+- tapOn: "Advanced"
+- scrollUntilVisible:
+    element: "Launch research"
+    direction: DOWN
+    timeout: 30000
+- takeScreenshot: 07-bot-settings-saved
+
+- tapOn: "Memory"
+- extendedWaitUntil:
+    visible: "Use bank ID"
+    timeout: 15000
+- tapOn: "Use bank ID"
+- tapOn: "Bank ID"
+- inputText: "writing-drafts"
+- tapOn: "Use"
+- extendedWaitUntil:
+    visible: "Writing drafts"
+    timeout: 30000
+- assertNotVisible: "Use bank ID"
+- takeScreenshot: 08-bank-id-draft
+- scrollUntilVisible:
+    element: "Save"
+    direction: DOWN
+    timeout: 10000
+- tapOn: "Save"
+- extendedWaitUntil:
+    visible: "Change memory bank?"
+    timeout: 10000
+- takeScreenshot: 09-change-bank-confirm
+- tapOn: "Continue"
+- extendedWaitUntil:
+    notVisible: "Save"
+    timeout: 70000
+
+- runFlow:
+    file: ../subflows/open-link.yaml
+    env:
+      RAKAZO_LINK: "rakazo:///bot-settings?botId=${RAKAZO_SCREENSHOT_BOT_ID}"
+- extendedWaitUntil:
+    visible: "Advanced"
+    timeout: 15000
+- tapOn: "Advanced"
+- scrollUntilVisible:
+    element: "Writing drafts"
+    direction: DOWN
+    timeout: 30000
+- takeScreenshot: 10-bot-settings-bank-id-saved

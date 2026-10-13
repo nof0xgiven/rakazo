@@ -203,7 +203,7 @@ describeIntegration("run executor lifecycle", () => {
     const results = await Promise.all([events.finalizeRun(input), events.finalizeRun(input)]);
 
     expect(results.filter((result) => result === false)).toHaveLength(1);
-    expect(results.filter(Boolean)).toEqual([{ continuationRunId: null }]);
+    expect(results.filter(Boolean)).toEqual([{ continuationRunId: null, memoryRetentionId: null }]);
     const [run, storedAttempt, task, messages, terminalEvents] = await Promise.all([
       handles.prisma.run.findUniqueOrThrow({ where: { id: seeded.run.id } }),
       handles.prisma.attempt.findUniqueOrThrow({ where: { id: attempt.id } }),
@@ -453,7 +453,7 @@ describeIntegration("run executor lifecycle", () => {
       ]);
       await expect(
         events.finalizeRun({ ...next, outcome: "failed", error: "provider failed" }),
-      ).resolves.toEqual({ continuationRunId: null });
+      ).resolves.toEqual({ continuationRunId: null, memoryRetentionId: null });
     } else {
       expect(recovered.continuationRunId).toBeNull();
     }

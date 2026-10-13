@@ -300,6 +300,7 @@ export const RU_MESSAGES: Record<string, string> = {
   "Delete account": "Удалить аккаунт",
   "Delete group": "Удалить группу",
   "Delete space": "Удалить пространство",
+  "Delete local notes": "Удалить локальные заметки",
   "Delete memories too": "Удалить также память",
   "Delete {name}?": "Удалить {name}?",
   "Delete this group? Bots and their solo threads are kept.":
@@ -358,6 +359,9 @@ export const RU_MESSAGES: Record<string, string> = {
   Integrations: "Интеграции",
   "If an account exists for that address, we sent a password reset link.":
     "Если для этого адреса существует учетная запись, мы отправили ссылку для сброса пароля.",
+  "Its conversation, files, and routines will be permanently deleted. What should happen to its local notes?":
+    "Его диалог, файлы и задачи будут удалены навсегда. Что сделать с его локальными заметками?",
+  "Cloud memories stay in Hindsight Cloud.": "Облачные воспоминания остаются в Hindsight Cloud.",
   "Its conversation, files, and routines will be permanently deleted. What should happen to its memories?":
     "Его диалог, файлы и задачи будут удалены навсегда. Что сделать с его памятью?",
   "It could not be opened. Try again from the sidebar.":
@@ -365,6 +369,7 @@ export const RU_MESSAGES: Record<string, string> = {
   "Jump to latest": "Перейти к последнему",
   "Jump to latest, new messages": "Перейти к последнему, новые сообщения",
   "just now": "только что",
+  "Keep local notes": "Сохранить локальные заметки",
   "Keep memories": "Сохранить память",
   Language: "Язык",
   "Live update settings": "Настройки обновлений в реальном времени",
@@ -769,8 +774,8 @@ export const RU_MESSAGES: Record<string, string> = {
     "Сообщения, история чата, инструкции ботов, воспоминания, вложения, снимки экрана и содержимое подключённых приложений отправляются для работы ваших ботов, включая задачи.",
   "Your recordings are sent for transcription, and text you play is sent to generate speech.":
     "Ваши записи отправляются для расшифровки, а воспроизводимый вами текст — для генерации речи.",
-  "Conversation summaries, memories, searches and bot and Space IDs are sent to store and recall context.":
-    "Сводки разговоров, воспоминания, поисковые запросы и идентификаторы ботов и пространств отправляются для хранения и извлечения контекста.",
+  "Conversation text and summaries, saved memories, searches, and bot and Space IDs are sent to store and recall context.":
+    "Тексты и сводки разговоров, сохранённые воспоминания, поисковые запросы и идентификаторы ботов и пространств отправляются для хранения и извлечения контекста.",
   "AI data sharing": "Передача данных ИИ",
   "Allow {name} on mobile": "Разрешить {name} на телефоне",
   "Could not load permissions.": "Не удалось загрузить разрешения.",
@@ -860,4 +865,47 @@ export const RU_MESSAGES: Record<string, string> = {
   Assignee: "Исполнитель",
   Status: "Статус",
   Labels: "Метки",
+  "Memory settings require a server update.": "Для настроек памяти требуется обновление сервера.",
+  "Could not load memory settings.": "Не удалось загрузить настройки памяти.",
+  Isolated: "Изолированная",
+  Shared: "Общая",
+  "Inherit default": "Как по умолчанию",
+  "Default scope": "Область по умолчанию",
+  "Memory scope": "Область памяти",
+  "Bank ID": "ID банка",
+  "Bots in this Space can use banks this key can access.":
+    "Боты в этом пространстве могут использовать банки, к которым у этого ключа есть доступ.",
+  "Disconnect memory?": "Отключить память?",
+  "Banks stay in Hindsight Cloud. Pending memory work stops; processing already started may finish.":
+    "Банки остаются в Hindsight Cloud. Ожидающая работа с памятью останавливается; уже начатая обработка может завершиться.",
+  "Memory bank": "Банк памяти",
+  "Search banks": "Поиск банков",
+  "Could not load banks.": "Не удалось загрузить банки.",
+  "Load more": "Загрузить ещё",
+  "No banks yet.": "Банков пока нет.",
+  "No banks found.": "Банки не найдены.",
+  "Built-in": "Встроенная",
+  "Bots using the same bank share memory.": "Боты с одним и тем же банком используют общую память.",
+  "Use bank ID": "Использовать ID банка",
+  Use: "Использовать",
+  "Create bank": "Создать банк",
+  "Bank name": "Название банка",
+  "Creates a bank in Hindsight Cloud.": "Создаёт банк в Hindsight Cloud.",
+  "Could not create bank": "Не удалось создать банк",
+  "Change memory bank?": "Сменить банк памяти?",
+  "Existing memories stay in their current bank; processing already started may finish.":
+    "Существующие воспоминания остаются в текущем банке; уже начатая обработка может завершиться.",
+  "Hindsight Cloud rejected this request.": "Hindsight Cloud отклонил этот запрос.",
+  "Hindsight Cloud rejected this API key.": "Hindsight Cloud отклонил этот API-ключ.",
+  "Hindsight Cloud is out of credits.": "В Hindsight Cloud закончились кредиты.",
+  "This key cannot access this bank.": "У этого ключа нет доступа к этому банку.",
+  "This bank is unavailable.": "Этот банк недоступен.",
+  "Hindsight Cloud reported a conflict.": "Hindsight Cloud сообщил о конфликте.",
+  "Hindsight Cloud is temporarily unavailable.": "Hindsight Cloud временно недоступен.",
+  "Hindsight Cloud returned an unexpected response.": "Hindsight Cloud вернул неожиданный ответ.",
+  "The memory connection changed. Choose a bank again.":
+    "Подключение памяти изменилось. Выберите банк заново.",
+  "This key can't list banks. Use bank ID.":
+    "Этот ключ не может получить список банков. Используйте ID банка.",
+  "This key can't create banks.": "Этот ключ не может создавать банки.",
 };

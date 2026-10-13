@@ -22,6 +22,10 @@ import { cancelRunsInTransaction } from "./cancel-runs.js";
 import type { Prisma, PrismaClient } from "./client.js";
 import { expireComputerExecutionLeases } from "./computers.js";
 import {
+  type ConversationRetentionInput,
+  insertConversationRetentionInTransaction,
+} from "./memory-retention.js";
+import {
   assertRunCanWriteHistory,
   assertRunIsCancelled,
   createThreadMessageInTransaction,
@@ -107,6 +111,7 @@ export interface ClaimedSteeringMessage {
 
 export interface FinalizeRunResult {
   continuationRunId: string | null;
+  memoryRetentionId: string | null;
 }
 
 interface FinalizeRunBase {
@@ -126,6 +131,7 @@ export type FinalizeRunInput = FinalizeRunBase &
         outcome: "completed";
         blocks: MessageBlock[];
         markUnread?: boolean;
+        memoryRetention?: ConversationRetentionInput;
       }
     | { outcome: "failed"; error: string }
   );
@@ -1106,7 +1112,10 @@ export async function finalizeRun(
   const committed = await commitRunFinalization(prisma, input);
   if (!committed) return false;
   await notifyRealtime(realtime, committed.threadId, committed.seq);
-  return { continuationRunId: committed.continuationRunId };
+  return {
+    continuationRunId: committed.continuationRunId,
+    memoryRetentionId: committed.memoryRetentionId,
+  };
 }
 
 /** Stamps one turn-level wall-clock duration on the final tool block. */
@@ -1130,7 +1139,12 @@ export function completedRunBlocks(
 async function commitRunFinalization(
   prisma: PrismaClient,
   input: FinalizeRunInput,
-): Promise<{ threadId: string; seq: number; continuationRunId: string | null } | null> {
+): Promise<{
+  threadId: string;
+  seq: number;
+  continuationRunId: string | null;
+  memoryRetentionId: string | null;
+} | null> {
   const owner = await prisma.run.findFirst({
     where: { id: input.runId, spaceId: input.spaceId, botId: input.botId },
     select: { userId: true },
@@ -1173,6 +1187,7 @@ async function commitRunFinalization(
       },
     });
     if (terminal.count !== 1) return null;
+    await tx.bot.update({ where: { id: input.botId }, data: { updatedAt: now } });
 
     const attempt = await tx.attempt.updateMany({
       where: {
@@ -1230,6 +1245,14 @@ async function commitRunFinalization(
       payload: input.outcome === "completed" ? {} : { error: input.error },
     });
     await tx.event.deleteMany({ where: { runId: input.runId, type: "thread.progress" } });
+    const memoryRetentionId =
+      input.outcome === "completed" && input.memoryRetention
+        ? await insertConversationRetentionInTransaction(tx, {
+            runId: input.runId,
+            now,
+            retention: input.memoryRetention,
+          })
+        : null;
     if (input.outcome === "completed") {
       await tx.steeringMessage.deleteMany({
         where: { runId: input.runId, claimedAt: { not: null } },
@@ -1254,8 +1277,12 @@ async function commitRunFinalization(
       });
     }
     const continuationRunId = await createPendingSteeringRun(tx, input);
-    await tx.bot.update({ where: { id: input.botId }, data: { updatedAt: now } });
-    return { threadId: lastEvent.threadId, seq: lastEvent.seq, continuationRunId };
+    return {
+      threadId: lastEvent.threadId,
+      seq: lastEvent.seq,
+      continuationRunId,
+      memoryRetentionId,
+    };
   });
 }
 

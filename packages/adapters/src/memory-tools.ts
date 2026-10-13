@@ -1,12 +1,25 @@
-import type { ConnectorTool } from "@rakazo/adapter-kit";
+import type { ConnectorTool, SemanticMemoryCapabilities } from "@rakazo/adapter-kit";
 
-const SEMANTIC_MEMORY_TOOL_NAMES = new Set(["recall_memory", "save_memory", "forget_memory"]);
+const SEMANTIC_MEMORY_TOOL_NAMES: Record<string, true> = {
+  recall_memory: true,
+  save_memory: true,
+  forget_memory: true,
+};
+
+export const QUEUED_SAVE_MEMORY_DESCRIPTION =
+  "Queues memory for storage; processing may continue after this reply.";
 
 export function selectMemoryTools(
   tools: ConnectorTool[],
-  semanticMemoryConfigured: boolean,
+  capabilities: SemanticMemoryCapabilities | null,
 ): ConnectorTool[] {
-  return semanticMemoryConfigured
-    ? tools.filter((tool) => tool.name !== "remember")
-    : tools.filter((tool) => !SEMANTIC_MEMORY_TOOL_NAMES.has(tool.name));
+  if (!capabilities) return tools.filter((tool) => !SEMANTIC_MEMORY_TOOL_NAMES[tool.name]);
+  return tools.flatMap((tool) => {
+    if (tool.name === "remember") return [];
+    if (tool.name === "forget_memory" && capabilities.forget === false) return [];
+    if (tool.name === "save_memory" && capabilities.banks === true) {
+      return [{ ...tool, description: QUEUED_SAVE_MEMORY_DESCRIPTION }];
+    }
+    return [tool];
+  });
 }

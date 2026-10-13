@@ -19,6 +19,7 @@ import {
   authCapabilitiesSchema,
   legacyAccountSecurity,
   legacyAuthCapabilitiesSchema,
+  MemoryConnectionErrorDataSchema,
 } from "@rakazo/contracts";
 import type { ThreadHistory } from "@rakazo/core";
 import {
@@ -70,6 +71,12 @@ export const MAX_MOBILE_AUTH_RESPONSE_BYTES = 256 * 1024;
 export const MAX_MOBILE_RPC_RESPONSE_BYTES = 16 * 1024 * 1024;
 /** Inbox bootstrap reads safe to replay without a Space header during auth recovery. */
 const SPACE_AUTH_RECOVERY_SAFE_PROCS = new Set(["spaces/list", "me"]);
+const MEMORY_REASON_PROCS: Record<string, true> = {
+  "memory/connectProvider": true,
+  "memory/banks": true,
+  "memory/bank": true,
+  "memory/createBank": true,
+};
 
 let cachedApiBase: string | undefined;
 const apiBaseListeners = new Set<() => void>();
@@ -212,6 +219,15 @@ export async function selectSpace(id: string) {
 
 export function selectedSpaceId(): string | null {
   return cachedSpaceId || null;
+}
+
+export function apiScopeKey(): string {
+  return JSON.stringify([
+    cachedApiBase ?? "",
+    currentSessionGeneration(),
+    cachedSpaceId,
+    spaceSelectionGeneration,
+  ]);
 }
 
 /** Keep requests usable after the server deleted the selected Space but native
@@ -908,7 +924,13 @@ export async function rpc<T>(
         if (!selectedSpaceId()) await clearStaleSpaceSelection();
         throw new Error(message);
       }
-      throw rpcFailure(message, res.status, error);
+      const failure = rpcFailure(message, res.status, error);
+      const reason =
+        MEMORY_REASON_PROCS[proc] && error?.code === "BAD_REQUEST"
+          ? MemoryConnectionErrorDataSchema.safeParse(error.data).data?.reason
+          : undefined;
+      if (reason) Object.defineProperty(failure, "reason", { value: reason });
+      throw failure;
     }
     const verifiedUser = parsed.json as { userId?: unknown; spaceId?: unknown } | null;
     if (
@@ -959,7 +981,7 @@ export type MobileBot = Pick<
   | "thinkingLevel"
   | "autoSpeak"
 > &
-  Partial<Pick<Bot, "parentBotId" | "spaceId">>;
+  Partial<Pick<Bot, "parentBotId" | "spaceId" | "memoryBank">>;
 
 export type MobileBotSection = BotSection;
 

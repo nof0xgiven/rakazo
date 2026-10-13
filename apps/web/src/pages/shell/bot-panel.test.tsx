@@ -86,6 +86,7 @@ function bot(description = "Billing"): Bot {
     unread: false,
     parentBotId: null,
     memoryScope: null,
+    memoryBank: null,
     threadId: "thread-1",
     preview: "",
     status: "idle",
@@ -117,9 +118,14 @@ async function render(description = "Billing", current = bot(description)) {
     root.render(
       <BotSettings
         bot={current}
-        memoryProviderConfigured={false}
+        memoryConfig={{ status: "ready", config: null }}
+        onMemoryConfigReload={async () => undefined}
+        onMemoryRefresh={async () => undefined}
         onSkillsChange={() => undefined}
-        onSave={onSave}
+        onSave={async (patch) => {
+          await onSave(patch);
+          return bot(description);
+        }}
         onExport={async () => undefined}
         onClear={() => undefined}
       />,

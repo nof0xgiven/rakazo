@@ -1,6 +1,8 @@
 import type {
   CacheCapabilities as ConnectionCacheCapabilities,
   ConnectionCatalogItem,
+  MemoryBank,
+  MemoryConnectionFailureReason,
   SandboxKind,
   ThinkingLevel,
 } from "@rakazo/contracts";
@@ -332,13 +334,17 @@ export type DurableMemoryScope = "isolated" | "shared";
 export interface SemanticMemoryCapabilities {
   recall: true;
   save: true;
-  purgeHistory: true;
-  sharedScope: true;
+  purgeHistory: boolean;
+  sharedScope: boolean;
+  banks?: boolean;
+  automaticRecall?: boolean;
+  conversationRetention?: boolean;
+  forget?: boolean;
 }
 
 export interface SemanticMemoryResult {
   memory: string;
-  score: number;
+  score?: number;
   updatedAt?: string;
   /** Stable provider id when the backend supports citation / forget. */
   id?: string;
@@ -357,7 +363,7 @@ export interface SemanticMemoryForgetRequest {
 
 export type SemanticMemoryResponse<T = void> =
   | { ok: true; value: T }
-  | { ok: false; error: string };
+  | { ok: false; error: string; code?: MemoryConnectionFailureReason; retryAfterMs?: number };
 
 export interface SemanticMemoryRecallRequest {
   query: string;
@@ -368,11 +374,42 @@ export interface SemanticMemoryRecallRequest {
   limit: number;
 }
 
+export interface SemanticMemoryDelivery {
+  documentId: string;
+  operationId: string;
+  timestamp: string;
+  threadId: string;
+  sourceKey: string;
+}
+
 export interface SemanticMemorySaveRequest {
   content: string;
   scope: DurableMemoryScope;
   botId: string;
-  source: { kind: "durable" } | { kind: "history"; generation: number };
+  source: { kind: "durable" } | { kind: "history"; generation: number } | { kind: "conversation" };
+  delivery?: SemanticMemoryDelivery;
+}
+
+export interface SemanticMemorySaveReceipt {
+  status: "pending" | "completed";
+  operationId: string;
+}
+
+export type SemanticMemoryOperationStatus =
+  | "pending"
+  | "processing"
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "not_found";
+
+export interface MemoryBankPage {
+  banks: MemoryBank[];
+  nextOffset: number | null;
+}
+
+export interface MemoryTransport {
+  fetch: typeof globalThis.fetch;
 }
 
 export interface SemanticMemoryPurgeHistoryRequest {
@@ -634,6 +671,7 @@ export interface BackgroundJobPayloads {
   "cloud_agent.poll": { agentId: string };
   /** Poll and fan out one native Linear source under its lease. */
   "linear.sync": { connectionId: string };
+  "memory.retain": { retentionId: string };
 }
 
 export type BackgroundJobName = keyof BackgroundJobPayloads;

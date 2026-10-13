@@ -2,8 +2,14 @@ import type { Actor } from "@rakazo/contracts";
 import { AI_DISCLOSURE_VERSION } from "@rakazo/contracts";
 import { describe, expect, it, vi } from "vitest";
 
+const threadTarget = vi.hoisted(() => ({
+  current: { kind: "bot", botId: "bot" } as
+    | { kind: "bot"; botId: string }
+    | { kind: "group"; groupId: string; memberBotIds: string[] },
+}));
+
 vi.mock("./thread-target.js", () => ({
-  resolveThreadTarget: async () => ({ kind: "bot", botId: "bot" }),
+  resolveThreadTarget: async () => threadTarget.current,
 }));
 
 import { aiConsentStatus, allowAiConsent } from "./ai-consent.js";
@@ -25,6 +31,7 @@ function setup() {
         findMany: vi.fn(async () => [{ credential: { provider: "openai" } }]),
       },
       spaceMemoryConfig: { findUnique: vi.fn(async () => null) },
+      botMemoryBank: { findFirst: vi.fn(async () => null) },
       deploymentSettings: { findUnique: vi.fn(async () => null) },
       aiDataConsent: { findMany: vi.fn(async () => []), upsert },
       $transaction: vi.fn(async (queries) => Promise.all(queries)),
@@ -235,5 +242,89 @@ describe("consent grants", () => {
         },
       }),
     );
+  });
+});
+
+describe("memory disclosure", () => {
+  const bankConfig = {
+    id: "cfg-1",
+    provider: "hindsight",
+    settings: { baseUrl: "https://api.hindsight.vectorize.io" },
+  };
+
+  function memorySetup(config: object | null, binding: object | null) {
+    const { deps, actor } = setup();
+    deps.env.agentRuntime = "pi";
+    vi.mocked(deps.prisma.spaceMemoryConfig.findUnique).mockResolvedValue(config as never);
+    vi.mocked(deps.prisma.botMemoryBank.findFirst).mockResolvedValue(binding as never);
+    return { deps, actor };
+  }
+
+  it("omits a bank-capable connection for a bot without a binding", async () => {
+    threadTarget.current = { kind: "bot", botId: "bot" };
+    const { deps, actor } = memorySetup(bankConfig, null);
+    const status = await aiConsentStatus(deps, actor, { botId: "bot", uses: ["memory"] });
+    expect(status.recipients).toEqual([]);
+    expect(deps.prisma.botMemoryBank.findFirst).toHaveBeenCalledWith({
+      where: {
+        spaceMemoryConfigId: "cfg-1",
+        bot: {
+          userId: actor.userId,
+          spaceId: actor.spaceId,
+          archivedAt: null,
+          id: { in: ["bot"] },
+        },
+      },
+      select: { id: true },
+    });
+    expect(deps.prisma.bot.findMany).not.toHaveBeenCalled();
+  });
+
+  it("discloses a bank-capable connection for a bound bot", async () => {
+    threadTarget.current = { kind: "bot", botId: "bot" };
+    const { deps, actor } = memorySetup(bankConfig, { id: "binding-1" });
+    const status = await aiConsentStatus(deps, actor, { botId: "bot", uses: ["memory"] });
+    expect(status.recipients).toEqual([
+      expect.objectContaining({
+        name: expect.stringContaining("Hindsight Cloud"),
+        use: "memory",
+        allowed: false,
+      }),
+    ]);
+  });
+
+  it("inspects the actor's group members and every bound bot account-wide", async () => {
+    threadTarget.current = { kind: "group", groupId: "group-1", memberBotIds: ["bot-a", "bot-b"] };
+    const { deps, actor } = memorySetup(bankConfig, { id: "binding-1" });
+    await aiConsentStatus(deps, actor, { groupId: "group-1", uses: ["memory"] });
+    await aiConsentStatus(deps, actor, { uses: ["memory"] });
+    expect(vi.mocked(deps.prisma.botMemoryBank.findFirst).mock.calls).toEqual([
+      [
+        expect.objectContaining({
+          where: expect.objectContaining({
+            bot: expect.objectContaining({ userId: actor.userId, id: { in: ["bot-a", "bot-b"] } }),
+          }),
+        }),
+      ],
+      [
+        expect.objectContaining({
+          where: {
+            spaceMemoryConfigId: "cfg-1",
+            bot: { userId: actor.userId, spaceId: actor.spaceId, archivedAt: null },
+          },
+        }),
+      ],
+    ]);
+  });
+
+  it("keeps disclosing a legacy connection without a binding", async () => {
+    threadTarget.current = { kind: "bot", botId: "bot" };
+    const { deps, actor } = memorySetup(
+      { id: "cfg-1", provider: "supermemory", settings: { mode: "cloud" } },
+      null,
+    );
+    const status = await aiConsentStatus(deps, actor, { botId: "bot", uses: ["memory"] });
+    expect(status.recipients).toEqual([expect.objectContaining({ use: "memory" })]);
+    expect(deps.prisma.botMemoryBank.findFirst).not.toHaveBeenCalled();
   });
 });

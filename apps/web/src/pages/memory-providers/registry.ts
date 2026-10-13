@@ -1,5 +1,6 @@
-import type { SpaceMemoryConfig } from "@rakazo/contracts";
+import type { MemoryConnectionFailureReason, SpaceMemoryConfig } from "@rakazo/contracts";
 import type { ComponentType } from "react";
+import { HindsightSettingsForm } from "./HindsightSettingsForm";
 import { SerenitySettingsForm } from "./SerenitySettingsForm";
 import { SupermemorySettingsForm } from "./SupermemorySettingsForm";
 
@@ -8,15 +9,20 @@ export interface MemoryProviderConnectionDraft {
   credentials: Record<string, string>;
 }
 
+export type MemoryProviderConnectResult =
+  | { ok: true }
+  | { ok: false; reason?: MemoryConnectionFailureReason };
+
 export interface MemoryProviderSettingsFormProps {
   busy: boolean;
-  onConnect: (draft: MemoryProviderConnectionDraft) => Promise<boolean>;
+  onConnect: (draft: MemoryProviderConnectionDraft) => Promise<MemoryProviderConnectResult>;
 }
 
 export interface MemoryProviderSettingsRegistration {
   id: string;
   name: string;
   description: string;
+  sharedScope: boolean;
   SettingsForm: ComponentType<MemoryProviderSettingsFormProps>;
   connectedLabel: (config: SpaceMemoryConfig) => string;
 }
@@ -26,6 +32,7 @@ export const MEMORY_PROVIDER_SETTINGS: readonly MemoryProviderSettingsRegistrati
     id: "supermemory",
     name: "Supermemory",
     description: "Add semantic recall alongside native MEMORY.md memory.",
+    sharedScope: true,
     SettingsForm: SupermemorySettingsForm,
     connectedLabel: (config) =>
       config.settings.mode === "cloud" ? "Supermemory Cloud" : `Local · ${config.settings.baseUrl}`,
@@ -34,6 +41,7 @@ export const MEMORY_PROVIDER_SETTINGS: readonly MemoryProviderSettingsRegistrati
     id: "serenity",
     name: "Serenity",
     description: "Hosted or self-hosted Serenity brain for durable memory.",
+    sharedScope: true,
     SettingsForm: SerenitySettingsForm,
     connectedLabel: (config) => {
       const label = config.settings.brainLabel?.trim();
@@ -41,6 +49,14 @@ export const MEMORY_PROVIDER_SETTINGS: readonly MemoryProviderSettingsRegistrati
       const mode = config.settings.allowWrites === "true" ? "read/write" : "recall only";
       return label ? `Serenity · ${label} · ${mode}` : `Serenity · ${endpoint} · ${mode}`;
     },
+  },
+  {
+    id: "hindsight",
+    name: "Hindsight Cloud",
+    description: "Per-bot memory banks in Hindsight Cloud.",
+    sharedScope: false,
+    SettingsForm: HindsightSettingsForm,
+    connectedLabel: () => "Hindsight Cloud",
   },
 ];
 

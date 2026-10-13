@@ -13,6 +13,11 @@ Permission includes background work explicitly started from mobile. Withdrawal a
 new mobile actions; it does not cancel work already authorized. Stop runs and disable routines
 using their existing controls. This flow is not a global data-access or run-revocation system.
 
+Disclosure version `2026-10-13` adds Hindsight Cloud memory. It replaces earlier grants, so every
+mobile recipient, including model and voice services, prompts once again on the next mobile action.
+Withdrawal semantics are unchanged: new mobile actions stop, and already-authorized background
+work, including queued memory processing, continues.
+
 ## Release gates
 
 - Confirm the review account's actual model, voice, memory, and cloud-agent configuration.
@@ -22,9 +27,19 @@ using their existing controls. This flow is not a global data-access or run-revo
   Apple's cited rejection requires recipient disclosure and permission, not a blanket ban on
   these gateways. The disclosure names the gateway and explains onward routing. Confirm the
   review configuration is accurately described; do not claim Apple has preapproved this wording.
-- Apply the additive consent-record migration and deploy the API before releasing the mobile
-  client. Older servers without the disclosure endpoints cannot supply the new mobile flow;
-  existing web/desktop clients and provider execution are unaffected.
+- For Hindsight Cloud memory, confirm the review Space's connection uses provider ID `hindsight`
+  and the fixed origin `https://api.hindsight.vectorize.io`; there is no endpoint setting.
+  Disclosure is bank-bound: the recipient appears only when the target bot (or, for groups and
+  account-wide prompts, an actor-owned bot) has a current bank selection. Connected but unbound
+  bots send nothing to Hindsight Cloud and do not name it. Bank listing, lookup, creation, and
+  selection exchange only bank metadata and do not prompt. The disclosure links
+  [the Vectorize privacy policy](https://vectorize.io/privacy). Remote memories stay in Hindsight
+  Cloud after local clear, delete, or disconnect and are deleted through Hindsight Cloud.
+- Apply the additive consent-record and memory-bank migrations and deploy the API before releasing
+  the mobile client. Older servers without the disclosure endpoints or memory-bank fields cannot
+  supply the new mobile flow; existing web/desktop clients and provider execution are unaffected.
+  The server checks grants against its disclosure version, so the one-time re-prompt begins when
+  the API deploys, including for already-installed mobile builds.
 - Self-hosters can set `PRIVACY_POLICY_URL` to their own absolute HTTP(S) policy URL. Otherwise
   the mobile flow links Rakazo's policy, which distinguishes hosted and self-hosted operators.
   Unknown custom providers have no invented provider-policy link.
@@ -51,7 +66,10 @@ Use synthetic content and a fresh review account on iPhone and an 11-inch iPad.
    and routines retain their previous behavior.
 8. Verify OpenRouter, Vercel AI Gateway, and custom/local providers remain selectable and keep
    their existing routing settings.
-9. Capture a native iPad consent screenshot; there is no new desktop/web consent screen.
+9. Bind a bot to a Hindsight Cloud bank. Confirm the next mobile message prompts and names
+   Hindsight Cloud, and that an unbound bot in the same Space does not. Confirm a recipient
+   already allowed under the previous disclosure version prompts once more.
+10. Capture a native iPad consent screenshot; there is no new desktop/web consent screen.
 
 ## App Review notes template
 

@@ -7,6 +7,7 @@ import type {
   ConnectorCatalogItem,
   JobPublisher,
   MemoryStore,
+  MemoryTransport,
   SandboxProvider,
   SecretStore,
   UsageOperationKind,
@@ -83,6 +84,7 @@ import {
   lockLinearSources,
   McpOAuthBroker,
   mapScratchpadItem,
+  memoryProviderCapabilities,
   modelCredentialAuthKindsForSpace,
   modelCredentialDto,
   normalizeSecretDestination,
@@ -240,6 +242,7 @@ import {
   revertConnectedMcpApprovals,
 } from "./mcp-approval.js";
 import { buildMcpUpdateMaterial } from "./mcp-material.js";
+import { createMemoryBank, listMemoryBanks, readMemoryBank } from "./memory-banks.js";
 import {
   disconnectMemoryProvider,
   persistMemoryProviderConfig,
@@ -583,6 +586,7 @@ export interface RouterDeps {
   sandbox: SandboxProvider;
   memory: MemoryStore;
   memoryProviders: MemoryProviderResolver;
+  memoryTransport?: MemoryTransport;
   home: AgentHomeStore;
   secrets: SecretStore;
   oauthLogins: PiOAuthLogins;
@@ -1446,8 +1450,18 @@ export function createRouter(deps: RouterDeps) {
         await repos.reorderBots(context.actor, input.botIds);
         return { ok: true as const };
       }),
-      update: authed.bots.update.handler(async ({ context, input }) => {
+      update: authed.bots.update.handler(async ({ context, input, signal }) => {
         const existing = await repos.getBot(context.actor, input.botId);
+        const memoryBank = input.memoryBank;
+        if (memoryBank) {
+          const config = await findSpaceMemoryConfig(deps.prisma, context.actor.spaceId);
+          if (!config || config.id !== memoryBank.configId) throw new ORPCError("CONFLICT");
+          if (!memoryProviderCapabilities(config.provider).banks) {
+            throw new ORPCError("BAD_REQUEST", {
+              message: "This memory connection does not use banks.",
+            });
+          }
+        }
         if (input.sectionId) {
           const section = await deps.prisma.botSection.findFirst({
             where: {
@@ -1485,6 +1499,21 @@ export function createRouter(deps: RouterDeps) {
               emitBotUpdated: botProfileLabelsChanged(input),
               validateModelChoice: model.validate,
               modelOwnerUserId: actor.userId,
+              ...(memoryBank
+                ? {
+                    memoryBank: {
+                      ...memoryBank,
+                      userId: actor.userId,
+                      readBank: (bankId: string) =>
+                        readMemoryBank(
+                          deps,
+                          actor,
+                          { botId: input.botId, configId: memoryBank.configId, bankId },
+                          signal,
+                        ),
+                    },
+                  }
+                : {}),
               data: {
                 name: input.name,
                 title: input.title,
@@ -1936,12 +1965,26 @@ export function createRouter(deps: RouterDeps) {
           botId: contextBotId,
           ...(target.kind === "group" ? { groupId: target.groupId } : {}),
         });
-        const [configuredMemory] = await Promise.all([
+        const [memory] = await Promise.all([
           target.kind === "bot"
-            ? deps.memoryProviders.resolve(context.actor.spaceId).catch((error) => {
-                getLogger().error("semantic memory resolution after thread clear failed", error);
-                return null;
-              })
+            ? deps.memoryProviders
+                .select({
+                  spaceId: context.actor.spaceId,
+                  userId: context.actor.userId,
+                  botId: target.botId,
+                })
+                .then((selection) =>
+                  deps.memoryProviders.resolve({
+                    spaceId: context.actor.spaceId,
+                    userId: context.actor.userId,
+                    botId: target.botId,
+                    selection,
+                  }),
+                )
+                .catch((error) => {
+                  getLogger().error("semantic memory resolution after thread clear failed", error);
+                  return null;
+                })
             : Promise.resolve(null),
           Promise.all(
             cancelledRunIds.map((runId) =>
@@ -1952,11 +1995,17 @@ export function createRouter(deps: RouterDeps) {
         // Durable memories remain in their Space-private containers. Clear only removes
         // conversation-derived summaries from the previous generation; including the new
         // generation also covers a compaction job that began just after the clear committed.
-        if (configuredMemory && target.kind === "bot") {
+        if (
+          target.kind === "bot" &&
+          memory?.kind === "configured" &&
+          memory.selection.kind === "legacy" &&
+          memory.capabilities.purgeHistory === true &&
+          memory.provider.purgeHistory
+        ) {
           // Best effort: the conversation rows are already deleted, so failing the clear here
           // would help nothing — a failed purge only leaves stale summaries recallable.
           try {
-            const purged = await configuredMemory.provider.purgeHistory(
+            const purged = await memory.provider.purgeHistory(
               {
                 botId: target.botId,
                 generations: [
@@ -2986,14 +3035,23 @@ export function createRouter(deps: RouterDeps) {
         const config = await findSpaceMemoryConfig(deps.prisma, context.actor.spaceId);
         return config ? serializeSpaceMemoryConfig(config) : null;
       }),
-      connectProvider: authed.memory.connectProvider.handler(async ({ context, input }) =>
-        persistMemoryProviderConfig(deps, context.actor, input),
+      connectProvider: authed.memory.connectProvider.handler(async ({ context, input, signal }) =>
+        persistMemoryProviderConfig(deps, context.actor, input, signal),
       ),
       setDefaultScope: authed.memory.setDefaultScope.handler(async ({ context, input }) =>
-        updateMemoryProviderDefaultScope(deps, context.actor, input.defaultMemoryScope),
+        updateMemoryProviderDefaultScope(deps, context.actor, input),
       ),
-      disconnectProvider: authed.memory.disconnectProvider.handler(async ({ context }) =>
-        disconnectMemoryProvider(deps, context.actor),
+      disconnectProvider: authed.memory.disconnectProvider.handler(async ({ context, input }) =>
+        disconnectMemoryProvider(deps, context.actor, input),
+      ),
+      banks: authed.memory.banks.handler(async ({ context, input, signal }) =>
+        listMemoryBanks(deps, context.actor, input, signal),
+      ),
+      bank: authed.memory.bank.handler(async ({ context, input, signal }) =>
+        readMemoryBank(deps, context.actor, input, signal),
+      ),
+      createBank: authed.memory.createBank.handler(async ({ context, input, signal }) =>
+        createMemoryBank(deps, context.actor, input, signal),
       ),
     },
     routines: {

@@ -5,6 +5,7 @@ import {
   cloudAgentsEnabled,
   compatibleCatalogModelsForSpace,
   OPENAI_COMPATIBLE_PROVIDER_ID,
+  memoryProviderCapabilities,
   parseModelSecret,
   selectConfiguredModel,
   toStringRecord,
@@ -18,6 +19,28 @@ import {
 } from "@rakazo/db";
 import type { RouterDeps } from "./router.js";
 import { resolveThreadTarget } from "./thread-target.js";
+
+async function disclosedMemoryConfig(
+  prisma: RouterDeps["prisma"],
+  actor: Actor,
+  botIds: string[] | undefined,
+) {
+  const config = await prisma.spaceMemoryConfig.findUnique({ where: { spaceId: actor.spaceId } });
+  if (!config || !memoryProviderCapabilities(config.provider).banks) return config;
+  const binding = await prisma.botMemoryBank.findFirst({
+    where: {
+      spaceMemoryConfigId: config.id,
+      bot: {
+        userId: actor.userId,
+        spaceId: actor.spaceId,
+        archivedAt: null,
+        ...(botIds ? { id: { in: botIds } } : {}),
+      },
+    },
+    select: { id: true },
+  });
+  return binding ? config : null;
+}
 
 export async function aiConsentStatus(
   deps: RouterDeps,
@@ -96,9 +119,7 @@ export async function aiConsentStatus(
             include: { credential: true },
           })
       : [],
-    uses.includes("memory")
-      ? deps.prisma.spaceMemoryConfig.findUnique({ where: { spaceId: actor.spaceId } })
-      : null,
+    uses.includes("memory") ? disclosedMemoryConfig(deps.prisma, actor, botIds) : null,
     modelsEnabled ? deps.prisma.deploymentSettings.findUnique({ where: { id: "default" } }) : null,
     deps.prisma.aiDataConsent.findMany({
       where: { userId: actor.userId, spaceId: actor.spaceId, version: AI_DISCLOSURE_VERSION },

@@ -125,7 +125,7 @@ describe("finalizeRun", () => {
         },
         { publish } as never,
       ),
-    ).resolves.toEqual({ continuationRunId: null });
+    ).resolves.toEqual({ continuationRunId: null, memoryRetentionId: null });
     expect(transaction).toHaveBeenCalledTimes(2);
     expect(createEvent).toHaveBeenCalledOnce();
     expect(publish).toHaveBeenCalledOnce();
@@ -186,7 +186,7 @@ describe("finalizeRun", () => {
         outcome: "failed",
         error: "intro failed",
       }),
-    ).resolves.toEqual({ continuationRunId: "run-reply" });
+    ).resolves.toEqual({ continuationRunId: "run-reply", memoryRetentionId: null });
 
     expect(tx.run.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
@@ -364,7 +364,7 @@ describe("finalizeRun", () => {
         outcome: "failed",
         error: "routine failed",
       }),
-    ).resolves.toEqual({ continuationRunId: "run-reply" });
+    ).resolves.toEqual({ continuationRunId: "run-reply", memoryRetentionId: null });
 
     expect(tx.run.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
@@ -378,6 +378,136 @@ describe("finalizeRun", () => {
       where: { id: { in: ["steer-channel"] }, runId: null },
       data: { runId: "run-reply", claimedAt: null },
     });
+  });
+
+  function completedRetentionTx(sources: Array<{ id: string }>) {
+    const order: string[] = [];
+    const tx = {
+      $queryRaw: vi
+        .fn()
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([
+          { botId: "bot-1", spaceMemoryConfigId: "config-1", bankId: "bank-a" },
+        ]),
+      run: {
+        findUnique: vi.fn(async () => ({
+          id: "run-1",
+          status: "running",
+          startedAt: null,
+          spaceId: "space-1",
+          botId: "bot-1",
+          userId: "user-1",
+          threadId: "thread-1",
+          trigger: "user",
+          sourceMessageId: "message-user",
+          memorySelection: {
+            kind: "bank",
+            configId: "config-1",
+            provider: "hindsight",
+            bindingId: "binding-1",
+            bankId: "bank-a",
+          },
+        })),
+        findFirst: vi.fn(async () => null),
+        updateMany: vi.fn(async () => ({ count: 1 })),
+      },
+      attempt: { updateMany: vi.fn(async () => ({ count: 1 })) },
+      task: { updateMany: vi.fn(async () => ({ count: 1 })) },
+      thread: { update: vi.fn(async () => ({ nextEventSeq: 1, nextMessageSeq: 1 })) },
+      message: {
+        create: vi.fn(async () => ({ id: "message-bot" })),
+        findMany: vi.fn(async () => sources),
+      },
+      event: {
+        create: vi.fn(async () => ({ threadId: "thread-1", seq: 3 })),
+        deleteMany: vi.fn(async () => ({ count: 0 })),
+      },
+      spaceMemoryConfig: {
+        findUnique: vi.fn(async () => ({ spaceId: "space-1", provider: "hindsight" })),
+      },
+      bot: {
+        findUnique: vi.fn(async () => ({ userId: "user-1", spaceId: "space-1" })),
+        update: vi.fn(async () => ({})),
+      },
+      spaceMember: { findUnique: vi.fn(async () => ({ id: "member-1" })) },
+      memoryRetention: {
+        create: vi.fn(async () => {
+          order.push("retention");
+          return { id: "retention-1" };
+        }),
+      },
+      steeringMessage: {
+        findMany: vi.fn(async () => []),
+        deleteMany: vi.fn(async () => {
+          order.push("steering-cleanup");
+          return { count: 0 };
+        }),
+        updateMany: vi.fn(async () => ({ count: 0 })),
+      },
+    };
+    const prisma = {
+      $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
+    } as unknown as PrismaClient;
+    return { tx, prisma, order };
+  }
+
+  const completedInput = (occurredAt: Date) => ({
+    spaceId: "space-1",
+    threadId: "thread-1",
+    botId: "bot-1",
+    runId: "run-1",
+    taskId: "task-1",
+    attemptId: "attempt-1",
+    leaseOwner: "worker-1",
+    leaseFence: 1,
+    outcome: "completed" as const,
+    blocks: [{ kind: "text" as const, text: "Noted." }],
+    memoryRetention: {
+      bindingId: "binding-1",
+      content:
+        "User 2026-10-13T00:00:00.000Z:\nI like tea\n\nAssistant 2026-10-13T00:00:01.000Z:\nNoted.",
+      occurredAt: occurredAt.toISOString(),
+      sourceMessageIds: ["message-user"],
+    },
+  });
+
+  it("records the learning intent with the winning reply before steering cleanup", async () => {
+    const { tx, prisma, order } = completedRetentionTx([{ id: "message-user" }]);
+
+    await expect(finalizeRun(prisma, completedInput(new Date()))).resolves.toEqual({
+      continuationRunId: null,
+      memoryRetentionId: "retention-1",
+    });
+    expect(order).toEqual(["retention", "steering-cleanup"]);
+    expect(tx.memoryRetention.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        runId: "run-1",
+        bindingId: "binding-1",
+        sourceKey: "conversation",
+        sourceKind: "conversation",
+        state: "pending",
+        attemptCount: 0,
+        operationId: expect.stringMatching(/^[0-9a-f-]{36}$/),
+      }),
+      select: { id: true },
+    });
+  });
+
+  it("commits the reply without an intent when a source or the clock is not trustworthy", async () => {
+    const missingSource = completedRetentionTx([]);
+    await expect(finalizeRun(missingSource.prisma, completedInput(new Date()))).resolves.toEqual({
+      continuationRunId: null,
+      memoryRetentionId: null,
+    });
+    expect(missingSource.tx.message.create).toHaveBeenCalledOnce();
+    expect(missingSource.tx.memoryRetention.create).not.toHaveBeenCalled();
+
+    const stale = completedRetentionTx([{ id: "message-user" }]);
+    await expect(
+      finalizeRun(stale.prisma, completedInput(new Date(Date.now() - 6 * 60_000))),
+    ).resolves.toEqual({ continuationRunId: null, memoryRetentionId: null });
+    expect(stale.tx.message.create).toHaveBeenCalledOnce();
+    expect(stale.tx.memoryRetention.create).not.toHaveBeenCalled();
   });
 });
 

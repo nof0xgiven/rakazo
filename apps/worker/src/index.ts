@@ -13,6 +13,7 @@ import {
   createConnectorStack,
   createJobReconciler,
   createLinearProvider,
+  createMemoryRetentionReconciler,
   createMessagingContextLoader,
   createPostgresReconciliationLeadership,
   createRunExecutor,
@@ -164,7 +165,7 @@ async function main() {
   const connector = stack.destination;
   await connector.start();
   integrationSettings.warmDirectories();
-  const memoryProviders = new SpaceMemoryProviderResolver(prisma, secrets);
+  const memoryProviders = new SpaceMemoryProviderResolver({ prisma, secrets });
   const home = new LocalAgentHomeStore(dataDir);
   const artifacts = new LocalArtifactStore(dataDir);
   const inMemoryJobs = process.env.WAKEUP_DRIVER === "memory" ? new InMemoryJobQueue() : undefined;
@@ -285,6 +286,7 @@ async function main() {
         jobs,
         signal: shutdown.signal,
       }),
+    reconcileMemoryRetention: createMemoryRetentionReconciler({ prisma, jobs }),
   });
   reconciler.start();
 

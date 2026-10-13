@@ -43,7 +43,7 @@ describe("createBackgroundJobHandlers", () => {
       workerId: "worker-1",
       runtime: {} as unknown as AgentRuntime,
       secretStore: {} as unknown as EncryptedSecretStore,
-      memoryProviders: { resolve: vi.fn(async () => null) },
+      memoryProviders: { select: vi.fn(), resolve: vi.fn() },
       messaging: {} as unknown as MessagingSurface,
       linearProvider: {} as unknown as IssueTrackerProvider,
       linearSignal: new AbortController().signal,
@@ -71,7 +71,7 @@ describe("createBackgroundJobHandlers", () => {
     const runtime = {} as unknown as AgentRuntime;
     const jobs = {} as unknown as JobPublisher;
     const secretStore = {} as unknown as EncryptedSecretStore;
-    const memoryProviders = { resolve: vi.fn(async () => null) };
+    const memoryProviders = { select: vi.fn(), resolve: vi.fn() };
     const resolveModel = vi.fn();
     const handlers = createBackgroundJobHandlers({
       executor: { resolveModel, contextStrategy: "current" } as unknown as ReturnType<
@@ -128,7 +128,7 @@ describe("createBackgroundJobHandlers", () => {
         workerId: "worker-fixture",
         runtime,
         secretStore: {} as unknown as EncryptedSecretStore,
-        memoryProviders: { resolve: vi.fn(async () => null) },
+        memoryProviders: { select: vi.fn(), resolve: vi.fn() },
         linearProvider: {} as unknown as IssueTrackerProvider,
         linearSignal: new AbortController().signal,
       });
