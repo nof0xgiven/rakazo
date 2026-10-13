@@ -300,11 +300,11 @@ msgstr "Добавьте время выполнения для разового
 
 #: src/pages/Shell.tsx
 msgid "Add a schedule, webhook, GitHub, Linear, or message trigger"
-msgstr ""
+msgstr "Добавьте расписание, вебхук, GitHub, Linear или триггер сообщения."
 
 #: src/pages/RoutineEditor.tsx
 msgid "Add a schedule, webhook, GitHub, Linear, or message trigger to run this routine."
-msgstr ""
+msgstr "Добавьте расписание, вебхук, GitHub, Linear или триггер сообщения для запуска этой задачи."
 
 #: src/pages/McpServersOverlay.tsx
 msgid "Add a server name."

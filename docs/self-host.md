@@ -288,6 +288,14 @@ loopback host. In `NODE_ENV=development`, captured messages are available from
 `http://127.0.0.1:3100/api/dev/emails` with cache disabled; the API logs only delivery
 metadata, never reset tokens. The inbox route is not registered in test, staging, or production.
 
+### Linear automations
+
+Linear triggers need no configuration: Rakazo polls each connected Linear account every minute
+with the person's API key. To start runs faster, a deployment whose `API_URL` is a public HTTPS
+origin shows a webhook URL under the account's **Webhooks** section. A Linear workspace admin
+registers that URL in Linear for Issue and Comment events, then pastes Linear's signing secret
+back into Rakazo. Loopback or private `API_URL` values keep polling only.
+
 ### Billing
 
 Billing stays off, with no paywall, unless `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, and
