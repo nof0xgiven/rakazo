@@ -1,9 +1,9 @@
 import { Trans, useLingui } from "@lingui/react/macro";
 import type { IntegrationCatalogResult, IntegrationSetupState } from "@rakazo/contracts";
+import { newClientId } from "@rakazo/core";
 import { Button, Input } from "@rakazo/ui-web";
 import { Check } from "lucide-react";
 import { useEffect, useId, useState } from "react";
-import { newClientId } from "../../lib/client-id";
 import { connectMcpOauth } from "../../lib/mcp-connect";
 import { rpc } from "../../lib/rpc";
 import { errorText } from "../../lib/user-error";

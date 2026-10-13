@@ -39,6 +39,27 @@ function rosterRunErrorId(
   return latestRun.id;
 }
 
+export const botMemoryBankInclude = {
+  select: { id: true, spaceMemoryConfigId: true, bankId: true, name: true },
+} as const;
+
+type BotMemoryBankRecord = {
+  id: string;
+  spaceMemoryConfigId: string;
+  bankId: string;
+  name: string;
+};
+
+function mapBotMemoryBank(binding: BotMemoryBankRecord | null): Bot["memoryBank"] {
+  if (!binding) return null;
+  return {
+    id: binding.id,
+    configId: binding.spaceMemoryConfigId,
+    bankId: binding.bankId,
+    name: binding.name,
+  };
+}
+
 function mapBot(
   bot: {
     id: string;
@@ -54,6 +75,7 @@ function mapBot(
     archivedAt: Date | null;
     parentBotId: string | null;
     memoryScope: string | null;
+    memoryBank: BotMemoryBankRecord | null;
     createdAt: Date;
     updatedAt: Date;
     thread: { id: string; unread: boolean } | null;
@@ -91,6 +113,7 @@ function mapBot(
     unread: bot.thread.unread,
     parentBotId: bot.parentBotId,
     memoryScope: bot.memoryScope as "isolated" | "shared" | null,
+    memoryBank: mapBotMemoryBank(bot.memoryBank),
     threadId: bot.thread.id,
     preview,
     status,
@@ -312,6 +335,7 @@ export function createRepos(prisma: PrismaClient) {
           },
           runs: activeRunSelection,
           computer: { select: { scope: true } },
+          memoryBank: botMemoryBankInclude,
         },
         orderBy: [{ pinned: "desc" }, { position: "asc" }, { createdAt: "asc" }],
       });
@@ -398,7 +422,7 @@ export function createRepos(prisma: PrismaClient) {
           userId: actor.userId,
           ...(options.includeArchived ? {} : { archivedAt: null }),
         },
-        include: { thread: true, computer: true },
+        include: { thread: true, computer: true, memoryBank: botMemoryBankInclude },
       });
       if (!bot) throw new IsolationError();
       return bot;
@@ -538,7 +562,7 @@ export function createRepos(prisma: PrismaClient) {
           });
           return tx.bot.findFirstOrThrow({
             where: { id: created.id },
-            include: { thread: true, computer: true },
+            include: { thread: true, computer: true, memoryBank: botMemoryBankInclude },
           });
         });
 
@@ -551,7 +575,7 @@ export function createRepos(prisma: PrismaClient) {
               spawnKey: input.spawnKey,
             },
           },
-          include: { thread: true, computer: true },
+          include: { thread: true, computer: true, memoryBank: botMemoryBankInclude },
         });
       };
 
@@ -626,7 +650,7 @@ export function createRepos(prisma: PrismaClient) {
           return tx.bot.update({
             where: { id: botId },
             data: { computerId: computer.id },
-            include: { thread: true, computer: true },
+            include: { thread: true, computer: true, memoryBank: botMemoryBankInclude },
           });
         }),
       );

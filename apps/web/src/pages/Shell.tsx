@@ -49,6 +49,7 @@ import {
   latestAnswerableAskMessageId,
   mentionChipKey,
   nestRosterByParent,
+  newClientId,
   plainTextFromMarkdown,
   projectMessageReactions,
   reorderBotTo,
@@ -180,7 +181,6 @@ import {
   shouldNotifyBrowser,
 } from "../lib/browser-notifications";
 import { startCall, useCallSession } from "../lib/call-session";
-import { newClientId } from "../lib/client-id";
 import {
   embeddableScreenUrl,
   loadComputerScreen,

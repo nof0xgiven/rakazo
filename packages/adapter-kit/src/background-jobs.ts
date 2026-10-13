@@ -22,6 +22,7 @@ const payloadSchemas = {
   "history.compact": z.object({ threadId: z.string().min(1) }),
   "messaging.deliver": z.object({ runId: z.string().min(1).optional() }),
   "cloud_agent.poll": z.object({ agentId: z.string().min(1) }),
+  "memory.retain": z.object({ retentionId: z.string().min(1) }),
 } satisfies { [Name in BackgroundJobName]: z.ZodType<BackgroundJobPayloads[Name]> };
 
 export function parseBackgroundJob(name: string, payload: unknown): BackgroundJob {
@@ -153,6 +154,20 @@ export function cloudAgentPollJob(
     name: "cloud_agent.poll",
     payload,
     replaceKey: cloudAgentPollJobKey(payload.agentId),
+    ...(availableAt ? { availableAt } : {}),
+  };
+}
+
+export function memoryRetainJobKey(retentionId: string): string {
+  return `memory.retain:${retentionId}`;
+}
+
+export function memoryRetainJob(retentionId: string, availableAt?: Date): BackgroundJob {
+  return {
+    name: "memory.retain",
+    payload: { retentionId },
+    replaceKey: memoryRetainJobKey(retentionId),
+    maxAttempts: 1,
     ...(availableAt ? { availableAt } : {}),
   };
 }

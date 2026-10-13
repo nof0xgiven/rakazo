@@ -1,3 +1,4 @@
+import type { MemoryBank } from "@rakazo/contracts";
 import type {
   AdapterContext,
   AdapterDescriptor,
@@ -38,6 +39,7 @@ import type {
   ConnectorEvent,
   ConnectorTool,
   ControlLeaseRef,
+  MemoryBankPage,
   MemoryCapabilities,
   MemoryCommitRequest,
   MemoryExportRequest,
@@ -64,10 +66,12 @@ import type {
   SecretRecord,
   SemanticMemoryCapabilities,
   SemanticMemoryForgetRequest,
+  SemanticMemoryOperationStatus,
   SemanticMemoryPurgeHistoryRequest,
   SemanticMemoryRecallRequest,
   SemanticMemoryResponse,
   SemanticMemoryResult,
+  SemanticMemorySaveReceipt,
   SemanticMemorySaveRequest,
   SnapshotRef,
   SpeechClip,
@@ -232,8 +236,8 @@ export interface SemanticMemoryProvider {
   save(
     request: SemanticMemorySaveRequest,
     context: AdapterContext,
-  ): Promise<SemanticMemoryResponse>;
-  purgeHistory(
+  ): Promise<SemanticMemoryResponse<void | SemanticMemorySaveReceipt>>;
+  purgeHistory?(
     request: SemanticMemoryPurgeHistoryRequest,
     context: AdapterContext,
   ): Promise<SemanticMemoryResponse>;
@@ -242,6 +246,22 @@ export interface SemanticMemoryProvider {
     request: SemanticMemoryForgetRequest,
     context: AdapterContext,
   ): Promise<SemanticMemoryResponse<{ id: string; expired: boolean; reason: string | null }>>;
+  operationStatus?(
+    operationId: string,
+    context: AdapterContext,
+  ): Promise<SemanticMemoryResponse<SemanticMemoryOperationStatus>>;
+}
+
+export interface MemoryBankDirectory {
+  list(
+    request: { q?: string; offset: number; limit: number },
+    context: AdapterContext,
+  ): Promise<SemanticMemoryResponse<MemoryBankPage>>;
+  read(bankId: string, context: AdapterContext): Promise<SemanticMemoryResponse<MemoryBank>>;
+  create(
+    request: { bankId: string; name: string },
+    context: AdapterContext,
+  ): Promise<SemanticMemoryResponse<MemoryBank>>;
 }
 
 export interface AgentRuntime {

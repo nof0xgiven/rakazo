@@ -431,6 +431,7 @@ model Bot {
   taughtSkills      TaughtSkill[]
   memoryDocuments   MemoryDocument[]
   agentHome         AgentHome?
+  memoryBank        BotMemoryBank?
   browserProfile    BrowserProfile?
   artifacts         Artifact[]
   tasks             Task[]
@@ -652,6 +653,8 @@ model Run {
   usageRecords         UsageRecord[]
   steeringMessages     SteeringMessage[]
   externalMessage      ExternalMessage?
+  memorySelection      Json?
+  memoryRetentions     MemoryRetention[]
 
   @@unique([spaceId, clientNonce])
   @@index([status, leaseExpiresAt])
@@ -1127,8 +1130,52 @@ model SpaceMemoryConfig {
   defaultMemoryScope String   @default("isolated")
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
+  memoryBanks        BotMemoryBank[]
 
   @@map("space_memory_configs")
+}
+
+model BotMemoryBank {
+  id                  String            @id @default(cuid())
+  botId               String            @unique
+  bot                 Bot               @relation(fields: [botId], references: [id], onDelete: Cascade)
+  spaceMemoryConfigId String
+  spaceMemoryConfig   SpaceMemoryConfig @relation(fields: [spaceMemoryConfigId], references: [id], onDelete: Cascade)
+  bankId              String
+  name                String
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+  retentions          MemoryRetention[]
+
+  @@index([spaceMemoryConfigId])
+  @@map("bot_memory_banks")
+}
+
+model MemoryRetention {
+  id            String        @id @default(cuid())
+  runId         String
+  run           Run           @relation(fields: [runId], references: [id], onDelete: Cascade)
+  bindingId     String
+  binding       BotMemoryBank @relation(fields: [bindingId], references: [id], onDelete: Cascade)
+  sourceKey     String
+  sourceKind    String
+  content       String?       @db.Text
+  occurredAt    DateTime
+  operationId   String        @unique
+  acceptedAt    DateTime?
+  state         String
+  attemptCount  Int           @default(0)
+  nextAttemptAt DateTime?
+  claimToken    String?
+  leaseUntil    DateTime?
+  failureCode   String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  @@unique([runId, sourceKey])
+  @@index([state, nextAttemptAt, id])
+  @@index([bindingId])
+  @@map("memory_retentions")
 }
 
 model Secret {
