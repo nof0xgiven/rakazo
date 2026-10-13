@@ -22,7 +22,9 @@ export const LEGACY_REASONING_THINKING_LEVELS: readonly ThinkingLevel[] = [
 export const LEGACY_COMPATIBLE_MAX_TOKENS = 4096;
 
 /** Supported levels for an unsaved deployment-only connection, from its `reasoning` flag. */
-export function deploymentCompatibleThinkingLevels(reasoning: boolean | undefined): ThinkingLevel[] {
+export function deploymentCompatibleThinkingLevels(
+  reasoning: boolean | undefined,
+): ThinkingLevel[] {
   return reasoning ? [...LEGACY_REASONING_THINKING_LEVELS] : ["off"];
 }
 

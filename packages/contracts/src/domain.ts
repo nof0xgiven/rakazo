@@ -1084,10 +1084,13 @@ export const ModelBackupListSchema = z
         });
       }
       seen.add(key);
-      hostedModelIdLengthIssue(choice.provider, choice.modelId, HOSTED_BACKUP_MODEL_ID_MAX_LENGTH, ctx, [
-        index,
-        "modelId",
-      ]);
+      hostedModelIdLengthIssue(
+        choice.provider,
+        choice.modelId,
+        HOSTED_BACKUP_MODEL_ID_MAX_LENGTH,
+        ctx,
+        [index, "modelId"],
+      );
     }
   });
 
@@ -1176,7 +1179,10 @@ function openAiCompatibleCapabilityIssues(
       path: ["thinkingLevels"],
     });
   }
-  if (value.defaultThinkingLevel !== null && !value.thinkingLevels.includes(value.defaultThinkingLevel)) {
+  if (
+    value.defaultThinkingLevel !== null &&
+    !value.thinkingLevels.includes(value.defaultThinkingLevel)
+  ) {
     ctx.addIssue({
       code: "custom",
       message: "Default reasoning effort must be a supported level",
@@ -1222,9 +1228,7 @@ export const OpenAiCompatibleDiscoveredModelSchema = z.object({
   modelId: z.string(),
   capabilities: OpenAiCompatibleModelCapabilitiesSchema.nullable(),
 });
-export type OpenAiCompatibleDiscoveredModel = z.infer<
-  typeof OpenAiCompatibleDiscoveredModelSchema
->;
+export type OpenAiCompatibleDiscoveredModel = z.infer<typeof OpenAiCompatibleDiscoveredModelSchema>;
 
 export const ModelConfigurationUsageSchema = z.object({
   kind: z.enum(["default", "bot", "routine", "backup", "run", "steering"]),
@@ -1249,7 +1253,10 @@ const ModelConfigurationUsagesSchema = z.array(ModelConfigurationUsageSchema).mi
 
 export const ModelConfigurationConflictDataSchema = z.discriminatedUnion("reason", [
   z.object({ reason: z.literal("models_in_use"), usages: ModelConfigurationUsagesSchema }),
-  z.object({ reason: z.literal("model_connection_in_use"), usages: ModelConfigurationUsagesSchema }),
+  z.object({
+    reason: z.literal("model_connection_in_use"),
+    usages: ModelConfigurationUsagesSchema,
+  }),
   z.object({ reason: z.literal("model_effort_in_use"), usages: ModelConfigurationUsagesSchema }),
   z.object({ reason: z.literal("model_configuration_changed") }),
 ]);
@@ -1265,7 +1272,11 @@ export function hostedModelIdLengthIssue(
 ) {
   if (!provider || provider === OPENAI_COMPATIBLE_PROVIDER_ID) return;
   if (typeof modelId === "string" && modelId.length > maxLength) {
-    ctx.addIssue({ code: "custom", message: `Model id must be at most ${maxLength} characters`, path });
+    ctx.addIssue({
+      code: "custom",
+      message: `Model id must be at most ${maxLength} characters`,
+      path,
+    });
   }
 }
 

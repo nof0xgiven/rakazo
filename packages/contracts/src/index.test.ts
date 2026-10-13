@@ -116,9 +116,9 @@ describe("contracts", () => {
       "expectedConfigurationVersion",
     );
     expect(issuePaths({ ...edit, modelId: "model-a" })).toContain("modelId");
-    expect(issuePaths({ provider: "openai", apiKey: "sk-test-key-123", models: [model] })).toContain(
-      "models",
-    );
+    expect(
+      issuePaths({ provider: "openai", apiKey: "sk-test-key-123", models: [model] }),
+    ).toContain("models");
   });
 
   it("validates each Cloudflare routing id and allows an update to send only one", () => {
