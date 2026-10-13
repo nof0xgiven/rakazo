@@ -267,6 +267,7 @@ export function BotSettings({
   const [committedBank, setCommittedBank] = useState(bot.memoryBank);
   const committedBankRef = useRef(bot.memoryBank);
   const serverBankRef = useRef(bot.memoryBank);
+  const serverBankChangedRef = useRef(false);
   const [pendingBank, setPendingBank] = useState<{ bank: MemoryBank | null } | null>(null);
   const pendingBankSavesRef = useRef(0);
   const bankGenerationRef = useRef(0);
@@ -297,7 +298,10 @@ export function BotSettings({
     const next = bot.memoryBank;
     if (serverBankRef.current === next) return;
     serverBankRef.current = next;
-    if (pendingSavesRef.current > 0) return;
+    if (pendingSavesRef.current > 0) {
+      serverBankChangedRef.current = true;
+      return;
+    }
     committedBankRef.current = next;
     setCommittedBank(next);
   }, [bot.memoryBank]);
@@ -475,6 +479,11 @@ export function BotSettings({
     }
     if (pendingSavesRef.current === 0) {
       setDisabledBuiltinTools([...persistedDisabledToolsRef.current]);
+      if (serverBankChangedRef.current) {
+        serverBankChangedRef.current = false;
+        committedBankRef.current = serverBankRef.current;
+        setCommittedBank(serverBankRef.current);
+      }
     }
     setSaving(pendingSavesRef.current > 0);
   }
