@@ -30,6 +30,7 @@ import {
   ATTACHMENT_MAX_BYTES,
   ATTACHMENT_MAX_COUNT,
   canReactToThreadMessage,
+  LINEAR_CONNECTOR_ID,
   MESSAGE_REACTIONS,
   normalizeCreateBotProfile,
 } from "@rakazo/contracts";
@@ -1914,7 +1915,9 @@ export function ShellPage() {
       rpc.connections.catalog({}).catch(() => [] as ConnectionCatalogItem[]),
     ]).then(([connections, catalog]) => {
       if (cancelled) return;
-      const connected = connections.filter((row) => row.status === "connected");
+      const connected = connections.filter(
+        (row) => row.status === "connected" && row.connectorId !== LINEAR_CONNECTOR_ID,
+      );
       const options: Array<{
         id: string;
         name: string;
@@ -1927,7 +1930,7 @@ export function ShellPage() {
         connectionId: row.id,
       }));
       for (const item of catalog) {
-        if (item.connected || item.noAuth) continue;
+        if (item.connected || item.noAuth || item.connectorId === LINEAR_CONNECTOR_ID) continue;
         if (
           connected.some(
             (row) =>

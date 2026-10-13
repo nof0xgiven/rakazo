@@ -327,7 +327,8 @@ export function LinearAccounts({
               placeholderTextColor={native.tertiaryLabel}
               secureTextEntry
               style={styles.input}
-              textContentType="none"
+              // iOS offers to save "none" secure fields as passwords; oneTimeCode suppresses that.
+              textContentType="oneTimeCode"
               value={secret}
             />
             <View style={styles.actions}>
@@ -474,7 +475,8 @@ export function LinearAccounts({
             placeholderTextColor={native.tertiaryLabel}
             secureTextEntry
             style={styles.input}
-            textContentType="none"
+            // iOS offers to save "none" secure fields as passwords; oneTimeCode suppresses that.
+            textContentType="oneTimeCode"
             value={apiKey}
           />
           {formError ? <Text style={styles.error}>{formError}</Text> : null}
