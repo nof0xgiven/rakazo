@@ -108,7 +108,8 @@ export function isIssueTrackerError(error: unknown): error is IssueTrackerError 
 /** Canonical UTC millisecond timestamp; throws on an unparseable value rather than inventing one. */
 export function canonicalOccurrence(value: string): string {
   const time = Date.parse(value);
-  if (!Number.isFinite(time)) throw new IssueTrackerError({ code: "invalid_response", retryAt: null });
+  if (!Number.isFinite(time))
+    throw new IssueTrackerError({ code: "invalid_response", retryAt: null });
   return new Date(time).toISOString();
 }
 
@@ -118,6 +119,7 @@ export function issueTrackerEventKey(
   entityId: string,
   occurredAt: string,
 ): string {
-  if (kind === "issue.updated") return `${kind}:${entityId}:${Date.parse(canonicalOccurrence(occurredAt))}`;
+  if (kind === "issue.updated")
+    return `${kind}:${entityId}:${Date.parse(canonicalOccurrence(occurredAt))}`;
   return `${kind}:${entityId}`;
 }

@@ -29,6 +29,7 @@ import type {
   FaviconResolver,
   getBotSecretMetadata,
   IntegrationProviderSettings,
+  LinearService,
   MemoryProviderResolver,
   PiOAuthLogins,
   RemoteConnectorDependencies,
@@ -54,6 +55,7 @@ import {
   computerSupportsTerminal,
   computerSupportsUpdate,
   computerUpdateView,
+  connectionCapabilities,
   createFaviconResolver,
   createTicket,
   createVoiceProvider,
@@ -73,10 +75,14 @@ import {
   isSandboxGoneError,
   isScratchpadStatus,
   kickModelCredentialRefresh,
+  LINEAR_MESSAGES,
+  LinearServiceError,
+  linearDatabaseNow,
   listAvailablePiCatalog,
   listBotSecretMetadata,
   listPiCatalog,
   listScratchpadItems,
+  lockLinearSources,
   McpOAuthBroker,
   mapScratchpadItem,
   modelCredentialAuthKindsForSpace,
@@ -144,6 +150,7 @@ import {
   ComputerCommandSchema,
   foldComputerCommands,
   IntegrationProviderIdSchema,
+  LINEAR_CONNECTOR_ID,
   OPENAI_COMPATIBLE_PROVIDER_ID,
   parseTicketRef,
   usableModelId,
@@ -157,6 +164,7 @@ import {
   containsSecret,
   expandSkillReferencesInPrompt,
   hasMixedOneShotSchedule,
+  hasRoutineEventTrigger,
   isOneShotRoutineCrons,
   nextCronDateAcrossStrict,
 } from "@rakazo/core";
@@ -213,6 +221,7 @@ import {
   toTicketCommentDto,
   toTicketDto,
   touchGroupUpdatedAt,
+  withTransactionRetry,
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import { deleteAgentSecret, listAgentSecrets, putAgentSecret } from "./agent-secrets.js";
@@ -255,6 +264,19 @@ import {
   promptFocus,
   startOnboarding,
 } from "./onboarding.js";
+import {
+  AUTOMATION_CHANGED_MESSAGE,
+  assertAttachableLinearSource,
+  cancelRoutineLinearRuns,
+  linearConnectionIds,
+  linearTriggerData,
+  lockRoutineOwnerBot,
+  publishRoutineLinearWork,
+  refreshRoutineLinearSources,
+  sameLinearTrigger,
+  sameLinearTriggerState,
+  toLinearTrigger,
+} from "./routine-linear.js";
 import { listRoutineRuns } from "./routine-runs.js";
 import { listSpaceRuns } from "./runs.js";
 import { addScreenProxyCapability } from "./screen-proxy.js";
@@ -575,6 +597,7 @@ export interface RouterDeps {
   composio?: ComposioProvider;
   mcpOAuth?: McpOAuthBroker;
   connectors: ConnectorRegistry;
+  linear: LinearService;
   remoteConnectors?: RemoteConnectorDependencies;
   artifacts: ArtifactStore;
   dataDir: string;
@@ -634,6 +657,13 @@ function mapSpaceLifecycleError(error: unknown): unknown {
     return new ORPCError("BAD_REQUEST", { message: error.message });
   }
   return error;
+}
+
+function linearRpcError(error: unknown): unknown {
+  if (error instanceof LinearServiceError) {
+    return new ORPCError(error.code, { message: error.message });
+  }
+  return mapSpaceLifecycleError(error);
 }
 
 const BOT_SECRET_INPUT_ERRORS = [
@@ -3265,7 +3295,7 @@ export function createRouter(deps: RouterDeps) {
         await repos.getBot(context.actor, input.botId);
         return listRoutinesDto(deps, context.actor, input.botId);
       }),
-      create: authed.routines.create.handler(async ({ context, input }) => {
+      create: authed.routines.create.handler(async ({ context, input, signal }) => {
         if (hasMixedOneShotSchedule(input.crons)) {
           throw new ORPCError("BAD_REQUEST", {
             message: "A one-time schedule can't be combined with other schedules.",
@@ -3284,26 +3314,68 @@ export function createRouter(deps: RouterDeps) {
           const computedNextRunAt = nextRoutineDate(input.crons, input.timezone);
           nextRunAt = input.active ? computedNextRunAt : null;
         }
-        const row = await deps.prisma.routine.create({
-          data: {
-            spaceId: context.actor.spaceId,
-            botId: input.botId,
-            userId: context.actor.userId,
-            name: input.name,
-            prompt: input.prompt,
-            crons: input.crons,
-            timezone: input.timezone,
-            notify: input.notify,
-            active: input.active,
-            webhookEnabled: input.webhookEnabled,
-            githubEnabled: input.githubEnabled,
-            messageProvider: input.messageProvider,
-            modelProvider: input.modelProvider,
-            modelId: input.modelId,
-            thinkingLevel: input.thinkingLevel,
-            nextRunAt,
-          },
+        const linearTrigger = input.linearTrigger;
+        const validation = linearTrigger
+          ? await deps.linear
+              .validateTrigger(context.actor, linearTrigger, signal ?? new AbortController().signal)
+              .catch((error: unknown) => {
+                throw linearRpcError(error);
+              })
+          : null;
+        const created = await withTransactionRetry(() =>
+          deps.prisma.$transaction(async (tx) => {
+            await lockRoutineOwnerBot(tx, context.actor, input.botId, {
+              membership: true,
+              includeArchived: false,
+            });
+            const sources = await lockLinearSources(tx, linearConnectionIds(linearTrigger));
+            if (linearTrigger && validation) {
+              assertAttachableLinearSource(
+                sources.get(linearTrigger.connectionId),
+                context.actor,
+                validation.sourceRevision,
+              );
+            }
+            const activatedAt = linearTrigger && input.active ? await linearDatabaseNow(tx) : null;
+            const row = await tx.routine.create({
+              data: {
+                spaceId: context.actor.spaceId,
+                botId: input.botId,
+                userId: context.actor.userId,
+                name: input.name,
+                prompt: input.prompt,
+                crons: input.crons,
+                timezone: input.timezone,
+                notify: input.notify,
+                active: input.active,
+                webhookEnabled: input.webhookEnabled,
+                githubEnabled: input.githubEnabled,
+                messageProvider: input.messageProvider,
+                modelProvider: input.modelProvider,
+                modelId: input.modelId,
+                thinkingLevel: input.thinkingLevel,
+                nextRunAt,
+                ...(linearTrigger
+                  ? {
+                      linearTrigger: {
+                        create: { ...linearTriggerData(linearTrigger), activatedAt },
+                      },
+                    }
+                  : {}),
+              },
+              include: { linearTrigger: true },
+            });
+            const linearSyncIds = await refreshRoutineLinearSources(
+              tx,
+              sources,
+              linearConnectionIds(linearTrigger),
+            );
+            return { row, linearSyncIds };
+          }),
+        ).catch((error: unknown) => {
+          throw mapSpaceLifecycleError(error);
         });
+        const row = created.row;
         if (bot.thread) {
           await deps.events.append({
             spaceId: context.actor.spaceId,
@@ -3316,9 +3388,13 @@ export function createRouter(deps: RouterDeps) {
         if (row.active && row.nextRunAt) {
           await deps.jobs.enqueue(routineWakeupJob(row.id, row.nextRunAt));
         }
+        await publishRoutineLinearWork(deps, {
+          linearSyncIds: created.linearSyncIds,
+          cancelled: null,
+        });
         return mapRoutine(row);
       }),
-      update: authed.routines.update.handler(async ({ context, input }) => {
+      update: authed.routines.update.handler(async ({ context, input, signal }) => {
         // Archived bots keep their routines paused, so resolve an active parent before any write.
         const existing = await deps.prisma.routine.findFirst({
           where: {
@@ -3327,6 +3403,7 @@ export function createRouter(deps: RouterDeps) {
             userId: context.actor.userId,
             bot: { archivedAt: null },
           },
+          include: { linearTrigger: true },
         });
         if (!existing) throw new ORPCError("NOT_FOUND");
         const bot = await repos.getBot(context.actor, existing.botId);
@@ -3366,10 +3443,20 @@ export function createRouter(deps: RouterDeps) {
         if (modelChanged) {
           await assertRoutineModel(deps, context.actor, { modelProvider, modelId });
         }
-        if (crons.length === 0 && !webhookEnabled && !githubEnabled && !messageProvider) {
-          throw new ORPCError("BAD_REQUEST", {
-            message: "Add a schedule, webhook, GitHub, or message trigger",
-          });
+        const existingLinearTrigger = toLinearTrigger(existing.linearTrigger);
+        const linearTrigger =
+          input.linearTrigger === undefined ? existingLinearTrigger : input.linearTrigger;
+        const linearChanged =
+          input.linearTrigger !== undefined &&
+          !sameLinearTrigger(existingLinearTrigger, input.linearTrigger);
+        const hasEventTrigger = hasRoutineEventTrigger({
+          webhookEnabled,
+          githubEnabled,
+          messageProvider,
+          linearTrigger,
+        });
+        if (crons.length === 0 && !hasEventTrigger) {
+          throw new ORPCError("BAD_REQUEST", { message: "Add a trigger" });
         }
         if (hasMixedOneShotSchedule(crons)) {
           throw new ORPCError("BAD_REQUEST", {
@@ -3382,7 +3469,7 @@ export function createRouter(deps: RouterDeps) {
               message: "One-shot schedules must be created from chat.",
             });
           }
-          if (!existing.nextRunAt && existing.lastRunAt) {
+          if (!existing.nextRunAt && existing.lastRunAt && !hasEventTrigger) {
             throw new ORPCError("BAD_REQUEST", {
               message: "This one-shot already ran.",
             });
@@ -3425,55 +3512,116 @@ export function createRouter(deps: RouterDeps) {
             : isOneShotRoutineCrons(crons)
               ? (armedOneShotAt ?? existing.nextRunAt)
               : (recalculatedNextRunAt ?? existing.nextRunAt);
-        // Re-check the parent in the write itself so an archive that lands after the read wins.
-        // Model patches must also match the snapshot used to resolve omitted model fields.
-        const row = await deps.prisma.routine
-          .update({
-            where: {
-              id: existing.id,
-              bot: { archivedAt: null },
-              ...(touchesModel
-                ? {
-                    modelProvider: existing.modelProvider,
-                    modelId: existing.modelId,
-                    thinkingLevel: existing.thinkingLevel,
-                  }
-                : {}),
-            },
-            data: {
-              name: input.name,
-              prompt: input.prompt,
-              crons: input.crons,
-              timezone: input.timezone,
-              active: input.active,
-              notify: input.notify,
-              webhookEnabled: input.webhookEnabled,
-              githubEnabled: input.githubEnabled,
-              messageProvider: input.messageProvider,
-              ...(touchesModel ? { modelProvider, modelId, thinkingLevel } : {}),
-              nextRunAt,
-            },
-          })
-          .catch(async (error: unknown) => {
-            if (isRecordNotFound(error)) {
-              if (
-                touchesModel &&
-                (await deps.prisma.routine.findFirst({
-                  where: {
-                    id: existing.id,
-                    spaceId: context.actor.spaceId,
-                    userId: context.actor.userId,
-                    bot: { archivedAt: null },
-                  },
-                  select: { id: true },
-                }))
-              ) {
-                throw new ORPCError("CONFLICT", { message: "Routine model changed; retry." });
-              }
-              throw new ORPCError("NOT_FOUND");
+        const validation =
+          linearTrigger && (linearChanged || (!existing.active && active))
+            ? await deps.linear
+                .validateTrigger(
+                  context.actor,
+                  linearTrigger,
+                  signal ?? new AbortController().signal,
+                )
+                .catch((error: unknown) => {
+                  throw linearRpcError(error);
+                })
+            : null;
+        const updated = await withTransactionRetry(() =>
+          deps.prisma.$transaction(async (tx) => {
+            await lockRoutineOwnerBot(tx, context.actor, existing.botId, {
+              membership: true,
+              includeArchived: false,
+            });
+            const connectionIds = linearConnectionIds(existing.linearTrigger, linearTrigger);
+            const sources = await lockLinearSources(tx, connectionIds);
+            if (linearTrigger && validation) {
+              assertAttachableLinearSource(
+                sources.get(linearTrigger.connectionId),
+                context.actor,
+                validation.sourceRevision,
+              );
             }
-            throw error;
-          });
+            await tx.$queryRaw`SELECT id FROM routines WHERE id = ${existing.id} FOR UPDATE`;
+            const current = await tx.routine.findFirst({
+              where: {
+                id: existing.id,
+                spaceId: context.actor.spaceId,
+                userId: context.actor.userId,
+              },
+              include: { linearTrigger: true },
+            });
+            if (!current) throw new ORPCError("NOT_FOUND");
+            if (
+              touchesModel &&
+              (current.modelProvider !== existing.modelProvider ||
+                current.modelId !== existing.modelId ||
+                current.thinkingLevel !== existing.thinkingLevel)
+            ) {
+              throw new ORPCError("CONFLICT", { message: "Routine model changed; retry." });
+            }
+            if (
+              current.active !== existing.active ||
+              !sameLinearTriggerState(current.linearTrigger, existing.linearTrigger)
+            ) {
+              throw new ORPCError("CONFLICT", { message: AUTOMATION_CHANGED_MESSAGE });
+            }
+            let subscriptionChanged = false;
+            let cancelLinearRuns = false;
+            if (!linearTrigger) {
+              if (current.linearTrigger) {
+                await tx.routineLinearTrigger.delete({ where: { routineId: current.id } });
+                subscriptionChanged = true;
+                cancelLinearRuns = true;
+              }
+            } else if (!current.linearTrigger) {
+              await tx.routineLinearTrigger.create({
+                data: {
+                  routineId: current.id,
+                  ...linearTriggerData(linearTrigger),
+                  activatedAt: active ? await linearDatabaseNow(tx) : null,
+                },
+              });
+              subscriptionChanged = true;
+            } else if (linearChanged || current.active !== active) {
+              await tx.routineLinearTrigger.update({
+                where: { routineId: current.id },
+                data: {
+                  ...linearTriggerData(linearTrigger),
+                  revision: { increment: 1 },
+                  activatedAt: active ? await linearDatabaseNow(tx) : null,
+                },
+              });
+              subscriptionChanged = true;
+              cancelLinearRuns = linearChanged || !active;
+            }
+            const row = await tx.routine.update({
+              where: { id: current.id },
+              data: {
+                name: input.name,
+                prompt: input.prompt,
+                crons: input.crons,
+                timezone: input.timezone,
+                active: input.active,
+                notify: input.notify,
+                webhookEnabled: input.webhookEnabled,
+                githubEnabled: input.githubEnabled,
+                messageProvider: input.messageProvider,
+                ...(touchesModel ? { modelProvider, modelId, thinkingLevel } : {}),
+                nextRunAt,
+              },
+              include: { linearTrigger: true },
+            });
+            const cancelled = cancelLinearRuns
+              ? await cancelRoutineLinearRuns(tx, current.id, new Date())
+              : null;
+            const linearSyncIds = subscriptionChanged
+              ? await refreshRoutineLinearSources(tx, sources, connectionIds)
+              : [];
+            return { row, cancelled, linearSyncIds };
+          }),
+        ).catch((error: unknown) => {
+          if (error instanceof IsolationError) throw new ORPCError("NOT_FOUND");
+          throw mapSpaceLifecycleError(error);
+        });
+        const row = updated.row;
         if (bot.thread) {
           await deps.events.append({
             spaceId: context.actor.spaceId,
@@ -3494,15 +3642,49 @@ export function createRouter(deps: RouterDeps) {
             await deps.jobs.cancel(routineJobKey(row.id));
           }
         }
+        await publishRoutineLinearWork(deps, {
+          linearSyncIds: updated.linearSyncIds,
+          cancelled: updated.cancelled,
+        });
         return mapRoutine(row);
       }),
       remove: authed.routines.remove.handler(async ({ context, input }) => {
         const existing = await deps.prisma.routine.findFirst({
-          where: { id: input.routineId, spaceId: context.actor.spaceId },
+          where: {
+            id: input.routineId,
+            spaceId: context.actor.spaceId,
+            userId: context.actor.userId,
+          },
+          include: { linearTrigger: true },
         });
         if (!existing) throw new IsolationError();
-        await deps.prisma.routine.delete({ where: { id: existing.id } });
+        const removed = await withTransactionRetry(() =>
+          deps.prisma.$transaction(async (tx) => {
+            await lockRoutineOwnerBot(tx, context.actor, existing.botId, {
+              membership: false,
+              includeArchived: true,
+            });
+            const connectionIds = linearConnectionIds(existing.linearTrigger);
+            const sources = await lockLinearSources(tx, connectionIds);
+            await tx.$queryRaw`SELECT id FROM routines WHERE id = ${existing.id} FOR UPDATE`;
+            const current = await tx.routine.findUnique({
+              where: { id: existing.id },
+              include: { linearTrigger: true },
+            });
+            if (!current) throw new IsolationError();
+            if (current.linearTrigger?.connectionId !== existing.linearTrigger?.connectionId) {
+              throw new ORPCError("CONFLICT", { message: AUTOMATION_CHANGED_MESSAGE });
+            }
+            const cancelled = current.linearTrigger
+              ? await cancelRoutineLinearRuns(tx, current.id, new Date())
+              : null;
+            await tx.routine.delete({ where: { id: current.id } });
+            const linearSyncIds = await refreshRoutineLinearSources(tx, sources, connectionIds);
+            return { cancelled, linearSyncIds };
+          }),
+        );
         await deps.jobs.cancel(routineJobKey(existing.id));
+        await publishRoutineLinearWork(deps, removed);
         return { ok: true as const };
       }),
       testRun: authed.routines.testRun.handler(async ({ context, input }) => {
@@ -3531,6 +3713,10 @@ export function createRouter(deps: RouterDeps) {
         try {
           // Task + run must commit together so a nonce collision cannot leave an orphan queued Task.
           run = await deps.prisma.$transaction(async (tx) => {
+            await lockRoutineOwnerBot(tx, context.actor, routine.botId, {
+              membership: true,
+              includeArchived: false,
+            });
             if (nonce) {
               const existing = await tx.run.findFirst({
                 where: { threadId, clientNonce: nonce },
@@ -3577,7 +3763,7 @@ export function createRouter(deps: RouterDeps) {
             });
             if (existing) return { runId: existing.id };
           }
-          throw error;
+          throw mapSpaceLifecycleError(error);
         }
         // Keep enqueue outside the nonce-collision catch. The queued run is durable;
         // log enqueue failures and still return success — the reconciler repairs a missed wake.
@@ -4609,7 +4795,31 @@ export function createRouter(deps: RouterDeps) {
             }
           }),
         );
-        return catalogs.flat();
+        const query = input.query?.trim().toLowerCase() ?? "";
+        const includeNativeLinear =
+          (!input.connectorId || input.connectorId === LINEAR_CONNECTOR_ID) &&
+          "linear automations".includes(query);
+        const nativeLinear: ConnectorCatalogItem[] = includeNativeLinear
+          ? [
+              {
+                connectorId: LINEAR_CONNECTOR_ID,
+                slug: "linear",
+                name: "Linear automations",
+                logo: null,
+                connected:
+                  (await deps.prisma.connection.count({
+                    where: {
+                      spaceId: context.actor.spaceId,
+                      userId: context.actor.userId,
+                      connectorId: LINEAR_CONNECTOR_ID,
+                      status: "connected",
+                    },
+                  })) > 0,
+                noAuth: false,
+              },
+            ]
+          : [];
+        return [...nativeLinear, ...catalogs.flat()];
       }),
       list: authed.connections.list.handler(async ({ context }) => {
         const rows = await deps.prisma.connection.findMany({
@@ -4621,11 +4831,14 @@ export function createRouter(deps: RouterDeps) {
           provider: row.provider,
           displayName: row.displayName,
           status: row.status as "pending" | "connected" | "revoked" | "error",
-          capabilities: [],
+          capabilities: connectionCapabilities(row.connectorId),
           createdAt: row.createdAt.toISOString(),
         }));
       }),
       begin: authed.connections.begin.handler(async ({ context, input }) => {
+        if (input.connectorId === LINEAR_CONNECTOR_ID) {
+          throw new ORPCError("BAD_REQUEST", { message: LINEAR_MESSAGES.useApiKey });
+        }
         const connector =
           deps.integrationSettings &&
           (input.connectorId === "composio" || input.connectorId === "pipedream")
@@ -4830,6 +5043,9 @@ export function createRouter(deps: RouterDeps) {
           },
         });
         if (!existing) throw new IsolationError();
+        if (existing.connectorId === LINEAR_CONNECTOR_ID) {
+          throw new ORPCError("BAD_REQUEST", { message: LINEAR_MESSAGES.useApiKey });
+        }
         const connector = deps.connectors.managed(existing.connectorId);
         if (!connector) {
           throw new ORPCError("BAD_REQUEST", {
@@ -5156,7 +5372,7 @@ export function createRouter(deps: RouterDeps) {
           provider: row.provider,
           displayName: row.displayName,
           status: row.status as "pending" | "connected" | "revoked" | "error",
-          capabilities: [],
+          capabilities: connectionCapabilities(row.connectorId),
           createdAt: row.createdAt.toISOString(),
         };
       }),
@@ -5173,6 +5389,14 @@ export function createRouter(deps: RouterDeps) {
             userId: context.actor.userId,
           },
         });
+        if (snapshot?.connectorId === LINEAR_CONNECTOR_ID) {
+          try {
+            await deps.linear.revoke(context.actor, { connectionId: snapshot.id });
+          } catch (error) {
+            throw linearRpcError(error);
+          }
+          return { ok: true as const };
+        }
         const needsProvider =
           snapshot &&
           ["connected", "pending", "error"].includes(snapshot.status) &&
@@ -5359,6 +5583,7 @@ export function createRouter(deps: RouterDeps) {
         return { ok: true as const };
       }),
       tools: authed.connections.tools.handler(async ({ context, input }) => {
+        if (input.connectorId === LINEAR_CONNECTOR_ID) return [];
         const connector = deps.connectors.managed(input.connectorId);
         if (!connector) return [];
         const row = await deps.prisma.connection.findFirst({
@@ -5395,6 +5620,44 @@ export function createRouter(deps: RouterDeps) {
             provider: input.provider,
           });
           return [];
+        }
+      }),
+    },
+    linear: {
+      connect: authed.linear.connect.handler(async ({ context, input }) => {
+        try {
+          return await deps.linear.connect(
+            context.actor,
+            input,
+            context.signal ?? new AbortController().signal,
+          );
+        } catch (error) {
+          throw linearRpcError(error);
+        }
+      }),
+      status: authed.linear.status.handler(async ({ context, input }) => {
+        try {
+          return await deps.linear.status(context.actor, input);
+        } catch (error) {
+          throw linearRpcError(error);
+        }
+      }),
+      options: authed.linear.options.handler(async ({ context, input }) => {
+        try {
+          return await deps.linear.options(
+            context.actor,
+            input,
+            context.signal ?? new AbortController().signal,
+          );
+        } catch (error) {
+          throw linearRpcError(error);
+        }
+      }),
+      configureWebhook: authed.linear.configureWebhook.handler(async ({ context, input }) => {
+        try {
+          return await deps.linear.configureWebhook(context.actor, input);
+        } catch (error) {
+          throw linearRpcError(error);
         }
       }),
     },
@@ -6848,6 +7111,7 @@ function mapRoutine(row: {
   modelProvider: string | null;
   modelId: string | null;
   thinkingLevel: string | null;
+  linearTrigger: Parameters<typeof toLinearTrigger>[0];
   lastRunAt: Date | null;
   nextRunAt: Date | null;
   createdAt: Date;
@@ -6867,6 +7131,7 @@ function mapRoutine(row: {
     modelProvider: row.modelProvider ?? null,
     modelId: row.modelId ?? null,
     thinkingLevel: (row.thinkingLevel as Routine["thinkingLevel"]) ?? null,
+    linearTrigger: toLinearTrigger(row.linearTrigger),
     lastRunAt: row.lastRunAt?.toISOString() ?? null,
     nextRunAt: row.nextRunAt?.toISOString() ?? null,
     createdAt: row.createdAt.toISOString(),
@@ -6876,6 +7141,7 @@ function mapRoutine(row: {
 async function listRoutinesDto(deps: RouterDeps, actor: Actor, botId: string) {
   const rows = await deps.prisma.routine.findMany({
     where: { botId, spaceId: actor.spaceId },
+    include: { linearTrigger: true },
   });
   return rows.map(mapRoutine);
 }
@@ -6976,10 +7242,6 @@ async function messagingIdentityDto(
 
 function isUniqueViolation(error: unknown): boolean {
   return Boolean(error && typeof error === "object" && "code" in error && error.code === "P2002");
-}
-
-function isRecordNotFound(error: unknown): boolean {
-  return Boolean(error && typeof error === "object" && "code" in error && error.code === "P2025");
 }
 
 function messagingChannelDto(membership: {

@@ -6,6 +6,7 @@ import type {
   IntegrationCatalogResult,
   IntegrationCatalogSurface,
 } from "@rakazo/contracts";
+import { LINEAR_CONNECTOR_ID } from "@rakazo/contracts";
 import {
   abortableDelay,
   buildFeaturedConnectorTiles,
@@ -31,6 +32,7 @@ import {
 import { ChevronDown, ChevronLeft, ChevronUp, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { IntegrationSetup } from "../components/integrations/IntegrationSetup";
+import { LinearAccounts } from "../components/integrations/LinearAccounts";
 import { optionalCatalogFeedProbe } from "../lib/optional-catalog-feed";
 import { rpc } from "../lib/rpc";
 import { errorText } from "../lib/user-error";
@@ -73,10 +75,12 @@ export function PluginsOverlay({
   onClose,
   onOpenMcp,
   activeBotId,
+  openLinear,
 }: {
   onClose: () => void;
   onOpenMcp?: () => void;
   activeBotId?: string;
+  openLinear?: boolean;
 }) {
   const { t } = useLingui();
   const [setupOpen, setSetupOpen] = useState(false);
@@ -109,6 +113,7 @@ export function PluginsOverlay({
   const [toolsOpen, setToolsOpen] = useState(true);
   const [toolsTick, setToolsTick] = useState(0);
   const connectionAttempt = useRef<AbortController | null>(null);
+  const [linearAddRequest, setLinearAddRequest] = useState(0);
 
   async function refresh() {
     const [items, installs, rows, catalogFeed] = await Promise.all([
@@ -139,6 +144,11 @@ export function PluginsOverlay({
 
   useEffect(() => {
     void refresh()
+      .then((items) => {
+        if (!openLinear) return;
+        const linear = items.find((entry) => entry.connectorId === LINEAR_CONNECTOR_ID);
+        if (linear) openLinearSetup(linear);
+      })
       .catch((err: unknown) => setCatalogError(errorText(err, t`Could not load integrations`)))
       .finally(() => setLoading(false));
     return () => connectionAttempt.current?.abort();
@@ -154,7 +164,7 @@ export function PluginsOverlay({
   }, [catalog, detailKey]);
 
   useEffect(() => {
-    if (!detailKey) {
+    if (!detailKey || detailKey.connectorId === LINEAR_CONNECTOR_ID) {
       setTools([]);
       setToolsLoading(false);
       return;
@@ -192,9 +202,23 @@ export function PluginsOverlay({
   function closeDetail() {
     setDetailKey(null);
     setTools([]);
+    setLinearAddRequest(0);
+  }
+
+  function openLinearSetup(item: ConnectionCatalogItem) {
+    openDetail(item);
+    setLinearAddRequest((request) => request + 1);
   }
 
   function itemConnected(item: ConnectionCatalogItem) {
+    if (item.connectorId === LINEAR_CONNECTOR_ID) {
+      return connections.some(
+        (row) =>
+          row.connectorId === item.connectorId &&
+          row.provider === item.slug &&
+          row.status !== "revoked",
+      );
+    }
     return (
       item.connected || activeAccounts(connections, item).some((row) => row.status === "connected")
     );
@@ -212,6 +236,10 @@ export function PluginsOverlay({
   }
 
   async function connect(item: ConnectionCatalogItem) {
+    if (item.connectorId === LINEAR_CONNECTOR_ID) {
+      openLinearSetup(item);
+      return;
+    }
     connectionAttempt.current?.abort();
     const controller = new AbortController();
     connectionAttempt.current = controller;
@@ -287,7 +315,15 @@ export function PluginsOverlay({
   }
 
   async function uninstall(item: ConnectionCatalogItem) {
-    const matches = activeAccounts(connections, item);
+    const matches =
+      item.connectorId === LINEAR_CONNECTOR_ID
+        ? connections.filter(
+            (row) =>
+              row.connectorId === item.connectorId &&
+              row.provider === item.slug &&
+              row.status !== "revoked",
+          )
+        : activeAccounts(connections, item);
     if (matches.length === 0) {
       setItemConnected(item, false);
       closeDetail();
@@ -525,6 +561,7 @@ export function PluginsOverlay({
     const connecting = pending === key;
     const uninstalling = pending === `uninstall:${key}`;
     const toolCount = tools.length;
+    const linear = item.connectorId === LINEAR_CONNECTOR_ID;
 
     return (
       <div data-testid="connection-detail" className="space-y-5">
@@ -567,96 +604,122 @@ export function PluginsOverlay({
           </Button>
         </div>
 
-        <Card data-testid="connection-accounts">
-          <CardHeader>
-            <CardTitle>
-              <Trans>Accounts</Trans>
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {accounts.map((row) => (
-              <div key={row.id} className="flex items-center gap-2">
-                <Input
-                  value={labelDrafts[row.id] ?? row.displayName}
-                  aria-label={t`Account label`}
-                  className="h-9 rounded-lg px-3 text-[13px]"
-                  onChange={(event) =>
-                    setLabelDrafts((current) => ({ ...current, [row.id]: event.target.value }))
-                  }
-                  onBlur={() => void renameAccount(row)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") {
-                      event.currentTarget.blur();
-                    }
-                  }}
-                />
-                <Button
-                  type="button"
-                  variant="ghost"
-                  className="h-9 shrink-0 rounded-full px-2 text-[12px]"
-                  size="sm"
-                  disabled={pending === row.id || uninstalling}
-                  onClick={() => void revokeAccount(row, item)}
-                >
-                  {pending === row.id ? <Trans>Removing…</Trans> : <Trans>Remove</Trans>}
-                </Button>
-              </div>
-            ))}
-            <Button
-              type="button"
-              variant="secondary"
-              className="rounded-full"
-              size="sm"
-              disabled={connecting || uninstalling}
-              onClick={() => void connect(item)}
-            >
-              {connecting ? <Trans>Adding…</Trans> : <Trans>Add another</Trans>}
-            </Button>
-          </CardContent>
-        </Card>
-
-        <Card data-testid="connection-tools">
-          <button
-            type="button"
-            className="flex w-full items-center justify-between gap-3 px-6 py-4 text-left"
-            onClick={() => setToolsOpen((open) => !open)}
-            aria-expanded={toolsOpen}
-          >
-            <span className="text-base font-medium text-foreground">
-              {toolsLoading ? (
-                <Trans>Tools</Trans>
-              ) : (
-                <Plural value={toolCount} one="# tool" other="# tools" />
-              )}
-            </span>
-            {toolsOpen ? (
-              <ChevronUp className="size-4 text-muted-foreground" />
-            ) : (
-              <ChevronDown className="size-4 text-muted-foreground" />
+        {linear ? (
+          <LinearAccounts
+            accounts={connections.filter(
+              (row) => row.connectorId === item.connectorId && row.provider === item.slug,
             )}
-          </button>
-          {toolsOpen ? (
-            <CardContent className="border-t border-border pt-3">
-              {toolsLoading ? (
-                <p className="text-sm text-muted-foreground">
-                  <Trans>Loading tools…</Trans>
-                </p>
-              ) : tools.length === 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  <Trans>No tools available.</Trans>
-                </p>
-              ) : (
-                <ul className="space-y-2">
-                  {tools.map((tool) => (
-                    <li key={tool.name} className="text-sm text-foreground">
-                      {humanizeToolName(tool.name)}
-                    </li>
-                  ))}
-                </ul>
-              )}
+            defaultLabel={nextAccountLabel(
+              item.name,
+              accounts.filter((row) => row.status === "connected").length,
+            )}
+            addRequest={linearAddRequest}
+            busy={uninstalling}
+            labelValue={(row) => labelDrafts[row.id] ?? row.displayName}
+            onLabelChange={(row, value) =>
+              setLabelDrafts((current) => ({ ...current, [row.id]: value }))
+            }
+            onLabelCommit={(row) => void renameAccount(row)}
+            removingId={pending}
+            onRemove={(row) => void revokeAccount(row, item)}
+            onChanged={async () => {
+              await refresh().catch(() => undefined);
+            }}
+          />
+        ) : (
+          <Card data-testid="connection-accounts">
+            <CardHeader>
+              <CardTitle>
+                <Trans>Accounts</Trans>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {accounts.map((row) => (
+                <div key={row.id} className="flex items-center gap-2">
+                  <Input
+                    value={labelDrafts[row.id] ?? row.displayName}
+                    aria-label={t`Account label`}
+                    className="h-9 rounded-lg px-3 text-[13px]"
+                    onChange={(event) =>
+                      setLabelDrafts((current) => ({ ...current, [row.id]: event.target.value }))
+                    }
+                    onBlur={() => void renameAccount(row)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.currentTarget.blur();
+                      }
+                    }}
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    className="h-9 shrink-0 rounded-full px-2 text-[12px]"
+                    size="sm"
+                    disabled={pending === row.id || uninstalling}
+                    onClick={() => void revokeAccount(row, item)}
+                  >
+                    {pending === row.id ? <Trans>Removing…</Trans> : <Trans>Remove</Trans>}
+                  </Button>
+                </div>
+              ))}
+              <Button
+                type="button"
+                variant="secondary"
+                className="rounded-full"
+                size="sm"
+                disabled={connecting || uninstalling}
+                onClick={() => void connect(item)}
+              >
+                {connecting ? <Trans>Adding…</Trans> : <Trans>Add another</Trans>}
+              </Button>
             </CardContent>
-          ) : null}
-        </Card>
+          </Card>
+        )}
+
+        {linear ? null : (
+          <Card data-testid="connection-tools">
+            <button
+              type="button"
+              className="flex w-full items-center justify-between gap-3 px-6 py-4 text-left"
+              onClick={() => setToolsOpen((open) => !open)}
+              aria-expanded={toolsOpen}
+            >
+              <span className="text-base font-medium text-foreground">
+                {toolsLoading ? (
+                  <Trans>Tools</Trans>
+                ) : (
+                  <Plural value={toolCount} one="# tool" other="# tools" />
+                )}
+              </span>
+              {toolsOpen ? (
+                <ChevronUp className="size-4 text-muted-foreground" />
+              ) : (
+                <ChevronDown className="size-4 text-muted-foreground" />
+              )}
+            </button>
+            {toolsOpen ? (
+              <CardContent className="border-t border-border pt-3">
+                {toolsLoading ? (
+                  <p className="text-sm text-muted-foreground">
+                    <Trans>Loading tools…</Trans>
+                  </p>
+                ) : tools.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    <Trans>No tools available.</Trans>
+                  </p>
+                ) : (
+                  <ul className="space-y-2">
+                    {tools.map((tool) => (
+                      <li key={tool.name} className="text-sm text-foreground">
+                        {humanizeToolName(tool.name)}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </CardContent>
+            ) : null}
+          </Card>
+        )}
       </div>
     );
   }

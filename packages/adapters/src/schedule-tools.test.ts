@@ -168,6 +168,9 @@ describe("filterBuiltinToolsForThread", () => {
     expect(filterBuiltinToolsForRun(tools, "user").map((tool) => tool.name)).toContain(
       "schedule_create",
     );
+    expect(filterBuiltinToolsForRun(tools, "linear").map((tool) => tool.name)).not.toContain(
+      "schedule_create",
+    );
   });
 
   it("composes thread then run filters without dropping group schedule tools", () => {

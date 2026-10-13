@@ -633,6 +633,7 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
           id: routine.id,
           name: routine.name,
           crons: routine.crons,
+          linearTrigger: routine.linearTrigger,
           botId: routine.botId,
           botName: routine.botName,
         })),

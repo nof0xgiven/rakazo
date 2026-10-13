@@ -1,7 +1,11 @@
 import type { JobPublisher, MessagingInboundMessage } from "@rakazo/adapter-kit";
 import { messagingDeliverJob, runContinueJob } from "@rakazo/adapter-kit";
 import type { MessageBlock } from "@rakazo/contracts";
-import { parseMessagingCommand, sanitizeMessagingLabel } from "@rakazo/core";
+import {
+  formatUntrustedDeliveryPayload,
+  parseMessagingCommand,
+  sanitizeMessagingLabel,
+} from "@rakazo/core";
 import type {
   MessagingIdentityRequest,
   Prisma,
@@ -23,7 +27,6 @@ import {
 } from "./team-chat-startup.js";
 import {
   deliverWebhookEvent,
-  formatUntrustedDeliveryPayload,
   inboundEventName,
   messagingWakeIdempotencyKey,
 } from "./webhook-inbound.js";

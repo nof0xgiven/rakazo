@@ -19,6 +19,7 @@ import {
   stripNoResponseReply,
   subagentMarksUnread,
   TICKET_SILENT_REPLY_GUIDANCE,
+  threadContextForRun,
 } from "./executor.js";
 import { finalBlocksAfterMidTurnProgress } from "./user-progress.js";
 
@@ -215,6 +216,40 @@ describe("background ticket runs", () => {
     const steps = [{ kind: "steps" as const, steps: [{ label: "Ticket comment", count: 1 }] }];
     const blocks = finalBlocksAfterMidTurnProgress(steps, runAllowsSilentEmpty("tickets"));
     expect(blocks).toEqual([]);
+  });
+});
+
+describe("Linear automation runs", () => {
+  it("follow routine isolation, silence, narration and unread policy with visible output", () => {
+    expect(
+      threadContextForRun(
+        "linear",
+        {
+          messages: [{ id: "m1" }],
+          summary: "summary",
+          historyCompactedUpToSeq: 4,
+        },
+        false,
+      ),
+    ).toEqual({
+      messages: [],
+      summary: null,
+      historyCompactedUpToSeq: null,
+      includeSemanticRecall: false,
+    });
+    expect(runAllowsSilentEmpty("linear")).toBe(true);
+    expect(runReplyGuidance("linear")).toBe(ROUTINE_SILENT_REPLY_GUIDANCE);
+    expect(runPromotesMidTurnNarration("linear")).toBe(false);
+    expect(completionMarksUnread("linear", "")).toBe(false);
+    expect(completionMarksUnread("linear", "Triaged the issue.")).toBe(true);
+    expect(subagentMarksUnread("linear", "completed")).toBe(false);
+    expect(subagentMarksUnread("linear", "failed")).toBe(true);
+    expect(runSendsFinishNotification("linear")).toBe(true);
+    expect(
+      completionMessageSegments([{ kind: "text", text: "Triaged the issue." }], {
+        allowSilentEmpty: runAllowsSilentEmpty("linear"),
+      }),
+    ).toEqual([{ kind: "text", text: "Triaged the issue." }]);
   });
 });
 

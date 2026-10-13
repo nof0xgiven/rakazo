@@ -12,6 +12,7 @@ import {
   createCloudAgentConnection,
   createConnectorStack,
   createJobReconciler,
+  createLinearProvider,
   createMessagingContextLoader,
   createPostgresReconciliationLeadership,
   createRunExecutor,
@@ -40,6 +41,7 @@ import {
   pipedreamConfigFromEnv,
   reconcileCloudAgents,
   reconcileComputerUpdates,
+  reconcileLinearSources,
   resolveDeploymentModel,
   resolvePiSessionRoot,
   resolveSandboxProvider,
@@ -180,6 +182,8 @@ async function main() {
     });
   // One provider instance so emulator launches and polls share the same Map.
   const cloudAgent = createCloudAgentConnection();
+  const shutdown = new AbortController();
+  const linearProvider = createLinearProvider();
   // Shared with the reconciler so a stuck wait uses the same push path as a finish notice.
   const notifications = new ExpoPushProvider(dataDir, (sessionId) =>
     pushSessionExpiresAt(prisma, sessionId),
@@ -243,6 +247,8 @@ async function main() {
     deploymentModelConfigured,
     messaging,
     cloudAgent,
+    linearProvider,
+    linearSignal: shutdown.signal,
   });
   // graphile-worker run() connects through the shared pool. createPool already
   // retries connect() on 53300 a finite number of times. Keep retrying start
@@ -271,6 +277,14 @@ async function main() {
     leadership: createPostgresReconciliationLeadership(pool),
     reconcileCloudAgents: () => reconcileCloudAgents({ prisma, jobs, cloudAgent }),
     reconcileComputerUpdates: () => reconcileComputerUpdates({ prisma, jobs }),
+    reconcileLinearSources: () =>
+      reconcileLinearSources({
+        prisma,
+        secrets,
+        provider: linearProvider,
+        jobs,
+        signal: shutdown.signal,
+      }),
   });
   reconciler.start();
 
@@ -279,8 +293,10 @@ async function main() {
     if (stopping) return;
     stopping = true;
     try {
+      shutdown.abort();
       await reconciler.stop();
       await jobHost.stop();
+      await linearProvider.close();
       await jobs.close();
       await secrets.close();
       await realtime.close();

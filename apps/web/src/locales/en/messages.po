@@ -226,6 +226,7 @@ msgid "Access token (optional)"
 msgstr "Access token (optional)"
 
 #: src/pages/AccountSettingsOverlay.tsx
+#: src/pages/LinearTriggerCard.tsx
 msgid "Account"
 msgstr "Account"
 
@@ -233,15 +234,21 @@ msgstr "Account"
 msgid "Account default"
 msgstr "Account default"
 
+#: src/components/integrations/LinearAccounts.tsx
+msgid "Account details"
+msgstr "Account details"
+
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
 msgid "Account ID"
 msgstr "Account ID"
 
+#: src/components/integrations/LinearAccounts.tsx
 #: src/pages/PluginsOverlay.tsx
 msgid "Account label"
 msgstr "Account label"
 
+#: src/components/integrations/LinearAccounts.tsx
 #: src/pages/PluginsOverlay.tsx
 msgid "Accounts"
 msgstr "Accounts"
@@ -276,6 +283,7 @@ msgstr "Active model"
 msgid "Activity"
 msgstr "Activity"
 
+#: src/components/integrations/LinearAccounts.tsx
 #: src/pages/ModelBackupsSettings.tsx
 #: src/pages/PluginsOverlay.tsx
 #: src/pages/ScratchpadSection.tsx
@@ -291,12 +299,12 @@ msgid "Add a run time for this one-shot."
 msgstr "Add a run time for this one-shot."
 
 #: src/pages/Shell.tsx
-msgid "Add a schedule, webhook, GitHub, or message trigger"
-msgstr "Add a schedule, webhook, GitHub, or message trigger"
+msgid "Add a schedule, webhook, GitHub, Linear, or message trigger"
+msgstr "Add a schedule, webhook, GitHub, Linear, or message trigger"
 
 #: src/pages/RoutineEditor.tsx
-msgid "Add a schedule, webhook, GitHub, or message trigger to run this routine."
-msgstr "Add a schedule, webhook, GitHub, or message trigger to run this routine."
+msgid "Add a schedule, webhook, GitHub, Linear, or message trigger to run this routine."
+msgstr "Add a schedule, webhook, GitHub, Linear, or message trigger to run this routine."
 
 #: src/pages/McpServersOverlay.tsx
 msgid "Add a server name."
@@ -310,6 +318,7 @@ msgstr "Add a stdio command."
 msgid "Add an HTTPS server URL."
 msgstr "Add an HTTPS server URL."
 
+#: src/components/integrations/LinearAccounts.tsx
 #: src/pages/PluginsOverlay.tsx
 msgid "Add another"
 msgstr "Add another"
@@ -499,6 +508,10 @@ msgstr "Answered: {0}"
 msgid "Answered: {answer}"
 msgstr "Answered: {answer}"
 
+#: src/pages/LinearTriggerCard.tsx
+msgid "Any"
+msgstr "Any"
+
 #: src/pages/Paywall.tsx
 msgid "Any model, with your own key"
 msgstr "Any model, with your own key"
@@ -509,6 +522,7 @@ msgstr "API is back, but the update did not finish. Check the host logs."
 
 #: src/components/AskCard.tsx
 #: src/components/integrations/IntegrationSetup.tsx
+#: src/components/integrations/LinearAccounts.tsx
 #: src/lib/localized-provider-hint.ts
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
@@ -596,6 +610,10 @@ msgstr "Ask before sending external email"
 #: src/components/integrations/IntegrationSetup.tsx
 msgid "Ask the server owner to configure this provider."
 msgstr "Ask the server owner to configure this provider."
+
+#: src/pages/LinearTriggerCard.tsx
+msgid "Assignee"
+msgstr "Assignee"
 
 #. placeholder {0}: preset.time
 #: src/pages/RoutineSchedule.tsx
@@ -793,6 +811,7 @@ msgstr "Can't reach the server."
 #: src/components/AskCard.tsx
 #: src/components/ComputerMaintenanceActions.tsx
 #: src/components/ComputerUpdateProgress.tsx
+#: src/components/integrations/LinearAccounts.tsx
 #: src/components/markdown-link-prompt.tsx
 #: src/components/teach/TeachComputerOverlay.tsx
 #: src/pages/Artifacts.tsx
@@ -907,6 +926,10 @@ msgstr "Checking…"
 msgid "Checkout has local changes. Clean it before updating."
 msgstr "Checkout has local changes. Clean it before updating."
 
+#: src/pages/LinearTriggerCard.tsx
+msgid "Choose"
+msgstr "Choose"
+
 #: src/pages/shell/avatar-studio-popover.tsx
 msgid "Choose a bot shape, color, or upload an image"
 msgstr "Choose a bot shape, color, or upload an image"
@@ -918,6 +941,10 @@ msgstr "Choose a bot…"
 #: src/pages/Auth.tsx
 msgid "Choose a new password"
 msgstr "Choose a new password"
+
+#: src/pages/LinearTriggerCard.tsx
+msgid "Choose an event"
+msgstr "Choose an event"
 
 #: src/pages/shell/avatar-studio-popover.tsx
 msgid "Choose file"
@@ -1070,6 +1097,10 @@ msgstr "Command variable"
 msgid "Comment"
 msgstr "Comment"
 
+#: src/pages/LinearTriggerCard.tsx
+msgid "Comment added"
+msgstr "Comment added"
+
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Compact"
 msgstr "Compact"
@@ -1139,6 +1170,7 @@ msgid "Confirm the URL is reachable from this browser session, then test again."
 msgstr "Confirm the URL is reachable from this browser session, then test again."
 
 #: src/components/integrations/IntegrationSetup.tsx
+#: src/components/integrations/LinearAccounts.tsx
 #: src/pages/memory-providers/SerenitySettingsForm.tsx
 #: src/pages/memory-providers/SupermemorySettingsForm.tsx
 #: src/pages/VoiceSettingsOverlay.tsx
@@ -1160,6 +1192,10 @@ msgstr "Connect API key"
 #: src/pages/PluginsOverlay.tsx
 msgid "Connect Executor"
 msgstr "Connect Executor"
+
+#: src/pages/LinearTriggerCard.tsx
+msgid "Connect Linear"
+msgstr "Connect Linear"
 
 #: src/pages/shell/message-cards.tsx
 msgid "Connect MCP server “{name}”"
@@ -1207,6 +1243,7 @@ msgid "Connected. Its tools are available from your next message."
 msgstr "Connected. Its tools are available from your next message."
 
 #: src/components/integrations/IntegrationSetup.tsx
+#: src/components/integrations/LinearAccounts.tsx
 #: src/pages/McpServersOverlay.tsx
 #: src/pages/memory-providers/SerenitySettingsForm.tsx
 #: src/pages/memory-providers/SupermemorySettingsForm.tsx
@@ -1248,11 +1285,13 @@ msgid "Continue with email"
 msgstr "Continue with email"
 
 #: src/components/ComputersUnavailableHint.tsx
+#: src/components/integrations/LinearAccounts.tsx
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
 msgid "Copied"
 msgstr "Copied"
 
+#: src/components/integrations/LinearAccounts.tsx
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
 #: src/pages/Shell.tsx
@@ -1312,6 +1351,7 @@ msgid "Could not complete the update. Try again."
 msgstr "Could not complete the update. Try again."
 
 #: src/components/integrations/IntegrationSetup.tsx
+#: src/components/integrations/LinearAccounts.tsx
 #: src/pages/PluginsOverlay.tsx
 msgid "Could not connect"
 msgstr "Could not connect"
@@ -1341,6 +1381,10 @@ msgstr "Could not connect to the computer screen"
 #: src/pages/Shell.tsx
 msgid "Could not continue"
 msgstr "Could not continue"
+
+#: src/components/integrations/LinearAccounts.tsx
+msgid "Could not copy"
+msgstr "Could not copy"
 
 #: src/pages/shell/bot-panel.tsx
 msgid "Could not create bot"
@@ -1498,6 +1542,10 @@ msgstr "Could not load sign-in options"
 msgid "Could not load skill"
 msgstr "Could not load skill"
 
+#: src/components/integrations/LinearAccounts.tsx
+msgid "Could not load status"
+msgstr "Could not load status"
+
 #: src/pages/Artifacts.tsx
 msgid "Could not load this artifact."
 msgstr "Could not load this artifact."
@@ -1647,6 +1695,10 @@ msgstr "Could not save the credential"
 #: src/pages/shell/message-cards.tsx
 msgid "Could not save this choice"
 msgstr "Could not save this choice"
+
+#: src/components/integrations/LinearAccounts.tsx
+msgid "Could not save webhook"
+msgstr "Could not save webhook"
 
 #: src/pages/PluginsOverlay.tsx
 msgid "Could not search catalog"
@@ -2124,6 +2176,10 @@ msgstr "Enter an API key before testing."
 msgid "Error"
 msgstr "Error"
 
+#: src/pages/LinearTriggerCard.tsx
+msgid "Events"
+msgstr "Events"
+
 #: src/pages/ExternalConversationSettings.tsx
 #: src/pages/RoutineSchedule.tsx
 msgid "Every"
@@ -2232,6 +2288,7 @@ msgid "Filter by date"
 msgstr "Filter by date"
 
 #: src/pages/Artifacts.tsx
+#: src/pages/LinearTriggerCard.tsx
 msgid "Filters"
 msgstr "Filters"
 
@@ -2500,6 +2557,14 @@ msgstr "Isolated"
 msgid "Isolated preview — no access to your account"
 msgstr "Isolated preview — no access to your account"
 
+#: src/pages/LinearTriggerCard.tsx
+msgid "Issue created"
+msgstr "Issue created"
+
+#: src/pages/LinearTriggerCard.tsx
+msgid "Issue updated"
+msgstr "Issue updated"
+
 #: src/pages/shell/dialogs.tsx
 msgid "Its conversation, files, and routines will be permanently deleted. Bots it created stay in your list."
 msgstr "Its conversation, files, and routines will be permanently deleted. Bots it created stay in your list."
@@ -2529,9 +2594,21 @@ msgstr "key"
 msgid "Knowledge"
 msgstr "Knowledge"
 
+#: src/pages/LinearTriggerCard.tsx
+msgid "Labels"
+msgstr "Labels"
+
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Language"
 msgstr "Language"
+
+#: src/components/integrations/LinearAccounts.tsx
+msgid "Last successful poll {lastPolled}"
+msgstr "Last successful poll {lastPolled}"
+
+#: src/components/integrations/LinearAccounts.tsx
+msgid "Last verified webhook {lastWebhook}"
+msgstr "Last verified webhook {lastWebhook}"
 
 #: src/components/DesktopUpdates.tsx
 msgid "Later"
@@ -2549,9 +2626,15 @@ msgstr "Leave"
 msgid "Light"
 msgstr "Light"
 
+#: src/pages/LinearTriggerCard.tsx
 #: src/pages/RoutineEditor.tsx
-msgid "Linear issue"
-msgstr "Linear issue"
+msgid "Linear"
+msgstr "Linear"
+
+#: src/components/integrations/LinearAccounts.tsx
+#: src/pages/LinearTriggerCard.tsx
+msgid "Linear is temporarily unavailable"
+msgstr "Linear is temporarily unavailable"
 
 #: src/pages/MessagingSettingsOverlay.tsx
 msgid "Link a chat app"
@@ -2622,9 +2705,11 @@ msgid "Loading voice providers…"
 msgstr "Loading voice providers…"
 
 #: src/App.tsx
+#: src/components/integrations/LinearAccounts.tsx
 #: src/pages/Artifacts.tsx
 #: src/pages/Auth.tsx
 #: src/pages/IntegrationSetup.tsx
+#: src/pages/LinearTriggerCard.tsx
 #: src/pages/ModelBackupsSettings.tsx
 #: src/pages/Onboarding.tsx
 #: src/pages/PeerMessagesOverlay.tsx
@@ -3000,6 +3085,10 @@ msgstr "New space"
 #: src/pages/Board.tsx
 msgid "New ticket"
 msgstr "New ticket"
+
+#: src/components/integrations/LinearAccounts.tsx
+msgid "No active automations"
+msgstr "No active automations"
 
 #: src/pages/MessagingSettingsOverlay.tsx
 msgid "No agent connections yet."
@@ -3383,6 +3472,10 @@ msgstr "Playing…"
 msgid "Plugin"
 msgstr "Plugin"
 
+#: src/components/integrations/LinearAccounts.tsx
+msgid "Polling"
+msgstr "Polling"
+
 #: src/pages/RoutineEditor.tsx
 msgid "POST to"
 msgstr "POST to"
@@ -3407,6 +3500,10 @@ msgstr "Private"
 #: src/pages/shell/dialogs.tsx
 msgid "Private workspace with its own bots and groups."
 msgstr "Private workspace with its own bots and groups."
+
+#: src/pages/LinearTriggerCard.tsx
+msgid "Project"
+msgstr "Project"
 
 #: src/components/integrations/IntegrationSetup.tsx
 msgid "Project ID"
@@ -3438,6 +3535,10 @@ msgstr "Queued"
 msgid "Quote"
 msgstr "Quote"
 
+#: src/components/integrations/LinearAccounts.tsx
+msgid "Re-enter the signing secret. Re-enable the webhook in Linear if it was disabled."
+msgstr "Re-enter the signing secret. Re-enable the webhook in Linear if it was disabled."
+
 #: src/pages/Shell.tsx
 msgid "React"
 msgstr "React"
@@ -3466,6 +3567,15 @@ msgstr "Recall only"
 #: src/pages/ActivityList.tsx
 msgid "Recent"
 msgstr "Recent"
+
+#: src/components/integrations/LinearAccounts.tsx
+msgid "Reconnect"
+msgstr "Reconnect"
+
+#: src/components/integrations/LinearAccounts.tsx
+#: src/pages/LinearTriggerCard.tsx
+msgid "Reconnect Linear"
+msgstr "Reconnect Linear"
 
 #: src/pages/McpServersOverlay.tsx
 msgid "Reconnect OAuth"
@@ -3563,6 +3673,7 @@ msgid "Release interrupted computer?"
 msgstr "Release interrupted computer?"
 
 #: src/components/ApprovalRulesSettings.tsx
+#: src/components/integrations/LinearAccounts.tsx
 #: src/pages/ModelBackupsSettings.tsx
 #: src/pages/PluginsOverlay.tsx
 #: src/pages/ScratchpadSection.tsx
@@ -3587,6 +3698,10 @@ msgstr "Remove {secretName}? This bot will no longer be able to use it."
 msgid "Remove Git event"
 msgstr "Remove Git event"
 
+#: src/pages/LinearTriggerCard.tsx
+msgid "Remove Linear trigger"
+msgstr "Remove Linear trigger"
+
 #. placeholder {0}: mention.name
 #: src/pages/Shell.tsx
 msgid "Remove mention {0}"
@@ -3605,6 +3720,7 @@ msgstr "Remove schedule"
 msgid "Remove skill {0}"
 msgstr "Remove skill {0}"
 
+#: src/components/integrations/LinearAccounts.tsx
 #: src/pages/RoutineEditor.tsx
 msgid "Remove webhook"
 msgstr "Remove webhook"
@@ -3617,6 +3733,7 @@ msgstr "Removed with chat, computer, and memory."
 msgid "Removed, but list refresh failed"
 msgstr "Removed, but list refresh failed"
 
+#: src/components/integrations/LinearAccounts.tsx
 #: src/pages/PluginsOverlay.tsx
 msgid "Removing…"
 msgstr "Removing…"
@@ -3724,6 +3841,7 @@ msgstr "Restoring your workspace"
 
 #: src/components/AccountAccess.tsx
 #: src/pages/Auth.tsx
+#: src/pages/LinearTriggerCard.tsx
 #: src/pages/ModelBackupsSettings.tsx
 msgid "Retry"
 msgstr "Retry"
@@ -3812,6 +3930,7 @@ msgid "Runs when this bot receives a verified message from this provider."
 msgstr "Runs when this bot receives a verified message from this provider."
 
 #: src/components/AskCard.tsx
+#: src/components/integrations/LinearAccounts.tsx
 #: src/components/teach/SkillDraftCard.tsx
 #: src/pages/Board.tsx
 #: src/pages/ExternalConversationSettings.tsx
@@ -3871,6 +3990,7 @@ msgid "Saving..."
 msgstr "Saving..."
 
 #: src/components/AskCard.tsx
+#: src/components/integrations/LinearAccounts.tsx
 #: src/components/teach/SkillDraftCard.tsx
 #: src/pages/GroupPanel.tsx
 #: src/pages/ModelBackupsSettings.tsx
@@ -4113,6 +4233,10 @@ msgstr "Sign in with the subscription, or test the API key instead."
 msgid "Sign up"
 msgstr "Sign up"
 
+#: src/components/integrations/LinearAccounts.tsx
+msgid "Signing secret"
+msgstr "Signing secret"
+
 #: src/pages/shell/bot-credentials.tsx
 msgid "Site"
 msgstr "Site"
@@ -4214,6 +4338,7 @@ msgstr "Starting…"
 
 #: src/pages/ActivityList.tsx
 #: src/pages/Board.tsx
+#: src/pages/LinearTriggerCard.tsx
 msgid "Status"
 msgstr "Status"
 
@@ -4301,6 +4426,7 @@ msgstr "Teach a task"
 msgid "Teaching in progress. Stop teaching before sending a new message."
 msgstr "Teaching in progress. Stop teaching before sending a new message."
 
+#: src/pages/LinearTriggerCard.tsx
 #: src/pages/shell/bot-panel.tsx
 msgid "Team"
 msgstr "Team"
@@ -4545,6 +4671,15 @@ msgstr "Unassigned"
 msgid "Unavailable"
 msgstr "Unavailable"
 
+#. placeholder {0}: value.connectionId
+#: src/pages/LinearTriggerCard.tsx
+msgid "Unavailable ({0})"
+msgstr "Unavailable ({0})"
+
+#: src/pages/LinearTriggerCard.tsx
+msgid "Unavailable ({id})"
+msgstr "Unavailable ({id})"
+
 #: src/pages/PluginsOverlay.tsx
 msgid "Uninstall"
 msgstr "Uninstall"
@@ -4718,6 +4853,14 @@ msgstr "Voice chat"
 msgid "Wait a moment and test again."
 msgstr "Wait a moment and test again."
 
+#: src/components/integrations/LinearAccounts.tsx
+msgid "Waiting for Linear"
+msgstr "Waiting for Linear"
+
+#: src/components/integrations/LinearAccounts.tsx
+msgid "Waiting for Linear until {until}"
+msgstr "Waiting for Linear until {until}"
+
 #: src/components/SoftwareUpdateSection.tsx
 msgid "Waiting for the API to come back…"
 msgstr "Waiting for the API to come back…"
@@ -4737,6 +4880,22 @@ msgstr "Web, desktop and mobile apps"
 #: src/pages/RoutineEditor.tsx
 msgid "Webhook"
 msgstr "Webhook"
+
+#: src/components/integrations/LinearAccounts.tsx
+msgid "Webhook setup"
+msgstr "Webhook setup"
+
+#: src/components/integrations/LinearAccounts.tsx
+msgid "Webhook URL"
+msgstr "Webhook URL"
+
+#: src/components/integrations/LinearAccounts.tsx
+msgid "Webhooks"
+msgstr "Webhooks"
+
+#: src/components/integrations/LinearAccounts.tsx
+msgid "Webhooks require a public HTTPS API URL."
+msgstr "Webhooks require a public HTTPS API URL."
 
 #: src/pages/shell/bot-credentials.tsx
 msgid "Website login"

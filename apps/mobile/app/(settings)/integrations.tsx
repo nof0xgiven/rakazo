@@ -22,6 +22,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { ConnectorIcon } from "../../components/connector-icon";
+import { LinearAccounts } from "../../components/linear-accounts";
 import { NativeActionButton } from "../../components/native-action-button";
 import { Chevron } from "../../components/row-accessories";
 import { rpc } from "../../lib/api";
@@ -36,6 +37,7 @@ import {
   writeIntegrationsCache,
 } from "../../lib/integrations-cache";
 import { loadLastBotId } from "../../lib/last-bot";
+import { isNativeLinear } from "../../lib/linear";
 import { native, useThemedStyles } from "../../lib/native";
 import { errorText } from "../../lib/user-error";
 
@@ -75,6 +77,7 @@ export default function Integrations() {
   const [toolsLoading, setToolsLoading] = useState(false);
   const [toolsOpen, setToolsOpen] = useState(true);
   const [toolsTick, setToolsTick] = useState(0);
+  const [linearAddOnOpen, setLinearAddOnOpen] = useState(false);
   const connectionAttempt = useRef<AbortController | null>(null);
 
   const cacheScope = useRef<IntegrationsCacheScope | null>(null);
@@ -292,7 +295,7 @@ export default function Integrations() {
   );
 
   useEffect(() => {
-    if (!detailKey) {
+    if (!detailKey || isNativeLinear(detailKey)) {
       setTools([]);
       setToolsLoading(false);
       return;
@@ -336,6 +339,23 @@ export default function Integrations() {
   function closeDetail() {
     setDetailKey(null);
     setTools([]);
+    setLinearAddOnOpen(false);
+  }
+
+  function openLinear(item: ConnectionCatalogItem) {
+    setLinearAddOnOpen(true);
+    openDetail(item);
+  }
+
+  function linearAccountsFor(item: Pick<ConnectionCatalogItem, "connectorId" | "slug">) {
+    return connections.filter(
+      (row) => row.connectorId === item.connectorId && row.provider === item.slug,
+    );
+  }
+
+  async function linearConnected(row: Connection) {
+    updateAccount(row);
+    await retryRefresh();
   }
 
   function accountsFor(item: Pick<ConnectionCatalogItem, "connectorId" | "slug">) {
@@ -570,7 +590,7 @@ export default function Integrations() {
         disabled={connecting}
         fill={false}
         label={connecting ? t("Working…") : t("Add")}
-        onPress={() => void connect(item)}
+        onPress={() => (isNativeLinear(item) ? openLinear(item) : void connect(item))}
         prominence="secondary"
       />
     );
@@ -615,6 +635,7 @@ export default function Integrations() {
     const connecting = pending === key;
     const uninstalling = pending === `uninstall:${key}`;
     const toolCount = tools.length;
+    const nativeLinear = isNativeLinear(item);
 
     return (
       <View style={styles.detail}>
@@ -643,70 +664,90 @@ export default function Integrations() {
           />
         </View>
 
-        <View style={styles.card}>
-          <Text style={styles.section}>{t("Accounts")}</Text>
-          {accounts.map((row) => (
-            <View key={row.id} style={styles.accountRow}>
-              <TextInput
-                value={labelDrafts[row.id] ?? row.displayName}
-                onChangeText={(value) =>
-                  setLabelDrafts((current) => ({ ...current, [row.id]: value }))
-                }
-                onEndEditing={() => void renameAccount(row)}
-                accessibilityLabel={t("Account label")}
-                style={styles.accountLabel}
-              />
-              <NativeActionButton
-                accessibilityLabel={t("Remove {name}", { name: row.displayName })}
-                disabled={pending === row.id || uninstalling}
-                fill={false}
-                label={pending === row.id ? t("Working…") : t("Remove")}
-                onPress={() => void revokeAccount(row)}
-                prominence="destructive"
-              />
-            </View>
-          ))}
-          <NativeActionButton
-            accessibilityLabel={t("Add another {name}", { name: item.name })}
-            disabled={connecting || uninstalling}
-            label={connecting ? t("Working…") : t("Add another")}
-            onPress={() => void connect(item)}
-            prominence="secondary"
+        {nativeLinear ? (
+          <LinearAccounts
+            accounts={linearAccountsFor(item)}
+            captureScope={captureConnectionScope}
+            item={item}
+            labelFor={(row) => labelDrafts[row.id] ?? row.displayName}
+            onConnected={linearConnected}
+            onLabelChange={(row, value) =>
+              setLabelDrafts((current) => ({ ...current, [row.id]: value }))
+            }
+            onRemove={revokeAccount}
+            onRename={(row) => void renameAccount(row)}
+            pending={pending}
+            startWithAdd={linearAddOnOpen}
+            uninstalling={uninstalling}
           />
-        </View>
-
-        <View style={styles.card}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityState={{ expanded: toolsOpen }}
-            onPress={() => setToolsOpen((open) => !open)}
-            style={styles.toolsToggle}
-          >
-            <Text style={styles.title}>
-              {toolsLoading
-                ? t("Tools")
-                : toolCount === 1
-                  ? t("1 tool")
-                  : t("{count} tools", { count: toolCount })}
-            </Text>
-            <Chevron expanded={toolsOpen} />
-          </Pressable>
-          {toolsOpen ? (
-            <View style={styles.toolsBody}>
-              {toolsLoading ? (
-                <Text style={styles.secondary}>{t("Loading tools…")}</Text>
-              ) : tools.length === 0 ? (
-                <Text style={styles.secondary}>{t("No tools available.")}</Text>
-              ) : (
-                tools.map((tool) => (
-                  <Text key={tool.name} style={styles.toolName}>
-                    {humanizeToolName(tool.name)}
-                  </Text>
-                ))
-              )}
+        ) : (
+          <>
+            <View style={styles.card}>
+              <Text style={styles.section}>{t("Accounts")}</Text>
+              {accounts.map((row) => (
+                <View key={row.id} style={styles.accountRow}>
+                  <TextInput
+                    value={labelDrafts[row.id] ?? row.displayName}
+                    onChangeText={(value) =>
+                      setLabelDrafts((current) => ({ ...current, [row.id]: value }))
+                    }
+                    onEndEditing={() => void renameAccount(row)}
+                    accessibilityLabel={t("Account label")}
+                    style={styles.accountLabel}
+                  />
+                  <NativeActionButton
+                    accessibilityLabel={t("Remove {name}", { name: row.displayName })}
+                    disabled={pending === row.id || uninstalling}
+                    fill={false}
+                    label={pending === row.id ? t("Working…") : t("Remove")}
+                    onPress={() => void revokeAccount(row)}
+                    prominence="destructive"
+                  />
+                </View>
+              ))}
+              <NativeActionButton
+                accessibilityLabel={t("Add another {name}", { name: item.name })}
+                disabled={connecting || uninstalling}
+                label={connecting ? t("Working…") : t("Add another")}
+                onPress={() => void connect(item)}
+                prominence="secondary"
+              />
             </View>
-          ) : null}
-        </View>
+
+            <View style={styles.card}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityState={{ expanded: toolsOpen }}
+                onPress={() => setToolsOpen((open) => !open)}
+                style={styles.toolsToggle}
+              >
+                <Text style={styles.title}>
+                  {toolsLoading
+                    ? t("Tools")
+                    : toolCount === 1
+                      ? t("1 tool")
+                      : t("{count} tools", { count: toolCount })}
+                </Text>
+                <Chevron expanded={toolsOpen} />
+              </Pressable>
+              {toolsOpen ? (
+                <View style={styles.toolsBody}>
+                  {toolsLoading ? (
+                    <Text style={styles.secondary}>{t("Loading tools…")}</Text>
+                  ) : tools.length === 0 ? (
+                    <Text style={styles.secondary}>{t("No tools available.")}</Text>
+                  ) : (
+                    tools.map((tool) => (
+                      <Text key={tool.name} style={styles.toolName}>
+                        {humanizeToolName(tool.name)}
+                      </Text>
+                    ))
+                  )}
+                </View>
+              ) : null}
+            </View>
+          </>
+        )}
       </View>
     );
   }

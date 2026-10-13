@@ -29,6 +29,7 @@ import {
 } from "@rakazo/ui-web";
 import {
   ChevronLeft,
+  CircleDot,
   Clock,
   GitBranch,
   Globe,
@@ -46,6 +47,13 @@ import {
   thinkingLevelLabel,
 } from "../lib/model-catalog";
 import { rpc } from "../lib/rpc";
+import type { LinearTriggerDraft } from "./LinearTriggerCard";
+import {
+  LinearTriggerCard,
+  linearTriggerFromDraft,
+  newLinearTriggerDraft,
+  sameLinearTrigger,
+} from "./LinearTriggerCard";
 import { RoutineRunHistory } from "./RoutineRunHistory";
 import { RoutineSchedule } from "./RoutineSchedule";
 
@@ -77,7 +85,6 @@ const SCHEDULE_PRESETS: CronFreq[] = [
 
 const COMING_SOON = [
   { id: "teams", label: () => t`Teams message` },
-  { id: "linear", label: () => t`Linear issue` },
   { id: "sentry", label: () => t`Sentry alert` },
   { id: "pagerduty", label: () => t`PagerDuty incident` },
 ] as const;
@@ -94,6 +101,7 @@ export type RoutineDraftState = {
   /** Empty runs this routine on the bot's model. */
   modelKey: string;
   thinkingLevel: string;
+  linearTrigger: LinearTriggerDraft | null;
 };
 
 export function emptyRoutineDraft(): RoutineDraftState {
@@ -108,6 +116,7 @@ export function emptyRoutineDraft(): RoutineDraftState {
     runAtLocal: "",
     modelKey: "",
     thinkingLevel: "",
+    linearTrigger: null,
   };
 }
 
@@ -126,6 +135,13 @@ export function draftFromRoutine(routine: Routine): RoutineDraftState {
         ? modelOptionKey(routine.modelProvider, routine.modelId)
         : "",
     thinkingLevel: routine.thinkingLevel ?? "",
+    linearTrigger: routine.linearTrigger
+      ? {
+          ...routine.linearTrigger,
+          events: [...routine.linearTrigger.events],
+          labelIds: [...routine.linearTrigger.labelIds],
+        }
+      : null,
   };
 }
 
@@ -134,6 +150,7 @@ export function routineTriggerSummary(routine: Routine): string {
   const parts: string[] = [];
   if (routine.webhookEnabled) parts.push(t`When a webhook fires`);
   if (routine.githubEnabled) parts.push(t`Git event`);
+  if (routine.linearTrigger) parts.push(t`Linear`);
   if (routine.messageProvider === "slack") parts.push(t`Slack message`);
   else if (routine.messageProvider === "teams") parts.push(t`Teams message`);
   else if (routine.messageProvider) parts.push(t`Message event`);
@@ -227,6 +244,8 @@ export function RoutineEditor({
   onTestRun,
   onDelete,
   onEnsureWebhook,
+  linearConnectionsTick,
+  onConnectLinear,
 }: {
   draft: RoutineDraftState;
   onChange: (next: RoutineDraftState) => void;
@@ -244,11 +263,14 @@ export function RoutineEditor({
   onTestRun: () => void;
   onDelete: () => void;
   onEnsureWebhook: () => Promise<void>;
+  linearConnectionsTick: number;
+  onConnectLinear: () => void;
 }) {
   const { t } = useLingui();
   const fieldId = useId();
   const [credentials, setCredentials] = useState<ModelCredential[]>([]);
   const [catalog, setCatalog] = useState<ModelCatalogEntry[]>([]);
+  const [linearBlocked, setLinearBlocked] = useState(false);
   useEffect(() => {
     void Promise.all([rpc.models.credentials(), rpc.models.list()])
       .then(([nextCredentials, nextCatalog]) => {
@@ -280,7 +302,13 @@ export function RoutineEditor({
     draft.schedules.length > 0 ||
     draft.webhookEnabled ||
     draft.githubEnabled ||
-    Boolean(draft.messageProvider);
+    Boolean(draft.messageProvider) ||
+    Boolean(draft.linearTrigger);
+  const linearTrigger = draft.linearTrigger ? linearTriggerFromDraft(draft.linearTrigger) : null;
+  const linearReady =
+    !draft.linearTrigger ||
+    (linearTrigger !== null &&
+      !(linearBlocked && !sameLinearTrigger(linearTrigger, editing?.linearTrigger ?? null)));
   const canTest = Boolean(editing) && !saving && !running;
   const needsOneShotArm =
     editing != null && routineNeedsOneShotArm(editing, draft.schedules.map(cronFromPreset));
@@ -527,6 +555,17 @@ export function RoutineEditor({
             />
           ) : null}
 
+          {draft.linearTrigger ? (
+            <LinearTriggerCard
+              value={draft.linearTrigger}
+              connectionsTick={linearConnectionsTick}
+              onChange={(next) => onChange({ ...draft, linearTrigger: next })}
+              onRemove={() => onChange({ ...draft, linearTrigger: null })}
+              onConnect={onConnectLinear}
+              onBlockedChange={setLinearBlocked}
+            />
+          ) : null}
+
           {needsOneShotArm ? (
             <label htmlFor={`${fieldId}-run-at`} className="block text-sm text-muted-foreground">
               <Trans>Run at</Trans>
@@ -597,6 +636,14 @@ export function RoutineEditor({
               </span>
             ))}
 
+            <DropdownMenuItem
+              disabled={Boolean(draft.linearTrigger)}
+              onClick={() => onChange({ ...draft, linearTrigger: newLinearTriggerDraft() })}
+            >
+              <CircleDot />
+              <Trans>Linear</Trans>
+            </DropdownMenuItem>
+
             <DropdownMenuItem disabled={draft.githubEnabled} onClick={() => void addGithub()}>
               <GitBranch />
               <Trans>Git event</Trans>
@@ -611,13 +658,15 @@ export function RoutineEditor({
 
         {!hasTriggers ? (
           <p className="mt-2 text-xs text-muted-foreground/70">
-            <Trans>Add a schedule, webhook, GitHub, or message trigger to run this routine.</Trans>
+            <Trans>
+              Add a schedule, webhook, GitHub, Linear, or message trigger to run this routine.
+            </Trans>
           </p>
         ) : null}
       </div>
 
       <div className="mt-5">
-        <Button disabled={saving || running || !hasTriggers} onClick={onSave}>
+        <Button disabled={saving || running || !hasTriggers || !linearReady} onClick={onSave}>
           {saving ? t`Saving…` : t`Save`}
         </Button>
       </div>
@@ -777,8 +826,6 @@ function comingSoonColor(id: string): string {
   switch (id) {
     case "teams":
       return "#6264A7";
-    case "linear":
-      return "#5E6AD2";
     case "sentry":
       return "#A467FD";
     default:

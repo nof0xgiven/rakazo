@@ -37,7 +37,9 @@ vi.mock("./native", () => ({ native: {}, useThemedStyles: (factory: () => unknow
 vi.mock("./i18n", () => ({
   t: (text: string) => text,
   useI18n: () => ({ t: (text: string) => text }),
+  dateLocaleForUi: () => "en-US",
 }));
+vi.mock("expo-clipboard", () => ({ setStringAsync: vi.fn(async () => true) }));
 vi.mock("../components/row-accessories", () => ({ Chevron: () => null }));
 vi.mock("react-native-safe-area-context", () => ({
   SafeAreaView: ({ children }: { children: ReactNode }) => <div>{children}</div>,
@@ -69,8 +71,16 @@ vi.mock("react-native", () => {
     View,
     ScrollView: View,
     Text: ({ children }: { children: ReactNode }) => <span>{children}</span>,
-    Pressable: ({ children, onPress }: { children: ReactNode; onPress: () => void }) => (
-      <button type="button" onClick={onPress}>
+    Pressable: ({
+      children,
+      onPress,
+      accessibilityLabel,
+    }: {
+      children: ReactNode;
+      onPress: () => void;
+      accessibilityLabel?: string;
+    }) => (
+      <button type="button" aria-label={accessibilityLabel} onClick={onPress}>
         {children}
       </button>
     ),
@@ -79,15 +89,27 @@ vi.mock("react-native", () => {
       value,
       onChangeText,
       onEndEditing,
+      secureTextEntry,
+      autoCorrect,
+      autoCapitalize,
+      importantForAutofill,
     }: {
       placeholder?: string;
       value?: string;
       onChangeText?: (value: string) => void;
       onEndEditing?: () => void;
+      secureTextEntry?: boolean;
+      autoCorrect?: boolean;
+      autoCapitalize?: string;
+      importantForAutofill?: string;
     }) => (
       <input
+        data-autocapitalize={autoCapitalize}
+        data-autocorrect={autoCorrect === undefined ? undefined : String(autoCorrect)}
+        data-autofill={importantForAutofill}
         onBlur={onEndEditing}
         placeholder={placeholder}
+        type={secureTextEntry ? "password" : "text"}
         value={value}
         onChange={(event) => onChangeText?.(event.target.value)}
       />
@@ -527,4 +549,218 @@ it("ignores an old focus identity error after the new focus succeeds", async () 
   expect(container.textContent).not.toContain("Old focus failed");
   expect(container.textContent).not.toContain("Retry");
   expect(container.textContent).toContain("New space appAdd");
+});
+
+const linearItem = {
+  connectorId: "linear",
+  slug: "linear",
+  name: "Linear automations",
+  logo: null,
+  connected: false,
+  noAuth: false,
+};
+const linearAccount = {
+  id: "linear-a",
+  connectorId: "linear",
+  provider: "linear",
+  displayName: "Linear automations",
+  status: "connected",
+  capabilities: ["automation_triggers"],
+  createdAt: "2026-01-01",
+};
+const linearStatus = {
+  connectionId: "linear-a",
+  revision: 3,
+  organizationName: "Example org",
+  viewerId: "viewer-1",
+  connectionStatus: "connected",
+  monitoring: "polling",
+  webhookConfigured: false,
+  webhookUrl: null as string | null,
+  lastPolledAt: null,
+  lastWebhookAt: null,
+  lastEventAt: null,
+  nextPollAt: null,
+  nextSyncAt: null,
+  rateLimitedUntil: null,
+  errorCode: null,
+};
+const linearRequest = { signal: expect.any(AbortSignal), timeoutMs: 30_000 };
+
+function findButton(label: string) {
+  return [...container.querySelectorAll("button")].find(
+    (button) => button.textContent === label || button.getAttribute("aria-label") === label,
+  );
+}
+async function press(label: string) {
+  const button = findButton(label);
+  expect(button, label).toBeDefined();
+  await act(async () => button?.click());
+}
+function field(placeholder: string) {
+  return container.querySelector<HTMLInputElement>(`input[placeholder="${placeholder}"]`);
+}
+async function enter(input: HTMLInputElement | null, value: string) {
+  expect(input).not.toBeNull();
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, value);
+    input?.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+}
+
+it("connects native Linear with a secure API key instead of OAuth", async () => {
+  state.read.mockReturnValue({ catalog: [linearItem], connections: [] });
+  await render();
+  state.rpc.mockImplementation((proc: string) => {
+    if (proc === "linear/connect") return Promise.resolve(linearAccount);
+    if (proc === "connections/catalog")
+      return Promise.resolve([{ ...linearItem, connected: true }]);
+    if (proc === "connections/list") return Promise.resolve([linearAccount]);
+    return Promise.resolve([]);
+  });
+  await press("Add");
+  const key = field("API key");
+  expect(key?.type).toBe("password");
+  expect(key?.dataset.autocorrect).toBe("false");
+  expect(key?.dataset.autocapitalize).toBe("none");
+  expect(key?.dataset.autofill).toBe("no");
+  expect(field("Account label")?.value).toBe("Linear automations");
+  await enter(key, "lin_api_synthetic");
+  await press("Connect");
+  expect(state.rpc).toHaveBeenCalledWith(
+    "linear/connect",
+    { apiKey: "lin_api_synthetic", displayName: "Linear automations" },
+    linearRequest,
+  );
+  expect(state.rpc.mock.calls.map(([proc]) => proc)).not.toContain("connections/begin");
+  expect(state.rpc.mock.calls.map(([proc]) => proc)).not.toContain("connections/tools");
+  expect(field("API key")).toBeNull();
+  expect(container.innerHTML).not.toContain("lin_api_synthetic");
+  expect(state.write).toHaveBeenCalledWith(expect.anything(), {
+    catalog: [{ ...linearItem, connected: true }],
+    connections: [linearAccount],
+  });
+});
+
+it("reconnects a revoked native Linear account with its current revision", async () => {
+  const revoked = { ...linearAccount, status: "revoked" };
+  state.read.mockReturnValue({ catalog: [linearItem], connections: [revoked] });
+  await render();
+  state.rpc.mockImplementation((proc: string) => {
+    if (proc === "linear/status")
+      return Promise.resolve({
+        ...linearStatus,
+        revision: 7,
+        connectionStatus: "revoked",
+        monitoring: "idle",
+      });
+    if (proc === "linear/connect") return Promise.resolve(linearAccount);
+    return Promise.resolve([]);
+  });
+  await press("Add");
+  expect(findButton("Remove")).toBeUndefined();
+  await press("Reconnect");
+  expect(field("Account label")?.value).toBe("Linear automations");
+  await enter(field("API key"), "lin_api_replacement");
+  await press("Connect");
+  expect(state.rpc).toHaveBeenCalledWith(
+    "linear/connect",
+    {
+      apiKey: "lin_api_replacement",
+      displayName: "Linear automations",
+      connectionId: "linear-a",
+      expectedRevision: 7,
+    },
+    linearRequest,
+  );
+  expect(field("API key")).toBeNull();
+});
+
+it("saves and removes a Linear webhook signing secret without keeping it", async () => {
+  state.read.mockReturnValue({
+    catalog: [{ ...linearItem, connected: true }],
+    connections: [linearAccount],
+  });
+  await render();
+  let current = {
+    ...linearStatus,
+    webhookUrl: "https://api.example.test/api/integrations/linear/linear-a/webhook",
+  };
+  state.rpc.mockImplementation((proc: string, body: { signingSecret?: string | null } = {}) => {
+    if (proc === "linear/status") return Promise.resolve(current);
+    if (proc === "linear/configureWebhook") {
+      current = {
+        ...current,
+        revision: current.revision + 1,
+        webhookConfigured: body.signingSecret !== null,
+      };
+      return Promise.resolve(current);
+    }
+    return Promise.resolve([]);
+  });
+  await press("Added");
+  await press("Details");
+  expect(container.textContent).toContain("Polling");
+  await press("Webhooks");
+  expect(container.textContent).toContain(current.webhookUrl);
+  expect(field("Signing secret")?.type).toBe("password");
+  await enter(field("Signing secret"), "whsec_synthetic");
+  await press("Save");
+  expect(state.rpc).toHaveBeenCalledWith(
+    "linear/configureWebhook",
+    { connectionId: "linear-a", expectedRevision: 3, signingSecret: "whsec_synthetic" },
+    linearRequest,
+  );
+  expect(field("Signing secret")?.value).toBe("");
+  await press("Remove webhook");
+  expect(state.rpc).toHaveBeenLastCalledWith(
+    "linear/configureWebhook",
+    { connectionId: "linear-a", expectedRevision: 4, signingSecret: null },
+    linearRequest,
+  );
+  expect(findButton("Remove webhook")).toBeUndefined();
+});
+
+it("explains webhooks need a public HTTPS API URL on loopback installs", async () => {
+  state.read.mockReturnValue({
+    catalog: [{ ...linearItem, connected: true }],
+    connections: [linearAccount],
+  });
+  await render();
+  state.rpc.mockImplementation((proc: string) =>
+    Promise.resolve(
+      proc === "linear/status"
+        ? { ...linearStatus, rateLimitedUntil: "2999-01-01T00:00:00.000Z" }
+        : [],
+    ),
+  );
+  await press("Added");
+  await press("Details");
+  expect(container.textContent).toContain("Waiting for Linear until");
+  expect(container.textContent).toContain("Webhooks require a public HTTPS API URL.");
+  expect(findButton("Webhooks")).toBeUndefined();
+});
+
+it("drops a late Linear connect after leaving the sheet and clears the key", async () => {
+  state.read.mockReturnValue({ catalog: [linearItem], connections: [] });
+  await render();
+  let finish!: (row: unknown) => void;
+  const late = new Promise((resolve) => {
+    finish = resolve;
+  });
+  state.rpc.mockImplementation((proc: string) =>
+    proc === "linear/connect" ? late : Promise.resolve([]),
+  );
+  await press("Add");
+  await enter(field("API key"), "lin_api_synthetic");
+  await press("Connect");
+  const request = state.rpc.mock.calls.find(([proc]) => proc === "linear/connect");
+  const writes = state.write.mock.calls.length;
+  state.focused = false;
+  await render();
+  expect(request?.[2].signal.aborted).toBe(true);
+  await act(async () => finish(linearAccount));
+  expect(state.write).toHaveBeenCalledTimes(writes);
+  expect(field("API key")).toBeNull();
+  expect(container.innerHTML).not.toContain("lin_api_synthetic");
 });

@@ -15,6 +15,7 @@ function routine(partial: Partial<Routine>): Routine {
     webhookEnabled: false,
     githubEnabled: false,
     messageProvider: null,
+    linearTrigger: null,
     modelProvider: null,
     modelId: null,
     thinkingLevel: null,
@@ -50,6 +51,22 @@ describe("routineStatusLine", () => {
         }),
       ),
     ).toBe("Paused · Every Monday at 9:00 AM, Webhook · Europe/Berlin");
+  });
+
+  it("adds Linear without changing the paused summary", () => {
+    const linearTrigger = {
+      connectionId: "connection-1",
+      teamId: "team-1",
+      events: ["issue.created" as const],
+      projectId: null,
+      assigneeId: null,
+      stateId: null,
+      labelIds: [],
+    };
+    expect(routineStatusLine(routine({ linearTrigger }))).toBe("Active · Linear · UTC");
+    expect(routineStatusLine(routine({ active: false, crons: ["0 9 * * 1"], linearTrigger }))).toBe(
+      "Paused · Every Monday at 9:00 AM, Linear · UTC",
+    );
   });
 
   it("omits the trigger segment when there are no triggers", () => {

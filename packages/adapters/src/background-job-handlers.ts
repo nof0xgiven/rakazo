@@ -2,6 +2,7 @@ import type {
   AgentHomeStore,
   AgentRuntime,
   BackgroundJobHandlers,
+  IssueTrackerProvider,
   JobPublisher,
   MessagingSurface,
   SandboxProvider,
@@ -17,6 +18,7 @@ import { scheduleComputerSleep, sleepComputerIfIdle } from "./computer-idle.js";
 import { performComputerUpdate } from "./computer-update.js";
 import type { createRunExecutor } from "./executor.js";
 import { compactHistory } from "./history-compaction.js";
+import { syncLinearConnection } from "./linear-sync.js";
 import type { MemoryProviderResolver } from "./memory-provider-factory.js";
 import { deliverMessagingOutbound, mirrorMessagingOutbound } from "./messaging-delivery.js";
 import { expireTaughtSkillTeaching } from "./teaching-session.js";
@@ -36,6 +38,8 @@ export function createBackgroundJobHandlers(deps: {
   deploymentModelConfigured?: boolean;
   messaging?: MessagingSurface;
   cloudAgent?: CloudAgentConnection | null;
+  linearProvider: IssueTrackerProvider;
+  linearSignal: AbortSignal;
 }): BackgroundJobHandlers {
   const deliverMessaging = async (runId?: string) => {
     if (!deps.messaging) return;
@@ -95,6 +99,18 @@ export function createBackgroundJobHandlers(deps: {
           jobs: deps.jobs,
           events: deps.events,
           cloudAgent: deps.cloudAgent,
+        },
+        payload,
+      );
+    },
+    "linear.sync": async (payload) => {
+      await syncLinearConnection(
+        {
+          prisma: deps.prisma,
+          secrets: deps.secretStore,
+          provider: deps.linearProvider,
+          jobs: deps.jobs,
+          signal: deps.linearSignal,
         },
         payload,
       );

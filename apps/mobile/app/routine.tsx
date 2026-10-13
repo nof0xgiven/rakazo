@@ -6,6 +6,8 @@ import { glassHeaderOptions } from "../components/glass-title";
 import { NativeActionButton } from "../components/native-action-button";
 import { rpc } from "../lib/api";
 import { useI18n } from "../lib/i18n";
+import type { LinearTriggerDetails } from "../lib/linear";
+import { LINEAR_RPC_TIMEOUT_MS, linearTriggerRows, loadLinearTriggerDetails } from "../lib/linear";
 import { native, useMobileTokens } from "../lib/native";
 import { routineStatusLine } from "../lib/routine";
 import { errorText } from "../lib/user-error";
@@ -22,6 +24,8 @@ export default function RoutineDetail() {
   const [routine, setRoutine] = useState<Routine | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [linearDetails, setLinearDetails] = useState<LinearTriggerDetails | null>(null);
+  const linearTrigger = routine?.linearTrigger ?? null;
 
   useEffect(() => {
     if (!botId || !routineId) {
@@ -51,6 +55,20 @@ export default function RoutineDetail() {
     };
   }, [botId, routineId]);
 
+  useEffect(() => {
+    setLinearDetails(null);
+    if (!linearTrigger) return;
+    const controller = new AbortController();
+    void loadLinearTriggerDetails(linearTrigger, <T,>(proc: string, body: unknown) =>
+      rpc<T>(proc, body, { signal: controller.signal, timeoutMs: LINEAR_RPC_TIMEOUT_MS }),
+    )
+      .catch(() => ({ accountLabel: null, names: new Map<string, string>() }))
+      .then((details) => {
+        if (!controller.signal.aborted) setLinearDetails(details);
+      });
+    return () => controller.abort();
+  }, [linearTrigger]);
+
   return (
     <ScrollView
       style={{ flex: 1, backgroundColor: tokens.background }}
@@ -73,6 +91,41 @@ export default function RoutineDetail() {
               {routineStatusLine(routine)}
             </Text>
           </View>
+          {linearTrigger ? (
+            <View style={{ gap: 8 }}>
+              <Text
+                style={{ color: tokens.mutedForeground, fontSize: 13, textTransform: "uppercase" }}
+              >
+                {t("Linear")}
+              </Text>
+              <View
+                style={{ borderRadius: 16, backgroundColor: native.fill, padding: 18, gap: 14 }}
+              >
+                {linearDetails ? (
+                  linearTriggerRows(linearTrigger, linearDetails).map((row) => (
+                    <View
+                      key={row.label}
+                      accessible
+                      accessibilityLabel={`${row.label}, ${row.value}`}
+                      style={{ gap: 2 }}
+                    >
+                      <Text style={{ color: tokens.mutedForeground, fontSize: 13 }}>
+                        {row.label}
+                      </Text>
+                      <Text selectable style={{ color: tokens.foreground, fontSize: 15 }}>
+                        {row.value}
+                      </Text>
+                    </View>
+                  ))
+                ) : (
+                  <ActivityIndicator
+                    accessibilityLabel={t("Loading…")}
+                    color={tokens.mutedForeground}
+                  />
+                )}
+              </View>
+            </View>
+          ) : null}
           <View style={{ gap: 8 }}>
             <Text
               style={{ color: tokens.mutedForeground, fontSize: 13, textTransform: "uppercase" }}

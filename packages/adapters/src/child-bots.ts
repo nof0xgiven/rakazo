@@ -7,7 +7,7 @@ import type {
   JobPublisher,
   SandboxProvider,
 } from "@rakazo/adapter-kit";
-import { routineJobKey, runContinueJob, runJobKey } from "@rakazo/adapter-kit";
+import { linearSyncJob, routineJobKey, runContinueJob, runJobKey } from "@rakazo/adapter-kit";
 import { type Actor, type Bot, type ComputerMode, GROUP_MEMBER_MIN } from "@rakazo/contracts";
 import { ACTIVE_RUN_STATUSES } from "@rakazo/core";
 import {
@@ -31,6 +31,7 @@ import {
   withCleanupDeadline,
 } from "./computer-workspace.js";
 import { resolveAgentHomePath } from "./home.js";
+import { lockLinearSources, refreshLinearSourceMonitoring } from "./linear-lifecycle.js";
 import { removePiBotSessions } from "./pi-session.js";
 
 export function confirmSpawnedBotName(confirmName: string, botName: string) {
@@ -272,55 +273,43 @@ export async function archiveBot(
   bot: LifecycleBot,
   context: AdapterContext,
 ) {
-  const [dedicated, activeRuns, activeRoutines] = await Promise.all([
-    deps.prisma.computer.findUnique({
-      where: { scopeKey: computerScopeKey("dedicated", bot.spaceId, bot.id) },
-    }),
-    deps.prisma.run.findMany({
-      where: { botId: bot.id, status: { in: [...ACTIVE_RUN_STATUSES] } },
-      select: { id: true },
-    }),
-    deps.prisma.routine.findMany({
-      where: { botId: bot.id, active: true },
-      select: { id: true },
-    }),
-  ]);
-  const runIds = activeRuns.map((run) => run.id);
-  const now = new Date();
-  await deps.prisma.$transaction(async (tx) => {
-    await tx.run.updateMany({
-      where: { id: { in: runIds } },
-      data: { status: "cancelled", completedAt: now },
-    });
-    await tx.task.updateMany({
-      where: { runs: { some: { id: { in: runIds } } } },
-      data: { status: "cancelled" },
-    });
-    await tx.routine.updateMany({
-      where: { botId: bot.id },
-      data: { active: false, nextRunAt: null },
-    });
-    await expireComputerExecutionLeases(tx, { botId: bot.id });
-    await tx.computer.updateMany({
-      where: {
-        OR: [{ controlBotId: bot.id }, { executionBotId: bot.id }],
-      },
-      data: releasedComputerLease(),
-    });
-    if (dedicated) {
-      await tx.computer.updateMany({
-        where: { id: dedicated.id, state: { not: "running" } },
-        data: { state: "stopped" },
-      });
-    }
-    await tx.bot.update({
-      where: { id: bot.id },
-      data: { archivedAt: bot.archivedAt ?? now, pinned: false },
-    });
+  const dedicated = await deps.prisma.computer.findUnique({
+    where: { scopeKey: computerScopeKey("dedicated", bot.spaceId, bot.id) },
   });
+  const now = new Date();
+  const archived = await withTransactionRetry(() =>
+    deps.prisma.$transaction(async (tx) => {
+      const stopped = await stopBotRoutineWork(tx, bot.id, now);
+      await expireComputerExecutionLeases(tx, { botId: bot.id });
+      await tx.computer.updateMany({
+        where: {
+          OR: [{ controlBotId: bot.id }, { executionBotId: bot.id }],
+        },
+        data: releasedComputerLease(),
+      });
+      if (dedicated) {
+        await tx.computer.updateMany({
+          where: { id: dedicated.id, state: { not: "running" } },
+          data: { state: "stopped" },
+        });
+      }
+      await tx.bot.update({
+        where: { id: bot.id },
+        data: { archivedAt: bot.archivedAt ?? now, pinned: false },
+      });
+      return {
+        runIds: stopped.runIds,
+        routineIds: stopped.routineIds,
+        linearSyncIds: await refreshLinearSources(tx, stopped.connectionIds),
+      };
+    }),
+  );
   await Promise.allSettled([
-    ...activeRuns.map((run) => deps.jobs.cancel(runJobKey(run.id))),
-    ...activeRoutines.map((routine) => deps.jobs.cancel(routineJobKey(routine.id))),
+    ...archived.runIds.map((runId) => deps.jobs.cancel(runJobKey(runId))),
+    ...archived.routineIds.map((routineId) => deps.jobs.cancel(routineJobKey(routineId))),
+    ...archived.linearSyncIds.map((connectionId) =>
+      deps.jobs.enqueue(linearSyncJob({ connectionId })),
+    ),
   ]);
   await releaseTeamComputerScreen(deps, bot, dedicated?.id, context);
   const currentDedicated = dedicated
@@ -347,24 +336,21 @@ export async function destroyBot(
   context: AdapterContext,
   options: { deleteMemories: boolean },
 ) {
-  const [dedicated, activeRuns, routines] = await Promise.all([
-    deps.prisma.computer.findUnique({
-      where: { scopeKey: computerScopeKey("dedicated", bot.spaceId, bot.id) },
-    }),
-    deps.prisma.run.findMany({
-      where: { botId: bot.id, status: { in: [...ACTIVE_RUN_STATUSES] } },
-      select: { id: true },
-    }),
-    deps.prisma.routine.findMany({ where: { botId: bot.id }, select: { id: true } }),
-  ]);
-  const runIds = activeRuns.map((run) => run.id);
-  await deps.prisma.run.updateMany({
-    where: { id: { in: runIds } },
-    data: { status: "cancelled", completedAt: new Date() },
+  const dedicated = await deps.prisma.computer.findUnique({
+    where: { scopeKey: computerScopeKey("dedicated", bot.spaceId, bot.id) },
   });
+  const stopped = await withTransactionRetry(() =>
+    deps.prisma.$transaction(async (tx) => {
+      const work = await stopBotRoutineWork(tx, bot.id, new Date());
+      return { ...work, linearSyncIds: await refreshLinearSources(tx, work.connectionIds) };
+    }),
+  );
   await Promise.allSettled([
-    ...activeRuns.map((run) => deps.jobs.cancel(runJobKey(run.id))),
-    ...routines.map((routine) => deps.jobs.cancel(routineJobKey(routine.id))),
+    ...stopped.runIds.map((runId) => deps.jobs.cancel(runJobKey(runId))),
+    ...stopped.routineIds.map((routineId) => deps.jobs.cancel(routineJobKey(routineId))),
+    ...stopped.linearSyncIds.map((connectionId) =>
+      deps.jobs.enqueue(linearSyncJob({ connectionId })),
+    ),
   ]);
   const sharedComputer = await releaseTeamComputerScreen(deps, bot, dedicated?.id, context, {
     cancelRunWork: true,
@@ -383,6 +369,11 @@ export async function destroyBot(
         FOR UPDATE
       `;
       const webhookSecretId = locked[0]?.webhookSecretId ?? bot.webhookSecretId ?? null;
+      const linear = await lockBotLinearSubscriptions(tx, bot.id);
+      const lateRuns = await tx.run.findMany({
+        where: { botId: bot.id, status: { in: [...ACTIVE_RUN_STATUSES] } },
+        select: { id: true },
+      });
       const botArtifacts = await tx.artifact.findMany({
         where: { botId: bot.id, groupId: null, spaceId: bot.spaceId },
         select: { storageKey: true },
@@ -432,12 +423,20 @@ export async function destroyBot(
           ...groupCleanup.artifactKeys,
         ],
         cancelledGroupRuns: groupCleanup.cancelledRuns,
+        lateRunIds: lateRuns.map((run) => run.id),
+        routineIds: linear.routineIds,
+        linearSyncIds: await refreshLinearSources(tx, linear.connectionIds),
       };
     }),
   );
-  await Promise.allSettled(
-    deletion.cancelledGroupRuns.map((run) => deps.jobs.cancel(runJobKey(run.id))),
-  );
+  await Promise.allSettled([
+    ...deletion.cancelledGroupRuns.map((run) => deps.jobs.cancel(runJobKey(run.id))),
+    ...deletion.lateRunIds.map((runId) => deps.jobs.cancel(runJobKey(runId))),
+    ...deletion.routineIds.map((routineId) => deps.jobs.cancel(routineJobKey(routineId))),
+    ...deletion.linearSyncIds.map((connectionId) =>
+      deps.jobs.enqueue(linearSyncJob({ connectionId })),
+    ),
+  ]);
   const stoppedGroupBots = [
     ...new Map(
       deletion.cancelledGroupRuns.map((run) => [
@@ -472,6 +471,49 @@ export async function destroyBot(
   if (artifactStore) {
     await removeStoredArtifacts(artifactStore, deletion.artifactKeys, context);
   }
+}
+
+async function lockBotLinearSubscriptions(tx: Prisma.TransactionClient, botId: string) {
+  const triggers = await tx.routineLinearTrigger.findMany({
+    where: { routine: { botId } },
+    select: { connectionId: true },
+  });
+  const connectionIds = [...new Set(triggers.map((trigger) => trigger.connectionId))].sort();
+  await lockLinearSources(tx, connectionIds);
+  const routines = await tx.$queryRaw<Array<{ id: string }>>`
+    SELECT id FROM routines WHERE "botId" = ${botId} ORDER BY id FOR UPDATE
+  `;
+  return { connectionIds, routineIds: routines.map((routine) => routine.id) };
+}
+
+async function stopBotRoutineWork(tx: Prisma.TransactionClient, botId: string, now: Date) {
+  await tx.$queryRaw`SELECT id FROM bots WHERE id = ${botId} FOR UPDATE`;
+  const { connectionIds, routineIds } = await lockBotLinearSubscriptions(tx, botId);
+  const activeRuns = await tx.run.findMany({
+    where: { botId, status: { in: [...ACTIVE_RUN_STATUSES] } },
+    select: { id: true, taskId: true },
+  });
+  await cancelRunsInTransaction(tx, activeRuns, now);
+  await tx.routineLinearTrigger.updateMany({
+    where: { routine: { botId, active: true } },
+    data: { activatedAt: null, revision: { increment: 1 } },
+  });
+  await tx.routine.updateMany({
+    where: { botId },
+    data: { active: false, nextRunAt: null },
+  });
+  return { connectionIds, routineIds, runIds: activeRuns.map((run) => run.id) };
+}
+
+async function refreshLinearSources(
+  tx: Prisma.TransactionClient,
+  connectionIds: readonly string[],
+): Promise<string[]> {
+  const enqueue: string[] = [];
+  for (const connectionId of connectionIds) {
+    if ((await refreshLinearSourceMonitoring(tx, connectionId)).enqueue) enqueue.push(connectionId);
+  }
+  return enqueue;
 }
 
 async function detachBotFromGroups(tx: Prisma.TransactionClient, botId: string) {

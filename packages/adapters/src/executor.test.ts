@@ -969,44 +969,79 @@ describe("parseUpdateBotPatch", () => {
 });
 
 describe("run notification preference", () => {
+  type Source = {
+    trigger: string;
+    bot: { notifyOnFinish: boolean };
+    thread: { groupId: string | null };
+    routine: { notify: boolean } | null;
+  };
+  const owned = {
+    id: "run-1",
+    botId: "bot-1",
+    threadId: "thread-1",
+    spaceId: "workspace-1",
+    userId: "user-1",
+  };
+
   it("silences direct messages but leaves group notifications enabled", async () => {
-    let source: { bot: { notifyOnFinish: boolean }; thread: { groupId: string | null } } | null = {
+    let source: Source | null = {
+      trigger: "user",
       bot: { notifyOnFinish: false },
       thread: { groupId: null },
+      routine: null,
     };
     const findFirst = vi.fn(async () => source);
     const prisma = { run: { findFirst } } as unknown as PrismaClient;
 
-    await expect(
-      runNotificationsEnabled(prisma, {
-        botId: "bot-1",
-        threadId: "thread-1",
-        spaceId: "workspace-1",
-        userId: "user-1",
-      }),
-    ).resolves.toBe(false);
+    await expect(runNotificationsEnabled(prisma, owned, "completion")).resolves.toBe(false);
     expect(findFirst).toHaveBeenCalledWith({
       where: {
+        id: "run-1",
         botId: "bot-1",
         threadId: "thread-1",
         spaceId: "workspace-1",
         userId: "user-1",
       },
       select: {
+        trigger: true,
         bot: { select: { notifyOnFinish: true } },
         thread: { select: { groupId: true } },
+        routine: { select: { notify: true } },
       },
     });
 
-    source = { bot: { notifyOnFinish: false }, thread: { groupId: "group-1" } };
-    await expect(
-      runNotificationsEnabled(prisma, {
-        botId: "bot-1",
-        threadId: "thread-1",
-        spaceId: "workspace-1",
-        userId: "user-1",
-      }),
-    ).resolves.toBe(true);
+    source = { ...source, thread: { groupId: "group-1" } };
+    await expect(runNotificationsEnabled(prisma, owned, "completion")).resolves.toBe(true);
+  });
+
+  it("gates Linear finish notifications on the current routine notify setting", async () => {
+    let source: Source = {
+      trigger: "linear",
+      bot: { notifyOnFinish: true },
+      thread: { groupId: null },
+      routine: { notify: false },
+    };
+    const prisma = { run: { findFirst: vi.fn(async () => source) } } as unknown as PrismaClient;
+
+    await expect(runNotificationsEnabled(prisma, owned, "completion")).resolves.toBe(false);
+    await expect(runNotificationsEnabled(prisma, owned, "failure")).resolves.toBe(false);
+    await expect(runNotificationsEnabled(prisma, owned, "help")).resolves.toBe(true);
+    await expect(runNotificationsEnabled(prisma, owned, "takeover")).resolves.toBe(true);
+
+    source = { ...source, routine: null };
+    await expect(runNotificationsEnabled(prisma, owned, "completion")).resolves.toBe(false);
+    await expect(runNotificationsEnabled(prisma, owned, "help")).resolves.toBe(true);
+
+    source = { ...source, routine: { notify: true } };
+    await expect(runNotificationsEnabled(prisma, owned, "completion")).resolves.toBe(true);
+
+    source = { ...source, bot: { notifyOnFinish: false } };
+    await expect(runNotificationsEnabled(prisma, owned, "completion")).resolves.toBe(false);
+  });
+
+  it("denies notifications when the exact run is not owned", async () => {
+    const prisma = { run: { findFirst: vi.fn(async () => null) } } as unknown as PrismaClient;
+    await expect(runNotificationsEnabled(prisma, owned, "help")).resolves.toBe(false);
   });
 });
 
@@ -1517,6 +1552,7 @@ describe("createRunExecutor", () => {
       },
       $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) =>
         callback({
+          $queryRaw: vi.fn(async () => []),
           routine: {
             updateMany,
             findUnique: vi.fn(async () => ({
@@ -1596,6 +1632,7 @@ describe("createRunExecutor", () => {
         agentSkill: { findMany: vi.fn(async () => []) },
         $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) =>
           callback({
+            $queryRaw: vi.fn(async () => []),
             routine: {
               updateMany: vi.fn(async () => ({ count: 1 })),
               findUnique: vi.fn(async () => claimedModel),
@@ -1742,6 +1779,7 @@ describe("createRunExecutor", () => {
       agentSkill: { findMany: vi.fn(async () => []) },
       $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) =>
         callback({
+          $queryRaw: vi.fn(async () => []),
           routine: {
             updateMany: vi.fn(async () => ({ count: 1 })),
             findUnique: vi.fn(async () => ({
@@ -1814,6 +1852,7 @@ describe("createRunExecutor", () => {
       agentSkill: { findMany: vi.fn(async () => []) },
       $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) =>
         callback({
+          $queryRaw: vi.fn(async () => []),
           routine: {
             updateMany: vi.fn(async () => ({ count: 1 })),
             findUnique: vi.fn(async () => ({
@@ -1903,6 +1942,7 @@ description: Prepare standup notes
       },
       $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) =>
         callback({
+          $queryRaw: vi.fn(async () => []),
           routine: {
             updateMany: vi.fn(async () => ({ count: 1 })),
             findUnique: vi.fn(async () => ({
@@ -1963,6 +2003,7 @@ description: Prepare standup notes
       },
       $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) =>
         callback({
+          $queryRaw: vi.fn(async () => []),
           routine: {
             updateMany,
             findUnique: vi.fn(async () => ({
@@ -2028,6 +2069,7 @@ description: Prepare standup notes
         transactionCalls += 1;
         if (transactionCalls === 1) {
           return callback({
+            $queryRaw: vi.fn(async () => []),
             routine: {
               updateMany: claimUpdateMany,
               findUnique: vi.fn(async () => ({
@@ -2041,6 +2083,7 @@ description: Prepare standup notes
           });
         }
         return callback({
+          $queryRaw: vi.fn(async () => []),
           routine: { updateMany: restoreUpdateMany },
           task: { deleteMany: deleteTaskMany },
           run: { deleteMany: deleteRunMany },
@@ -2066,6 +2109,87 @@ description: Prepare standup notes
           active: true,
           lastRunAt: previousLastRunAt,
         }),
+      }),
+    );
+  });
+
+  it("keeps a one-shot routine with a Linear trigger active and restores it consistently", async () => {
+    const scheduledAt = new Date(Date.now() - 1_000);
+    const previousLastRunAt = new Date(Date.now() - 60_000);
+    const enqueue = vi.fn(async () => {
+      throw new Error("enqueue failed");
+    });
+    const claimUpdateMany = vi.fn(async () => ({ count: 1 }));
+    const restoreUpdateMany = vi.fn(async () => ({ count: 1 }));
+    const claimQueryRaw = vi.fn(async () => []);
+    let transactionCalls = 0;
+    const prisma = {
+      routine: {
+        findUnique: vi.fn(async () => ({
+          id: "routine-1",
+          spaceId: "ws-1",
+          botId: "bot-1",
+          userId: "user-1",
+          prompt: "say hi",
+          crons: [ONCE_ROUTINE_CRON],
+          timezone: "UTC",
+          active: true,
+          nextRunAt: scheduledAt,
+          lastRunAt: previousLastRunAt,
+        })),
+      },
+      bot: {
+        findUnique: vi.fn(async () => ({ id: "bot-1", thread: { id: "thread-1" } })),
+      },
+      agentSkill: { findMany: vi.fn(async () => []) },
+      $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => {
+        transactionCalls += 1;
+        if (transactionCalls === 1) {
+          return callback({
+            $queryRaw: claimQueryRaw,
+            routine: {
+              updateMany: claimUpdateMany,
+              findUnique: vi.fn(async () => ({
+                webhookEnabled: false,
+                githubEnabled: false,
+                messageProvider: null,
+                linearTrigger: { routineId: "routine-1" },
+                modelProvider: null,
+                modelId: null,
+                thinkingLevel: null,
+              })),
+            },
+            task: { create: vi.fn(async () => ({ id: "task-1" })) },
+            run: { create: vi.fn(async () => ({ id: "run-1", taskId: "task-1" })) },
+          });
+        }
+        return callback({
+          $queryRaw: vi.fn(async () => []),
+          routine: { updateMany: restoreUpdateMany },
+          task: { deleteMany: vi.fn(async () => ({ count: 1 })) },
+          run: { deleteMany: vi.fn(async () => ({ count: 1 })) },
+        });
+      }),
+    } as unknown as PrismaClient;
+    const executor = createRunExecutor({
+      prisma,
+      jobs: { enqueue, cancel: vi.fn(async () => undefined), close: vi.fn(async () => undefined) },
+      events: { append: vi.fn(async () => undefined) },
+    } as unknown as Parameters<typeof createRunExecutor>[0]);
+
+    await expect(executor.wakeRoutine("routine-1", scheduledAt.toISOString())).rejects.toThrow(
+      "enqueue failed",
+    );
+    expect(claimQueryRaw).toHaveBeenCalledTimes(2);
+    const [claim] = claimUpdateMany.mock.calls.at(0) as unknown as [
+      { data: Record<string, unknown> },
+    ];
+    expect(claim.data).toMatchObject({ nextRunAt: null });
+    expect(claim.data).not.toHaveProperty("active");
+    expect(restoreUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ id: "routine-1", active: true, nextRunAt: null }),
+        data: expect.objectContaining({ nextRunAt: scheduledAt, active: true }),
       }),
     );
   });

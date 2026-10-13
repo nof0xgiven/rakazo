@@ -5,6 +5,7 @@ import {
   canTransition,
   isBackgroundRunTrigger,
   isConversationalRun,
+  isRoutineRunTrigger,
 } from "./run-state.js";
 
 describe("run state machine", () => {
@@ -19,6 +20,7 @@ describe("run state machine", () => {
     expect(isConversationalRun("messaging")).toBe(true);
     expect(isConversationalRun("routine")).toBe(false);
     expect(isConversationalRun("webhook")).toBe(false);
+    expect(isConversationalRun("linear")).toBe(false);
     expect(isConversationalRun("created")).toBe(false);
     expect(isConversationalRun("tickets")).toBe(false);
   });
@@ -27,7 +29,16 @@ describe("run state machine", () => {
     expect(isBackgroundRunTrigger("tickets")).toBe(true);
     expect(isBackgroundRunTrigger("user")).toBe(false);
     expect(isBackgroundRunTrigger("routine")).toBe(false);
+    expect(isBackgroundRunTrigger("linear")).toBe(false);
     expect(isBackgroundRunTrigger(null)).toBe(false);
+  });
+
+  it("treats Linear automations as routine runs", () => {
+    expect(isRoutineRunTrigger("routine")).toBe(true);
+    expect(isRoutineRunTrigger("linear")).toBe(true);
+    expect(isRoutineRunTrigger("webhook")).toBe(false);
+    expect(isRoutineRunTrigger("user")).toBe(false);
+    expect(isRoutineRunTrigger(null)).toBe(false);
   });
 
   it("rejects rewriting a completed run", () => {
