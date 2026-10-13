@@ -105,6 +105,14 @@ import {
   IntegrationProviderConfigSchema,
   IntegrationSetupStateSchema,
 } from "./integration-settings.js";
+import {
+  LinearConfigureWebhookInputSchema,
+  LinearConnectInputSchema,
+  LinearConnectionStatusSchema,
+  LinearOptionsInputSchema,
+  LinearOptionsSchema,
+  LinearTriggerSchema,
+} from "./linear.js";
 import { MessageReactionSchema } from "./reactions.js";
 import { RoutineHistorySchema, RoutineRunCursorSchema, RunsListOutputSchema } from "./runs.js";
 import { SearchQueryOutputSchema } from "./search.js";
@@ -524,6 +532,8 @@ export const appContract = {
             modelProvider: z.string().trim().min(1).max(80).nullable().optional(),
             modelId: z.string().trim().min(1).max(200).nullable().optional(),
             thinkingLevel: ThinkingLevelSchema.nullable().optional(),
+            /** Null removes the Linear trigger; omitted leaves it unchanged. */
+            linearTrigger: LinearTriggerSchema.nullable().optional(),
             /** ISO datetime to arm a never-run one-shot. */
             runAt: IsoDate.optional(),
           })
@@ -533,11 +543,12 @@ export const appContract = {
               value.crons.length === 0 &&
               value.webhookEnabled === false &&
               value.githubEnabled === false &&
-              value.messageProvider === null
+              value.messageProvider === null &&
+              value.linearTrigger === null
             ) {
               ctx.addIssue({
                 code: "custom",
-                message: "Add a schedule, webhook, GitHub, or message trigger",
+                message: "Add a trigger",
                 path: ["crons"],
               });
             }
@@ -779,6 +790,15 @@ export const appContract = {
         }),
       ),
     ),
+  },
+  /** Native Linear automations: API-key connections that start routines on issue events. */
+  linear: {
+    connect: oc.input(LinearConnectInputSchema).output(ConnectionSchema),
+    status: oc.input(z.object({ connectionId: Id })).output(LinearConnectionStatusSchema),
+    options: oc.input(LinearOptionsInputSchema).output(LinearOptionsSchema),
+    configureWebhook: oc
+      .input(LinearConfigureWebhookInputSchema)
+      .output(LinearConnectionStatusSchema),
   },
   /** External messaging surface: link state, group channels, agent connections. */
   messaging: {

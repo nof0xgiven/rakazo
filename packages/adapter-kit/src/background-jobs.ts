@@ -22,6 +22,7 @@ const payloadSchemas = {
   "history.compact": z.object({ threadId: z.string().min(1) }),
   "messaging.deliver": z.object({ runId: z.string().min(1).optional() }),
   "cloud_agent.poll": z.object({ agentId: z.string().min(1) }),
+  "linear.sync": z.object({ connectionId: z.string().min(1) }),
 } satisfies { [Name in BackgroundJobName]: z.ZodType<BackgroundJobPayloads[Name]> };
 
 export function parseBackgroundJob(name: string, payload: unknown): BackgroundJob {
@@ -153,6 +154,22 @@ export function cloudAgentPollJob(
     name: "cloud_agent.poll",
     payload,
     replaceKey: cloudAgentPollJobKey(payload.agentId),
+    ...(availableAt ? { availableAt } : {}),
+  };
+}
+
+export function linearSyncJobKey(connectionId: string): string {
+  return `linear.sync:${connectionId}`;
+}
+
+export function linearSyncJob(
+  payload: BackgroundJobPayloads["linear.sync"],
+  availableAt?: Date,
+): BackgroundJob {
+  return {
+    name: "linear.sync",
+    payload,
+    replaceKey: linearSyncJobKey(payload.connectionId),
     ...(availableAt ? { availableAt } : {}),
   };
 }

@@ -12,6 +12,7 @@ export * from "./events.js";
 export * from "./history.js";
 export * from "./ids.js";
 export * from "./integration-settings.js";
+export * from "./linear.js";
 export * from "./local-settings.js";
 export * from "./markdown-text.js";
 export * from "./mcp.js";

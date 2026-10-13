@@ -629,6 +629,8 @@ export interface BackgroundJobPayloads {
   "messaging.deliver": { runId?: string };
   /** Reconcile durable remote-agent intent; scope is loaded from the database. */
   "cloud_agent.poll": { agentId: string };
+  /** Poll and fan out one native Linear source under its lease. */
+  "linear.sync": { connectionId: string };
 }
 
 export type BackgroundJobName = keyof BackgroundJobPayloads;
