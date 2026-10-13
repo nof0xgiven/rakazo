@@ -25,12 +25,15 @@ vi.mock("./bot-voices", () => ({
 vi.mock("./device-voice", () => ({ loadDeviceVoiceEnabled: async () => false }));
 vi.mock("./voice", () => ({ stopVoicePlayback: vi.fn() }));
 vi.mock("./api", () => ({
+  apiScopeKey: () => "scope-fixture",
+  captureApiRequestContext: async () => ({ apiBase: "http://fixture", headers: {} }),
   rpc: async (procedure: string, input: unknown) => {
     if (procedure === "bots/get") return mocks.bot;
     if (procedure === "bots/update") {
       mocks.updates.push(input);
       return {};
     }
+    if (procedure === "memory/providerConfig") return null;
     if (mocks.metadataError) throw mocks.metadataError;
     if (procedure === "me") return mocks.me;
     if (procedure === "models/list") return mocks.catalog;

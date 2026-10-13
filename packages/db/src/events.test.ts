@@ -385,6 +385,7 @@ describe("finalizeRun", () => {
     const tx = {
       $queryRaw: vi
         .fn()
+        .mockResolvedValueOnce([{ id: "user-1" }])
         .mockResolvedValueOnce([])
         .mockResolvedValueOnce([
           { botId: "bot-1", spaceMemoryConfigId: "config-1", bankId: "bank-a" },
@@ -446,6 +447,7 @@ describe("finalizeRun", () => {
       },
     };
     const prisma = {
+      run: { findFirst: vi.fn(async () => ({ userId: "user-1" })) },
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
     } as unknown as PrismaClient;
     return { tx, prisma, order };

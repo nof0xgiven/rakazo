@@ -11,7 +11,7 @@ import { IssueTrackerError, linearSyncJobKey, runJobKey } from "@rakazo/adapter-
 import type { LinearTrigger } from "@rakazo/contracts";
 import { createDb, IsolationError, type PrismaClient } from "@rakazo/db";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { LINEAR_MESSAGES, LinearServiceError, createLinearService } from "./linear-service.js";
+import { createLinearService, LINEAR_MESSAGES, LinearServiceError } from "./linear-service.js";
 import { withSecretPersistence } from "./secret-persistence.js";
 import { EncryptedSecretStore } from "./secrets.js";
 
@@ -128,8 +128,7 @@ describePostgres("Linear connection service (PostgreSQL)", () => {
     const signal = new AbortController().signal;
     const key = `lin_api_${randomUUID()}`;
     provider.identities.set(key, WORKSPACE);
-    const connect = () =>
-      service.connect(actor, { apiKey: key, displayName: "Work" }, signal);
+    const connect = () => service.connect(actor, { apiKey: key, displayName: "Work" }, signal);
     const source = (connectionId: string) =>
       db.prisma.linearSource.findUniqueOrThrow({
         where: { connectionId },
@@ -137,12 +136,32 @@ describePostgres("Linear connection service (PostgreSQL)", () => {
       });
     const secretsOf = () =>
       db.prisma.secret.findMany({ where: { userId: actor.userId }, orderBy: { id: "asc" } });
-    return { actor, provider, service, jobs, enqueue, cancel, signal, key, connect, source, secretsOf };
+    return {
+      actor,
+      provider,
+      service,
+      jobs,
+      enqueue,
+      cancel,
+      signal,
+      key,
+      connect,
+      source,
+      secretsOf,
+    };
   }
 
-  async function attachActiveRoutine(actor: { userId: string; spaceId: string }, connectionId: string) {
+  async function attachActiveRoutine(
+    actor: { userId: string; spaceId: string },
+    connectionId: string,
+  ) {
     const bot = await db.prisma.bot.create({
-      data: { spaceId: actor.spaceId, userId: actor.userId, name: "Linear bot", color: "test-color" },
+      data: {
+        spaceId: actor.spaceId,
+        userId: actor.userId,
+        name: "Linear bot",
+        color: "test-color",
+      },
     });
     const routine = await db.prisma.routine.create({
       data: {
@@ -436,9 +455,9 @@ describePostgres("Linear connection service (PostgreSQL)", () => {
     expect(
       await db.prisma.linearEvent.findUniqueOrThrow({ where: { id: fixture.event.id } }),
     ).toMatchObject({ status: "discarded", seed: null, snapshot: null });
-    expect(await db.prisma.run.findUniqueOrThrow({ where: { id: fixture.run.id } })).toMatchObject(
-      { status: "cancelled" },
-    );
+    expect(await db.prisma.run.findUniqueOrThrow({ where: { id: fixture.run.id } })).toMatchObject({
+      status: "cancelled",
+    });
     expect(
       await db.prisma.task.findUniqueOrThrow({ where: { id: fixture.task.id } }),
     ).toMatchObject({ status: "cancelled" });
@@ -566,9 +585,9 @@ describePostgres("Linear connection service (PostgreSQL)", () => {
     expect(
       await db.prisma.linearEvent.findUniqueOrThrow({ where: { id: fixture.event.id } }),
     ).toMatchObject({ status: "discarded" });
-    expect(await db.prisma.run.findUniqueOrThrow({ where: { id: fixture.run.id } })).toMatchObject(
-      { status: "cancelled" },
-    );
+    expect(await db.prisma.run.findUniqueOrThrow({ where: { id: fixture.run.id } })).toMatchObject({
+      status: "cancelled",
+    });
     expect(
       await db.prisma.routineLinearTrigger.findUnique({ where: { routineId: fixture.routine.id } }),
     ).not.toBeNull();
@@ -752,7 +771,12 @@ describePostgres("Linear connection service (PostgreSQL)", () => {
     await expect(
       h.service.connect(
         intruder,
-        { apiKey: h.key, displayName: "Stolen", connectionId: connection.id, expectedRevision: revision },
+        {
+          apiKey: h.key,
+          displayName: "Stolen",
+          connectionId: connection.id,
+          expectedRevision: revision,
+        },
         h.signal,
       ),
     ).rejects.toBeInstanceOf(IsolationError);

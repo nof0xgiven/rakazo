@@ -7,7 +7,6 @@ import { RECALLED_MEMORY_PREFIX } from "@rakazo/core";
 import { loadRootEnv } from "@rakazo/core/node/load-root-env";
 import { PostgreSqlContainer } from "@testcontainers/postgresql";
 import type { createApp } from "../../../../apps/api/src/app.ts";
-import { handleLinearFixture, LINEAR_FIXTURE_PATH, seedLinearEmulator } from "./linear-fixture.js";
 import {
   HINDSIGHT_FIXTURE_CONTROL_PATH,
   HINDSIGHT_FIXTURE_TOKEN_HEADER,
@@ -15,6 +14,7 @@ import {
 } from "../hindsight-emulator.js";
 import type { ModelEmulatorRequest } from "../model-emulator.js";
 import { startModelEmulator } from "../model-emulator.js";
+import { handleLinearFixture, LINEAR_FIXTURE_PATH, seedLinearEmulator } from "./linear-fixture.js";
 import { runProcess } from "./process.js";
 
 loadRootEnv();
