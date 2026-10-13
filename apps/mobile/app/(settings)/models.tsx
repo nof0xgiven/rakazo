@@ -1,31 +1,49 @@
-import type { ModelBackupChoice, ModelOAuthBegin, ThinkingLevel } from "@rakazo/contracts";
+import type {
+  ModelBackupChoice,
+  ModelConfigurationConflictData,
+  ModelConfigurationUsage,
+  ModelOAuthBegin,
+  OpenAiCompatibleDiscoveredModel,
+  ThinkingLevel,
+} from "@rakazo/contracts";
 import {
   backupChoiceKey,
   CLOUDFLARE_AI_GATEWAY_PROVIDER_ID,
   cloudflareGatewayRouting,
   connectedBackupOptions,
-  DEFAULT_MODEL_CONTEXT_WINDOW,
-  DEFAULT_MODEL_MAX_TOKENS,
+  effectiveThinkingLevel,
   MAX_MODEL_BACKUPS,
-  MAX_MODEL_CONTEXT_WINDOW,
   MAX_MODEL_MAX_TOKENS,
   moveBackupChoice,
   OPENAI_COMPATIBLE_BASE_URL_HINT,
   OPENAI_COMPATIBLE_PROVIDER_ID,
-  openAiCompatibleConnectReady,
-  parseModelContextWindow,
-  parseModelMaxImagesPerPrompt,
   parseModelMaxTokens,
   sameBackupChoices,
+  thinkingLevelsReason,
 } from "@rakazo/contracts";
+import type { OpenAiCompatibleModelDraft } from "@rakazo/core";
 import {
-  COMPATIBLE_THINKING_LEVELS,
+  addOpenAiCompatibleModel,
   clampCatalogThinkingLevel,
+  createModelDescription,
   createModelProbe,
+  createOpenAiCompatibleModelDraft,
   featuredModelProviders,
   filterModelCatalog,
+  groupModelConfigurationUsages,
   initialModelProbeState,
+  isSavedOpenAiCompatibleEndpoint,
+  mergeDiscoveredOpenAiCompatibleModels,
+  modelConfigurationConflict,
+  openAiCompatibleApiKeyInput,
+  openAiCompatibleConnectInput,
+  openAiCompatibleCredential,
+  openAiCompatibleDefaultCandidates,
+  openAiCompatibleDraftBlockers,
   pickCatalogModelId,
+  reloadOpenAiCompatibleModelDraft,
+  restoreBlockedOpenAiCompatibleModels,
+  setOpenAiCompatibleEndpoint,
 } from "@rakazo/core";
 import * as Clipboard from "expo-clipboard";
 import { useFocusEffect } from "expo-router";
@@ -44,8 +62,10 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { MenuPicker } from "../../components/menu-picker";
 import { NativeActionButton } from "../../components/native-action-button";
 import { NativeSwitch } from "../../components/native-switch";
+import { OpenAiCompatibleModelList } from "../../components/openai-compatible-model-list";
 import { Checkmark, Chevron } from "../../components/row-accessories";
 import type {
   ApiRequestContext,
@@ -64,32 +84,30 @@ import {
 } from "../../lib/model-auth";
 import { mobileBackupScopeIsCurrent } from "../../lib/model-backups";
 import { native, useResolvedAppearance, useThemedStyles } from "../../lib/native";
+import { thinkingLevelLabel } from "../../lib/thinking-level-label";
 import { errorText } from "../../lib/user-error";
 
-function connectionMaxTokensField(providerId: string, stored: number | undefined): string {
-  if (providerId === OPENAI_COMPATIBLE_PROVIDER_ID) {
-    return String(stored ?? DEFAULT_MODEL_MAX_TOKENS);
-  }
-  return stored !== undefined ? String(stored) : "";
+type CompatibleDraftLoad = "create" | "preserve" | "keepLocal" | "discardLocal";
+
+type ModelConflict = {
+  data: ModelConfigurationConflictData;
+  message: string;
+};
+
+function persistedCompatibleModelIds(credential: MobileModelCredential | null): string[] {
+  const configured = new Set(credential?.models?.map((model) => model.modelId));
+  return (credential?.enabledModelIds ?? []).filter((modelId) => configured.has(modelId));
 }
 
-const THINKING_LEVEL_OPTIONS: ThinkingLevel[] = [
-  "minimal",
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-  "max",
-];
-
-function thinkingLevelLabel(level: ThinkingLevel, t: (message: string) => string): string {
-  if (level === "xhigh") return t("Extra high");
-  if (level === "low") return t("Low");
-  if (level === "medium") return t("Medium");
-  if (level === "high") return t("High");
-  if (level === "minimal") return t("Minimal");
-  if (level === "max") return t("Max");
-  return level;
+function defaultCompatibleModelId(
+  credential: MobileModelCredential | null,
+  preferred: string | null | undefined,
+): string {
+  const choices = persistedCompatibleModelIds(credential);
+  const candidate = [preferred?.trim(), credential?.modelId].find(
+    (modelId) => modelId && choices.includes(modelId),
+  );
+  return candidate ?? choices[0] ?? "";
 }
 
 /** Providers with more models than this get a search field. */
@@ -118,19 +136,21 @@ export default function Models() {
   const [apiKey, setApiKey] = useState("");
   const [accountId, setAccountId] = useState("");
   const [gatewayId, setGatewayId] = useState("");
-  const [baseUrl, setBaseUrl] = useState("");
-  const [reasoning, setReasoning] = useState(false);
+  const [draft, setDraft] = useState<OpenAiCompatibleModelDraft>(() =>
+    createOpenAiCompatibleModelDraft(),
+  );
+  const [removeSavedKey, setRemoveSavedKey] = useState(false);
+  const [conflict, setConflict] = useState<ModelConflict | null>(null);
+  const [staleConfiguration, setStaleConfiguration] = useState(false);
   const [thinkingLevel, setThinkingLevel] = useState<ThinkingLevel | null>(null);
-  const [maxTokens, setMaxTokens] = useState(String(DEFAULT_MODEL_MAX_TOKENS));
-  const [contextWindow, setContextWindow] = useState(String(DEFAULT_MODEL_CONTEXT_WINDOW));
-  const [supportsImages, setSupportsImages] = useState(false);
-  const [maxImagesPerPrompt, setMaxImagesPerPrompt] = useState("");
+  const [maxTokens, setMaxTokens] = useState("");
   const [showEndpointHelp, setShowEndpointHelp] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [showApiKey, setShowApiKey] = useState(false);
-  const [{ models: probeModels, probing }, setProbe] = useState(initialModelProbeState);
+  const [{ probing }, setProbe] = useState(initialModelProbeState);
   const [modelProbe] = useState(() => createModelProbe(setProbe));
-  const resetOpenAiCompatibleProbe = modelProbe.reset;
+  const [describing, setDescribing] = useState(false);
+  const [modelDescription] = useState(() => createModelDescription(setDescribing));
   const [oauth, setOauth] = useState<ModelOAuthBegin | null>(null);
   const [pasteCode, setPasteCode] = useState("");
   const [loading, setLoading] = useState(true);
@@ -176,6 +196,7 @@ export default function Models() {
   function clearFeedback() {
     setFeedbackAnchor("connection");
     setError(null);
+    setConflict(null);
   }
 
   const copyOAuthCode = useCallback((code: string) => {
@@ -198,70 +219,76 @@ export default function Models() {
     if (loginId) void rpc("models/cancelOAuth", { loginId }).catch(() => undefined);
   }, []);
 
-  const load = useCallback(async (preferred: ModelSelection = {}) => {
-    setError(null);
-    const [nextMe, nextCatalog, nextCredentials] = await Promise.all([
-      rpc<MobileMe>("me"),
-      rpc<MobileModel[]>("models/list"),
-      rpc<MobileModelCredential[]>("models/credentials"),
-    ]);
-    const nextProvider =
-      (preferred.provider && nextCatalog.some((entry) => entry.provider === preferred.provider)
-        ? preferred.provider
-        : nextMe.defaultProvider) ??
-      nextCatalog[0]?.provider ??
-      "";
-    const nextCredential = nextCredentials.find((entry) => entry.provider === nextProvider);
-    const nextModel =
-      nextProvider === OPENAI_COMPATIBLE_PROVIDER_ID
-        ? preferred.modelId?.trim() ||
-          nextCredential?.modelId ||
-          (nextMe.defaultProvider === OPENAI_COMPATIBLE_PROVIDER_ID ? nextMe.defaultModel : "") ||
-          ""
-        : pickCatalogModelId(
-            nextCatalog,
-            nextProvider,
-            preferred.modelId || nextCredential?.modelId || nextMe.defaultModel,
-          );
-    meRef.current = nextMe;
-    setMe(nextMe);
-    setCatalog(nextCatalog);
-    setCredentials(nextCredentials);
-    resetOpenAiCompatibleProbe();
-    setProvider(nextProvider);
-    setModelSearch((current) =>
-      current.provider === nextProvider ? current : { provider: nextProvider, query: "" },
-    );
-    setModelId(nextModel);
-    if (nextProvider === OPENAI_COMPATIBLE_PROVIDER_ID) {
-      setBaseUrl(nextCredential?.baseUrl ?? "");
-      setReasoning(nextCredential?.reasoning ?? false);
-      setThinkingLevel(
-        clampCatalogThinkingLevel(
-          nextCredential?.modelId === nextModel ? nextCredential?.thinkingLevel : null,
-          nextCredential?.reasoning ? COMPATIBLE_THINKING_LEVELS : [],
-        ) as ThinkingLevel | null,
+  const load = useCallback(
+    async (preferred: ModelSelection = {}, draftLoad: CompatibleDraftLoad = "create") => {
+      setError(null);
+      const [nextMe, nextCatalog, nextCredentials] = await Promise.all([
+        rpc<MobileMe>("me"),
+        rpc<MobileModel[]>("models/list"),
+        rpc<MobileModelCredential[]>("models/credentials"),
+      ]);
+      const nextProvider =
+        (preferred.provider && nextCatalog.some((entry) => entry.provider === preferred.provider)
+          ? preferred.provider
+          : nextMe.defaultProvider) ??
+        nextCatalog[0]?.provider ??
+        "";
+      const compatibleCredential = openAiCompatibleCredential(nextCredentials);
+      const nextCredential =
+        nextProvider === OPENAI_COMPATIBLE_PROVIDER_ID
+          ? compatibleCredential
+          : nextCredentials.find((entry) => entry.provider === nextProvider);
+      const nextModel =
+        nextProvider === OPENAI_COMPATIBLE_PROVIDER_ID
+          ? defaultCompatibleModelId(compatibleCredential, preferred.modelId)
+          : pickCatalogModelId(
+              nextCatalog,
+              nextProvider,
+              preferred.modelId || nextCredential?.modelId || nextMe.defaultModel,
+            );
+      meRef.current = nextMe;
+      setMe(nextMe);
+      setCatalog(nextCatalog);
+      setCredentials(nextCredentials);
+      modelProbe.reset();
+      modelDescription.reset();
+      if (draftLoad !== "preserve") {
+        setDraft((current) =>
+          draftLoad === "create"
+            ? createOpenAiCompatibleModelDraft(compatibleCredential)
+            : reloadOpenAiCompatibleModelDraft(current, compatibleCredential, {
+                discardLocal: draftLoad === "discardLocal",
+              }),
+        );
+      }
+      setProvider(nextProvider);
+      setModelSearch((current) =>
+        current.provider === nextProvider ? current : { provider: nextProvider, query: "" },
       );
-      setContextWindow(String(nextCredential?.contextWindow ?? DEFAULT_MODEL_CONTEXT_WINDOW));
-      setSupportsImages(nextCredential?.supportsImages ?? false);
-      setMaxImagesPerPrompt(String(nextCredential?.maxImagesPerPrompt ?? ""));
-    } else {
+      setModelId(nextModel);
       // A credential's stored effort is bound to its saved model choice.
       const nextEntry = nextCatalog.find(
         (entry) => entry.provider === nextProvider && entry.id === nextModel,
       );
       setThinkingLevel(
-        clampCatalogThinkingLevel(
-          nextCredential?.modelId === nextModel ? nextCredential.thinkingLevel : null,
-          nextEntry?.thinkingLevels,
-        ) as ThinkingLevel | null,
+        nextProvider === OPENAI_COMPATIBLE_PROVIDER_ID
+          ? null
+          : (clampCatalogThinkingLevel(
+              nextCredential?.modelId === nextModel ? nextCredential.thinkingLevel : null,
+              nextEntry?.thinkingLevels,
+            ) as ThinkingLevel | null),
       );
-    }
-    setMaxTokens(connectionMaxTokensField(nextProvider, nextCredential?.maxTokens));
-    setAccountId(nextCredential?.accountId ?? "");
-    setGatewayId(nextCredential?.gatewayId ?? "");
-    return nextMe;
-  }, []);
+      setMaxTokens(
+        nextCredential?.maxTokens !== undefined && nextProvider !== OPENAI_COMPATIBLE_PROVIDER_ID
+          ? String(nextCredential.maxTokens)
+          : "",
+      );
+      setAccountId(nextCredential?.accountId ?? "");
+      setGatewayId(nextCredential?.gatewayId ?? "");
+      return nextMe;
+    },
+    [modelDescription, modelProbe],
+  );
 
   const loadBackupModels = useCallback(
     async (expectedMe: MobileMe) => {
@@ -350,9 +377,10 @@ export default function Models() {
         setBackupError(null);
         setBackupNotice(null);
         modelProbe.invalidate();
+        modelDescription.invalidate();
         cancelOAuth();
       };
-    }, [cancelOAuth, load, loadBackupModels]),
+    }, [cancelOAuth, load, loadBackupModels, modelDescription, modelProbe]),
   );
 
   const groups = useMemo(() => {
@@ -441,23 +469,30 @@ export default function Models() {
   const isCloudflareGateway = provider === CLOUDFLARE_AI_GATEWAY_PROVIDER_ID;
   const cloudflareRoutingReady =
     !isCloudflareGateway || cloudflareGatewayRouting({ accountId, gatewayId }) !== undefined;
-  const credential = credentials.find((entry) => entry.provider === provider);
+  const compatibleCredential = openAiCompatibleCredential(credentials);
+  const credential = isOpenAiCompatible
+    ? compatibleCredential
+    : credentials.find((entry) => entry.provider === provider);
   const currentEntry = catalog.find(
     (entry) => entry.provider === me?.defaultProvider && entry.id === me?.defaultModel,
   );
   const activeCredential = credentials.find(
     (entry) => entry.provider === me?.defaultProvider && entry.modelId === me?.defaultModel,
   );
-  // The banner shows the effective effort — stored level or the runtime
-  // default — only when the active model can actually think.
-  const activeThinkingLabel =
-    (currentEntry?.thinkingLevels ?? []).some((level) => level !== "off") ||
-    activeCredential?.reasoning
-      ? thinkingLevelLabel(activeCredential?.thinkingLevel ?? "medium", t)
-      : null;
+  const activeLevels = currentEntry?.thinkingLevels ?? [];
+  const activeThinkingLabel = thinkingLevelsReason(activeLevels)
+    ? thinkingLevelLabel(
+        effectiveThinkingLevel(
+          activeLevels,
+          activeCredential?.thinkingLevel,
+          currentEntry?.defaultThinkingLevel,
+        ),
+        t,
+      )
+    : null;
   const isActive =
     me?.defaultProvider === selected?.provider &&
-    me?.defaultModel === (isOpenAiCompatible ? modelId.trim() : selected?.id);
+    me?.defaultModel === (isOpenAiCompatible ? modelId : selected?.id);
   // Space still bills the host while this provider matches; model id alone is not credentials.
   const usingServerCredentials = provider === me?.hostCredentialProvider;
   const acceptsKey = selected?.auth !== "oauth";
@@ -468,89 +503,120 @@ export default function Models() {
     !isOpenAiCompatible && selected
       ? (selected.thinkingLevels ?? []).filter((level) => level !== "off")
       : [];
-  const reasoningEffortValue = thinkingLevel ? thinkingLevelLabel(thinkingLevel, t) : t("Default");
+  const catalogDefaultLabel = t("Default ({level})", {
+    level: thinkingLevelLabel(effectiveThinkingLevel(catalogThinkingLevels, null, null), t),
+  });
   const catalogThinkingValue = thinkingLevel
     ? thinkingLevelLabel(thinkingLevel, t)
-    : t("Default ({level})", { level: thinkingLevelLabel("medium", t) });
+    : catalogDefaultLabel;
   const selectedStoredLevel =
     !isOpenAiCompatible && credential?.modelId === selected?.id
       ? (credential?.thinkingLevel ?? null)
       : null;
   const thinkingDirty = !isOpenAiCompatible && (thinkingLevel ?? null) !== selectedStoredLevel;
   const busy = pending !== null || oauthPending;
-  const effectiveBaseUrl = baseUrl.trim();
-  const openAiCompatibleReady = openAiCompatibleConnectReady({
-    baseUrl: effectiveBaseUrl,
-    modelId,
+  const compatibleDefaultChoices = persistedCompatibleModelIds(compatibleCredential);
+  const creatingCompatible = draft.connection === null;
+  const compatibleBlockers = openAiCompatibleDraftBlockers(draft, {
+    requireDefault: creatingCompatible,
   });
+  const compatibleSaveReady =
+    draft.baseUrl.trim().length > 0 && compatibleBlockers.length === 0 && !staleConfiguration;
   const builtinLimitSave = !isOpenAiCompatible && Boolean(credential) && apiKey.trim().length === 0;
 
   function updateBaseUrl(nextBaseUrl: string) {
-    setBaseUrl(nextBaseUrl);
-    resetOpenAiCompatibleProbe();
+    const next = setOpenAiCompatibleEndpoint(draft, nextBaseUrl);
+    if (isSavedOpenAiCompatibleEndpoint(draft) && !isSavedOpenAiCompatibleEndpoint(next)) {
+      setApiKey("");
+      setRemoveSavedKey(false);
+    }
+    setDraft(next);
+    modelProbe.reset();
+    modelDescription.reset();
     clearFeedback();
   }
 
   function updateApiKey(nextApiKey: string) {
     setApiKey(nextApiKey);
-    resetOpenAiCompatibleProbe();
+    modelProbe.reset();
   }
 
   function chooseProvider(nextProvider: string) {
     cancelOAuth();
-    const nextCredential = credentials.find((entry) => entry.provider === nextProvider);
+    const nextCredential =
+      nextProvider === OPENAI_COMPATIBLE_PROVIDER_ID
+        ? compatibleCredential
+        : credentials.find((entry) => entry.provider === nextProvider);
     const nextModelId =
       nextProvider === OPENAI_COMPATIBLE_PROVIDER_ID
-        ? (nextCredential?.modelId ?? "")
+        ? defaultCompatibleModelId(
+            compatibleCredential,
+            me?.defaultProvider === OPENAI_COMPATIBLE_PROVIDER_ID ? me.defaultModel : undefined,
+          )
         : pickCatalogModelId(catalog, nextProvider, nextCredential?.modelId ?? me?.defaultModel);
     Keyboard.dismiss();
     setProvider(nextProvider);
     setModelSearch({ provider: nextProvider, query: "" });
-    setReasoning(nextCredential?.reasoning ?? false);
     const nextEntry = catalog.find(
       (entry) => entry.provider === nextProvider && entry.id === nextModelId,
     );
     setThinkingLevel(
-      clampCatalogThinkingLevel(
-        nextCredential?.modelId === nextModelId ? nextCredential.thinkingLevel : null,
-        nextProvider === OPENAI_COMPATIBLE_PROVIDER_ID
-          ? nextCredential?.reasoning
-            ? COMPATIBLE_THINKING_LEVELS
-            : []
-          : nextEntry?.thinkingLevels,
-      ) as ThinkingLevel | null,
+      nextProvider === OPENAI_COMPATIBLE_PROVIDER_ID
+        ? null
+        : (clampCatalogThinkingLevel(
+            nextCredential?.modelId === nextModelId ? nextCredential.thinkingLevel : null,
+            nextEntry?.thinkingLevels,
+          ) as ThinkingLevel | null),
     );
-    setMaxTokens(connectionMaxTokensField(nextProvider, nextCredential?.maxTokens));
-    setContextWindow(String(nextCredential?.contextWindow ?? DEFAULT_MODEL_CONTEXT_WINDOW));
-    setSupportsImages(nextCredential?.supportsImages ?? false);
-    setMaxImagesPerPrompt(String(nextCredential?.maxImagesPerPrompt ?? ""));
+    setMaxTokens(
+      nextCredential?.maxTokens !== undefined && nextProvider !== OPENAI_COMPATIBLE_PROVIDER_ID
+        ? String(nextCredential.maxTokens)
+        : "",
+    );
     setModelId(nextModelId);
-    setBaseUrl(
-      nextProvider === OPENAI_COMPATIBLE_PROVIDER_ID ? (nextCredential?.baseUrl ?? "") : "",
-    );
+    setDraft(createOpenAiCompatibleModelDraft(compatibleCredential));
     setApiKey("");
+    setRemoveSavedKey(false);
     setAccountId(nextCredential?.accountId ?? "");
     setGatewayId(nextCredential?.gatewayId ?? "");
-    resetOpenAiCompatibleProbe();
+    modelProbe.reset();
+    modelDescription.reset();
     clearFeedback();
   }
 
+  function showModelConflict(error: unknown, anchor: FeedbackAnchor, effortMessage: string) {
+    const data = modelConfigurationConflict(error);
+    if (!data) return null;
+    const message =
+      data.reason === "models_in_use"
+        ? t("Reassign models before disabling them.")
+        : data.reason === "model_connection_in_use"
+          ? t("Reassign models before changing their connection.")
+          : data.reason === "model_effort_in_use"
+            ? effortMessage
+            : t("Model settings changed; reload before saving.");
+    if (data.reason === "model_configuration_changed") setStaleConfiguration(true);
+    publishFeedback(anchor, { error: message });
+    setConflict({ data, message });
+    return data;
+  }
+
   async function probeServerModels() {
-    if (!baseUrl.trim()) return;
+    if (!draft.baseUrl.trim()) return;
     Keyboard.dismiss();
     clearFeedback();
     await modelProbe.probe({
-      baseUrl,
-      apiKey,
-      request: (input) => rpc<{ models: string[] }>("models/probeOpenAiCompatible", input),
+      baseUrl: draft.baseUrl,
+      apiKey: openAiCompatibleApiKeyInput(apiKey, removeSavedKey),
+      credentialId: draft.connection?.credentialId,
+      request: (input) =>
+        rpc<{ models: OpenAiCompatibleDiscoveredModel[] }>("models/probeOpenAiCompatible", input),
       onSuccess: (models) => {
-        const next = modelId.trim() || models[0] || "";
-        if (next !== modelId) stageCompatibleModelId(next);
-        else setModelId(next);
+        setDraft((current) => mergeDiscoveredOpenAiCompatibleModels(current, models));
         publishFeedback("probe", {
           notice:
             models.length === 0
-              ? t("Server found. Enter a model name.")
+              ? t("Server found. Add a model by id.")
               : models.length === 1
                 ? t("Found {count} model.", { count: 1 })
                 : t("Found {count} models.", { count: models.length }),
@@ -563,9 +629,50 @@ export default function Models() {
     });
   }
 
+  function addCompatibleModel(nextModelId: string) {
+    if (!draft.baseUrl.trim() || !nextModelId) return Promise.resolve(false);
+    clearFeedback();
+    return new Promise<boolean>((resolve) => {
+      void modelDescription.describe({
+        baseUrl: draft.baseUrl,
+        credentialId: draft.connection?.credentialId,
+        modelId: nextModelId,
+        request: (input) =>
+          rpc<{ models: OpenAiCompatibleDiscoveredModel[] }>(
+            "models/describeOpenAiCompatible",
+            input,
+          ),
+        onSuccess: (model) => {
+          setDraft((current) => addOpenAiCompatibleModel(current, model));
+          resolve(true);
+        },
+        onError: (err) => {
+          publishFeedback("probe", {
+            error: errorText(err, t("Could not add this model")),
+          });
+          resolve(false);
+        },
+      });
+    });
+  }
+
+  async function reloadCompatibleSettings() {
+    clearFeedback();
+    setApiKey("");
+    setRemoveSavedKey(false);
+    try {
+      await load({ provider: OPENAI_COMPATIBLE_PROVIDER_ID }, "discardLocal");
+      setStaleConfiguration(false);
+    } catch (err) {
+      publishFeedback("connection", {
+        error: errorText(err, t("Could not load model settings")),
+      });
+    }
+  }
+
   async function setModelDefault() {
     if (!selected || !credential) return;
-    const activeModelId = isOpenAiCompatible ? modelId.trim() : selected.id;
+    const activeModelId = isOpenAiCompatible ? modelId : selected.id;
     if (isOpenAiCompatible && !activeModelId) return;
     Keyboard.dismiss();
     clearFeedback();
@@ -574,8 +681,6 @@ export default function Models() {
       await rpc("models/setDefault", {
         provider: selected.provider,
         modelId: activeModelId,
-        // Catalog connections keep the space default effort on the preference;
-        // openai-compatible still owns its level inside the stored endpoint config.
         ...(!isOpenAiCompatible
           ? {
               thinkingLevel: clampCatalogThinkingLevel(
@@ -585,16 +690,24 @@ export default function Models() {
             }
           : {}),
       });
-      await load({ provider, modelId: activeModelId });
+      await load({ provider, modelId: activeModelId }, "preserve");
       publishFeedback("model", {
-        notice: isOpenAiCompatible
-          ? t("Model updated.")
-          : t("Now using {label}.", { label: selected.label }),
+        notice: t("Now using {label}.", {
+          label: isOpenAiCompatible ? activeModelId : selected.label,
+        }),
       });
     } catch (err) {
-      publishFeedback("model", {
-        error: errorText(err, t("Could not change the default model")),
-      });
+      if (
+        !showModelConflict(
+          err,
+          "model",
+          t("Change bot reasoning effort before changing the default model."),
+        )
+      ) {
+        publishFeedback("model", {
+          error: errorText(err, t("Could not change the default model")),
+        });
+      }
     } finally {
       setPending(null);
     }
@@ -608,6 +721,7 @@ export default function Models() {
     try {
       await rpc("models/disconnect", { provider: selected.provider });
       setApiKey("");
+      setRemoveSavedKey(false);
       setThinkingLevel(null);
       await load({ provider });
       publishFeedback("connection", {
@@ -616,41 +730,78 @@ export default function Models() {
         }),
       });
     } catch (err) {
-      publishFeedback("connection", {
-        error: errorText(err, t("Could not disconnect this provider")),
-      });
+      if (
+        !showModelConflict(
+          err,
+          "connection",
+          t("Change reasoning effort before changing supported levels."),
+        )
+      ) {
+        publishFeedback("connection", {
+          error: errorText(err, t("Could not disconnect this provider")),
+        });
+      }
     } finally {
       setPending(null);
     }
   }
 
-  function stageCompatibleModelId(nextModelId: string) {
-    setModelId(nextModelId);
-    setThinkingLevel(
-      clampCatalogThinkingLevel(
-        credential?.modelId === nextModelId ? credential.thinkingLevel : null,
-        reasoning ? COMPATIBLE_THINKING_LEVELS : [],
-      ) as ThinkingLevel | null,
-    );
+  async function saveCompatibleConnection() {
+    if (!selected || !compatibleSaveReady) return;
+    Keyboard.dismiss();
+    clearFeedback();
+    const saving = draft;
+    const creating = saving.connection === null;
+    setPending("connect");
+    try {
+      await rpc(
+        "models/connect",
+        openAiCompatibleConnectInput(saving, {
+          apiKey: openAiCompatibleApiKeyInput(apiKey, removeSavedKey),
+          label: selected.providerName ?? selected.provider,
+        }),
+      );
+      setApiKey("");
+      setRemoveSavedKey(false);
+      await load(
+        {
+          provider: OPENAI_COMPATIBLE_PROVIDER_ID,
+          modelId: creating ? (saving.defaultModelId ?? undefined) : modelId,
+        },
+        "keepLocal",
+      );
+      publishFeedback("connection", { notice: t("Saved.") });
+    } catch (err) {
+      const data = showModelConflict(
+        err,
+        "connection",
+        t("Change reasoning effort before changing supported levels."),
+      );
+      if (
+        (data?.reason === "models_in_use" || data?.reason === "model_effort_in_use") &&
+        isSavedOpenAiCompatibleEndpoint(saving)
+      ) {
+        setDraft((current) => restoreBlockedOpenAiCompatibleModels(current, data.usages));
+      }
+      if (!data) {
+        publishFeedback("connection", {
+          error: errorText(err, t("Could not save this connection")),
+        });
+      }
+    } finally {
+      setPending(null);
+    }
   }
 
   async function connectKey() {
     if (!selected) return;
-    const savingLimitOnly = !isOpenAiCompatible && !apiKey.trim();
-    const activeModelId = isOpenAiCompatible ? modelId.trim() : selected.id;
-    const supportedThinking = isOpenAiCompatible
-      ? reasoning
-        ? COMPATIBLE_THINKING_LEVELS
-        : []
-      : selected.thinkingLevels;
+    const savingLimitOnly = !apiKey.trim();
     const stagedThinking = clampCatalogThinkingLevel(
       thinkingLevel,
-      supportedThinking,
+      selected.thinkingLevels,
     ) as ThinkingLevel | null;
-    const modelChanged = (credential?.modelId ?? null) !== (activeModelId || null);
-    if (isOpenAiCompatible) {
-      if (!effectiveBaseUrl || !modelId.trim()) return;
-    } else if (savingLimitOnly) {
+    const modelChanged = (credential?.modelId ?? null) !== selected.id;
+    if (savingLimitOnly) {
       if (!credential) return;
     } else if (apiKey.trim().length < 8) {
       return;
@@ -659,7 +810,7 @@ export default function Models() {
     Keyboard.dismiss();
     clearFeedback();
     const parsedMaxTokens = maxTokens.trim() ? parseModelMaxTokens(maxTokens) : undefined;
-    if ((isOpenAiCompatible || maxTokens.trim()) && parsedMaxTokens === undefined) {
+    if (maxTokens.trim() && parsedMaxTokens === undefined) {
       publishFeedback("connection", {
         error: t("Enter a whole number from 1 to {max} for maximum output tokens.", {
           max: MAX_MODEL_MAX_TOKENS,
@@ -667,79 +818,41 @@ export default function Models() {
       });
       return;
     }
-    const parsedMaxImagesPerPrompt = isOpenAiCompatible
-      ? parseModelMaxImagesPerPrompt(maxImagesPerPrompt, supportsImages)
-      : undefined;
-    if (
-      isOpenAiCompatible &&
-      supportsImages &&
-      maxImagesPerPrompt.trim() &&
-      parsedMaxImagesPerPrompt === undefined
-    ) {
-      publishFeedback("connection", {
-        error: t("Enter a whole number from 1 to 1000 for the image limit."),
-      });
-      return;
-    }
-    const maxImagesPerPromptInput =
-      supportsImages && !maxImagesPerPrompt.trim() ? null : parsedMaxImagesPerPrompt;
-    const parsedContextWindow = isOpenAiCompatible
-      ? parseModelContextWindow(contextWindow)
-      : undefined;
-    if (isOpenAiCompatible && parsedContextWindow === undefined) {
-      publishFeedback("connection", {
-        error: t("Enter a whole number from 1 to {max} for the context limit.", {
-          max: MAX_MODEL_CONTEXT_WINDOW,
-        }),
-      });
-      return;
-    }
-    if (isOpenAiCompatible && parsedMaxTokens === undefined) return;
     setPending("connect");
     try {
-      await rpc(
-        "models/connect",
-        isOpenAiCompatible
-          ? {
-              provider: selected.provider,
-              baseUrl: effectiveBaseUrl,
-              modelId: modelId.trim(),
-              reasoning,
-              thinkingLevel: stagedThinking,
-              maxTokens: parsedMaxTokens,
-              contextWindow: parsedContextWindow,
-              supportsImages,
-              maxImagesPerPrompt: maxImagesPerPromptInput,
-              apiKey: apiKey.trim() || undefined,
-              label: selected.providerName ?? selected.provider,
-            }
-          : {
-              provider: selected.provider,
-              ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
-              ...(provider === CLOUDFLARE_AI_GATEWAY_PROVIDER_ID
-                ? { accountId: accountId.trim(), gatewayId: gatewayId.trim() }
-                : {}),
-              modelId: selected.id,
-              // A limits-only save leaves the stored effort alone while the model
-              // stays put. Changing the model sends the clamped level, including
-              // null, so the previous model's effort is not reused.
-              ...(!savingLimitOnly || modelChanged ? { thinkingLevel: stagedThinking } : {}),
-              maxTokens: parsedMaxTokens ?? null,
-              label: selected.providerName ?? selected.provider,
-            },
-      );
+      await rpc("models/connect", {
+        provider: selected.provider,
+        ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
+        ...(provider === CLOUDFLARE_AI_GATEWAY_PROVIDER_ID
+          ? { accountId: accountId.trim(), gatewayId: gatewayId.trim() }
+          : {}),
+        modelId: selected.id,
+        // A limits-only save leaves the stored effort alone while the model
+        // stays put. Changing the model sends the clamped level, including
+        // null, so the previous model's effort is not reused.
+        ...(!savingLimitOnly || modelChanged ? { thinkingLevel: stagedThinking } : {}),
+        maxTokens: parsedMaxTokens ?? null,
+        label: selected.providerName ?? selected.provider,
+      });
       setApiKey("");
-      await load({ provider, modelId });
+      await load({ provider, modelId }, "preserve");
       publishFeedback("connection", {
-        notice:
-          isOpenAiCompatible || savingLimitOnly
-            ? t("Saved.")
-            : t("Connected and using {label}.", { label: selected.label }),
+        notice: savingLimitOnly
+          ? t("Saved.")
+          : t("Connected and using {label}.", { label: selected.label }),
       });
     } catch (err) {
-      publishFeedback("connection", {
-        error: errorText(err, t("Could not connect this provider")),
-      });
+      if (
+        !showModelConflict(
+          err,
+          "connection",
+          t("Change bot reasoning effort before changing the default model."),
+        )
+      ) {
+        publishFeedback("connection", {
+          error: errorText(err, t("Could not connect this provider")),
+        });
+      }
     } finally {
       setPending(null);
     }
@@ -844,7 +957,44 @@ export default function Models() {
     }
   }
 
-  const feedback = error ? <Text style={styles.error}>{error}</Text> : null;
+  const usageKindLabels: Record<ModelConfigurationUsage["kind"], string> = {
+    default: t("Space default"),
+    bot: t("Bot"),
+    routine: t("Routine"),
+    backup: t("Backup model"),
+    run: t("Running task"),
+    steering: t("Queued message"),
+  };
+  const conflictUsages = conflict && "usages" in conflict.data ? conflict.data.usages : [];
+  const feedback = error ? (
+    <View accessibilityRole="alert">
+      <Text style={styles.error}>{error}</Text>
+      {groupModelConfigurationUsages(conflictUsages).map((group) => (
+        <View key={group.spaceId} style={styles.blockerGroup}>
+          <Text style={styles.blockerSpace}>{group.spaceName}</Text>
+          {group.usages.map((usage) => (
+            <View key={`${usage.kind}:${usage.id}:${usage.modelId}`} style={styles.blockerRow}>
+              <Text style={styles.blockerLabel}>
+                {usageKindLabels[usage.kind]} · {usage.name} · {usage.modelId}
+                {usage.thinkingLevel ? ` · ${thinkingLevelLabel(usage.thinkingLevel, t)}` : ""}
+              </Text>
+              {usage.kind === "routine" ? (
+                <Text style={styles.hint}>{t("Change this routine on the web.")}</Text>
+              ) : null}
+            </View>
+          ))}
+        </View>
+      ))}
+    </View>
+  ) : null;
+
+  function blockerText(blocker: (typeof compatibleBlockers)[number]): string | null {
+    if (blocker.kind === "no_models") {
+      return draft.rows.length > 0 ? t("Turn on at least one model.") : null;
+    }
+    if (blocker.kind === "missing_default") return t("Choose a default model.");
+    return t("Finish Advanced setup for {models}.", { models: blocker.modelIds.join(", ") });
+  }
 
   function disclosureRow(label: string, expanded: boolean, onPress: () => void) {
     return (
@@ -886,6 +1036,7 @@ export default function Models() {
     );
   }
 
+  const compatibleDefaultCandidates = openAiCompatibleDefaultCandidates(draft);
   const compatConfig = isOpenAiCompatible ? (
     <>
       <Text style={styles.sectionTitle}>{t("Server URL")}</Text>
@@ -898,13 +1049,13 @@ export default function Models() {
         placeholder={t("http://127.0.0.1:8000/v1")}
         placeholderTextColor={native.tertiaryLabel}
         style={styles.keyInput}
-        value={baseUrl}
+        value={draft.baseUrl}
       />
       <Pressable
         accessibilityRole="button"
         accessibilityState={{ expanded: showEndpointHelp }}
         onPress={() => setShowEndpointHelp((visible) => !visible)}
-        style={({ pressed }) => [pressed && styles.pressed]}
+        style={({ pressed }) => [styles.textActionRow, pressed && styles.pressed]}
       >
         <Text style={styles.textAction}>{t("Setup help")}</Text>
       </Pressable>
@@ -912,7 +1063,7 @@ export default function Models() {
         <Text style={styles.hint}>{t(OPENAI_COMPATIBLE_BASE_URL_HINT)}</Text>
       ) : null}
       <NativeActionButton
-        disabled={busy || probing || !effectiveBaseUrl}
+        disabled={busy || probing || !draft.baseUrl.trim()}
         fill
         label={probing ? t("Finding…") : t("Find models")}
         onPress={() => void probeServerModels()}
@@ -920,132 +1071,34 @@ export default function Models() {
         style={{ marginTop: 12 }}
       />
       {feedbackAnchor === "probe" ? feedback : null}
-      <Text style={[styles.sectionTitle, { marginTop: 12 }]}>{t("Model")}</Text>
-      {probeModels.length && probeModels.includes(modelId) ? (
-        <View style={styles.card}>
-          {probeModels.map((entry) => (
-            <Pressable
-              key={entry}
-              accessibilityRole="radio"
-              accessibilityState={{ selected: entry === modelId }}
-              disabled={probing}
-              onPress={() => stageCompatibleModelId(entry)}
-              style={({ pressed }) => [
-                styles.modelRow,
-                probing && styles.disabled,
-                pressed && styles.pressed,
-              ]}
-            >
-              <Text style={styles.modelLabel}>{entry}</Text>
-              {entry === modelId ? <Checkmark /> : null}
-            </Pressable>
-          ))}
-          <Pressable
-            accessibilityRole="radio"
-            accessibilityState={{ selected: false }}
-            disabled={probing}
-            onPress={() => stageCompatibleModelId("")}
-            style={({ pressed }) => [
-              styles.modelRow,
-              probing && styles.disabled,
-              pressed && styles.pressed,
-            ]}
-          >
-            <Text style={styles.modelLabel}>{t("Other model…")}</Text>
-          </Pressable>
-        </View>
-      ) : (
-        <>
-          <TextInput
-            accessibilityLabel={t("Model id")}
-            autoCapitalize="none"
-            autoCorrect={false}
-            editable={!busy && !probing}
-            onChangeText={stageCompatibleModelId}
-            placeholder={t("exact-model-id")}
-            placeholderTextColor={native.tertiaryLabel}
-            style={styles.keyInput}
-            value={modelId}
+      <OpenAiCompatibleModelList
+        adding={describing}
+        busy={busy || staleConfiguration}
+        draft={draft}
+        onAddModel={addCompatibleModel}
+        onChange={setDraft}
+      />
+      {creatingCompatible && compatibleDefaultCandidates.length ? (
+        <View style={[styles.card, { marginTop: 12 }]}>
+          <MenuPicker
+            choices={compatibleDefaultCandidates.map((row) => ({
+              key: row.modelId,
+              label: row.modelId,
+            }))}
+            label={t("Default model")}
+            onChange={(key) => setDraft({ ...draft, defaultModelId: key })}
+            value={draft.defaultModelId ?? ""}
           />
-          {probeModels.length ? (
-            <Pressable
-              accessibilityRole="button"
-              onPress={() => stageCompatibleModelId(probeModels[0] ?? "")}
-              style={({ pressed }) => [pressed && styles.pressed]}
-            >
-              <Text style={styles.textAction}>{t("Use a found model")}</Text>
-            </Pressable>
-          ) : null}
-        </>
-      )}
-      {disclosureRow(t("Advanced"), showAdvanced, () => setShowAdvanced((visible) => !visible))}
-      {showAdvanced ? (
-        <>
-          <View style={styles.card}>
-            <View style={styles.modelRow}>
-              <Text style={styles.modelLabel}>{t("Supports thinking")}</Text>
-              <NativeSwitch
-                accessibilityLabel={t("Supports thinking")}
-                value={reasoning}
-                onValueChange={(value) => {
-                  setReasoning(value);
-                  if (!value) setThinkingLevel(null);
-                }}
-                disabled={busy}
-              />
-            </View>
-            {reasoning ? (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={t("Reasoning effort")}
-                accessibilityValue={{ text: reasoningEffortValue }}
-                disabled={busy}
-                onPress={() => {
-                  presentMessageActionSheet({
-                    title: t("Reasoning effort"),
-                    cancel: t("Cancel"),
-                    more: t("More"),
-                    colorScheme,
-                    actions: [
-                      {
-                        text: t("Default"),
-                        onPress: () => setThinkingLevel(null),
-                      },
-                      ...THINKING_LEVEL_OPTIONS.map((level) => ({
-                        text: thinkingLevelLabel(level, t),
-                        onPress: () => setThinkingLevel(level),
-                      })),
-                    ],
-                  });
-                }}
-                style={({ pressed }) => [styles.modelRow, pressed && styles.pressed]}
-              >
-                <Text style={styles.modelLabel}>{t("Reasoning effort")}</Text>
-                <Text style={styles.rowValue}>{reasoningEffortValue}</Text>
-              </Pressable>
-            ) : null}
-            <View style={[styles.modelRow, styles.singleRow]}>
-              <Text style={styles.modelLabel}>{t("Supports images")}</Text>
-              <NativeSwitch
-                accessibilityLabel={t("Supports images")}
-                value={supportsImages}
-                onValueChange={setSupportsImages}
-                disabled={busy}
-              />
-            </View>
-          </View>
-          {limitField(t("Context limit"), contextWindow, setContextWindow, 7)}
-          {limitField(t("Maximum output tokens"), maxTokens, setMaxTokens, 6)}
-          {supportsImages
-            ? limitField(
-                t("Maximum images per request"),
-                maxImagesPerPrompt,
-                setMaxImagesPerPrompt,
-                4,
-              )
-            : null}
-        </>
+        </View>
       ) : null}
+      {compatibleBlockers.map((blocker) => {
+        const text = blockerText(blocker);
+        return text ? (
+          <Text key={blocker.kind} style={styles.hint}>
+            {text}
+          </Text>
+        ) : null;
+      })}
     </>
   ) : null;
 
@@ -1058,43 +1111,75 @@ export default function Models() {
     </Text>
   );
 
+  const savedKeyApplies =
+    Boolean(draft.connection?.hasKey) && isSavedOpenAiCompatibleEndpoint(draft);
   const compatKeySection =
     isOpenAiCompatible && acceptsKey ? (
       <View style={styles.keySection}>
         {disclosureRow(t("API key"), showApiKey, () => setShowApiKey((visible) => !visible))}
         {showApiKey ? (
-          <TextInput
-            accessibilityLabel={t("API key")}
-            autoCapitalize="none"
-            autoCorrect={false}
-            autoComplete="off"
-            editable={!busy}
-            importantForAutofill="no"
-            onChangeText={updateApiKey}
-            placeholder={credential?.hasKey ? t("Paste a replacement key") : t("Optional")}
-            placeholderTextColor={native.tertiaryLabel}
-            secureTextEntry
-            style={styles.keyInput}
-            textContentType="none"
-            value={apiKey}
+          <>
+            <TextInput
+              accessibilityLabel={t("API key")}
+              autoCapitalize="none"
+              autoCorrect={false}
+              autoComplete="off"
+              editable={!busy && !removeSavedKey}
+              importantForAutofill="no"
+              onChangeText={updateApiKey}
+              placeholder={savedKeyApplies ? t("Paste a replacement key") : t("Optional")}
+              placeholderTextColor={native.tertiaryLabel}
+              secureTextEntry
+              style={styles.keyInput}
+              textContentType="none"
+              value={apiKey}
+            />
+            {savedKeyApplies ? (
+              <View style={styles.switchRow}>
+                <Text style={styles.modelLabel}>{t("Remove saved key")}</Text>
+                <NativeSwitch
+                  accessibilityLabel={t("Remove saved key")}
+                  disabled={busy}
+                  onValueChange={(value) => {
+                    setRemoveSavedKey(value);
+                    if (value) setApiKey("");
+                    modelProbe.reset();
+                  }}
+                  value={removeSavedKey}
+                />
+              </View>
+            ) : null}
+          </>
+        ) : null}
+        <NativeActionButton
+          disabled={busy || !compatibleSaveReady}
+          label={pending === "connect" ? t("Saving…") : t("Save")}
+          onPress={() => void saveCompatibleConnection()}
+          style={{ marginTop: 12 }}
+        />
+        {staleConfiguration ? (
+          <NativeActionButton
+            disabled={busy}
+            label={t("Reload")}
+            onPress={() => void reloadCompatibleSettings()}
+            prominence="secondary"
+            style={{ marginTop: 8 }}
           />
         ) : null}
+      </View>
+    ) : null;
 
-        <NativeActionButton
-          disabled={
-            busy || (isOpenAiCompatible ? !openAiCompatibleReady : apiKey.trim().length < 8)
-          }
-          label={
-            pending === "connect"
-              ? t("Saving…")
-              : isOpenAiCompatible
-                ? t("Save")
-                : credential
-                  ? t("Replace API key")
-                  : t("Connect API key")
-          }
-          onPress={() => void connectKey()}
-          style={{ marginTop: 12 }}
+  const compatDefaultRow =
+    isOpenAiCompatible && !creatingCompatible && compatibleDefaultChoices.length ? (
+      <View style={[styles.card, { marginTop: 16 }]}>
+        <MenuPicker
+          choices={compatibleDefaultChoices.map((choice) => ({ key: choice, label: choice }))}
+          label={t("Default model")}
+          onChange={(key) => {
+            setModelId(key);
+            clearFeedback();
+          }}
+          value={modelId}
         />
       </View>
     ) : null;
@@ -1166,9 +1251,7 @@ export default function Models() {
                   colorScheme,
                   actions: [
                     {
-                      text: t("Default ({level})", {
-                        level: thinkingLevelLabel("medium", t),
-                      }),
+                      text: catalogDefaultLabel,
                       onPress: () => setThinkingLevel(null),
                     },
                     ...catalogThinkingLevels.map((level) => ({
@@ -1476,7 +1559,7 @@ export default function Models() {
   const saveRow =
     credential && (!isActive || thinkingDirty || usingServerCredentials) ? (
       <NativeActionButton
-        disabled={busy || (isOpenAiCompatible && !modelId.trim())}
+        disabled={busy || (isOpenAiCompatible && !modelId)}
         label={
           pending === "default"
             ? t("Switching…")
@@ -1621,10 +1704,13 @@ export default function Models() {
         {selected ? (
           isOpenAiCompatible ? (
             <>
+              {connectedStatusRow}
               {compatConfig}
               {compatKeySection}
+              {feedbackAnchor === "connection" ? feedback : null}
+              {compatDefaultRow}
               {saveRow}
-              {feedbackAnchor === "probe" ? null : feedback}
+              {feedbackAnchor === "model" ? feedback : null}
             </>
           ) : credential ? (
             <>
@@ -1980,6 +2066,33 @@ function createModelsStyles() {
       color: native.secondaryLabel,
       fontSize: 15,
       marginTop: 8,
+    },
+    textActionRow: {
+      minHeight: 44,
+      justifyContent: "center",
+    },
+    switchRow: {
+      minHeight: 44,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 12,
+      marginTop: 8,
+    },
+    blockerGroup: {
+      marginTop: 8,
+      gap: 4,
+    },
+    blockerSpace: {
+      color: native.label,
+      fontSize: 14,
+      fontWeight: "600",
+    },
+    blockerRow: {
+      paddingStart: 8,
+    },
+    blockerLabel: {
+      color: native.label,
+      fontSize: 14,
     },
     chevron: {
       width: 16,

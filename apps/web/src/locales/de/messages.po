@@ -22,6 +22,11 @@ msgstr " (ungelesen)"
 msgid "{0, plural, one {# model} other {# models}}"
 msgstr "{0, plural, one {# Modell} other {# Modelle}}"
 
+#. placeholder {0}: setup.foundCount
+#: src/components/OpenAiCompatibleSetup.tsx
+msgid "{0, plural, one {Found # model.} other {Found # models.}}"
+msgstr "{0, plural, one {# Modell gefunden.} other {# Modelle gefunden.}}"
+
 #. placeholder {0}: Math.ceil(oauth.expiresInSeconds / 60)
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
@@ -136,6 +141,11 @@ msgstr ""
 #: src/pages/ActivityList.tsx
 msgid "{hours}h ago"
 msgstr "vor {hours} Std."
+
+#. js-lingui-explicit-id
+#: src/lib/model-catalog.ts
+msgid "{label} (unavailable)"
+msgstr "{label} (nicht verfügbar)"
 
 #: src/lib/relative-time.ts
 #: src/pages/ActivityList.tsx
@@ -276,6 +286,7 @@ msgstr "Aktives Modell"
 msgid "Activity"
 msgstr "Aktivität"
 
+#: src/components/OpenAiCompatibleSetup.tsx
 #: src/pages/ModelBackupsSettings.tsx
 #: src/pages/PluginsOverlay.tsx
 #: src/pages/ScratchpadSection.tsx
@@ -384,10 +395,10 @@ msgstr ""
 msgid "Adding…"
 msgstr "Wird hinzugefügt…"
 
+#: src/components/OpenAiCompatibleSetup.tsx
 #: src/pages/AccountSettingsOverlay.tsx
 #: src/pages/McpServersOverlay.tsx
 #: src/pages/ModelSettingsOverlay.tsx
-#: src/pages/Onboarding.tsx
 #: src/pages/PluginsOverlay.tsx
 #: src/pages/RoutineEditor.tsx
 #: src/pages/RoutineSchedule.tsx
@@ -509,6 +520,7 @@ msgstr ""
 
 #: src/components/AskCard.tsx
 #: src/components/integrations/IntegrationSetup.tsx
+#: src/components/OpenAiCompatibleSetup.tsx
 #: src/lib/localized-provider-hint.ts
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
@@ -523,6 +535,14 @@ msgstr "API-Schlüssel-Header"
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Appearance"
 msgstr "Erscheinungsbild"
+
+#: src/components/OpenAiCompatibleSetup.tsx
+msgid "Apply"
+msgstr "Übernehmen"
+
+#: src/components/OpenAiCompatibleSetup.tsx
+msgid "Apply or cancel each model's setup."
+msgstr "Übernimm oder verwirf die Einrichtung jedes Modells."
 
 #: src/components/teach/SkillDraftCard.tsx
 msgid "Approval boundaries"
@@ -675,6 +695,11 @@ msgstr ""
 msgid "Back to sign in"
 msgstr "Zurück zur Anmeldung"
 
+#. js-lingui-explicit-id
+#: src/components/OpenAiCompatibleSetup.tsx
+msgid "Backup model"
+msgstr "Ersatzmodell"
+
 #: src/pages/ModelBackupsSettings.tsx
 msgid "Backup models"
 msgstr "Backup-Modelle"
@@ -738,6 +763,7 @@ msgid "Bot"
 msgstr "Bot"
 
 #. js-lingui-explicit-id
+#: src/components/OpenAiCompatibleSetup.tsx
 #: src/lib/browser-notifications.ts
 msgid "Bot"
 msgstr ""
@@ -794,6 +820,7 @@ msgstr "Server nicht erreichbar."
 #: src/components/ComputerMaintenanceActions.tsx
 #: src/components/ComputerUpdateProgress.tsx
 #: src/components/markdown-link-prompt.tsx
+#: src/components/OpenAiCompatibleSetup.tsx
 #: src/components/teach/TeachComputerOverlay.tsx
 #: src/pages/Artifacts.tsx
 #: src/pages/KnowledgeSection.tsx
@@ -834,9 +861,17 @@ msgstr "Abgebrochen"
 msgid "Card view"
 msgstr ""
 
+#: src/components/OpenAiCompatibleSetup.tsx
+msgid "Change bot reasoning effort before changing the default model."
+msgstr "Ändere den Denkaufwand der Bots, bevor du das Standardmodell änderst."
+
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Change password"
 msgstr "Passwort ändern"
+
+#: src/components/OpenAiCompatibleSetup.tsx
+msgid "Change reasoning effort before changing supported levels."
+msgstr "Ändere den Denkaufwand, bevor du die unterstützten Stufen änderst."
 
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Changing…"
@@ -915,9 +950,33 @@ msgstr "Wähle eine Bot-Form und Farbe oder lade ein Bild hoch"
 msgid "Choose a bot…"
 msgstr ""
 
+#: src/components/OpenAiCompatibleSetup.tsx
+msgid "Choose a checked model"
+msgstr "Ausgewähltes Modell wählen"
+
+#: src/components/OpenAiCompatibleSetup.tsx
+msgid "Choose a default model."
+msgstr "Wähle ein Standardmodell."
+
 #: src/pages/Auth.tsx
 msgid "Choose a new password"
 msgstr "Wähle ein neues Passwort"
+
+#: src/components/OpenAiCompatibleSetup.tsx
+msgid "Choose a reasoning level other than Off."
+msgstr "Wähle eine Denkstufe außer „Aus“."
+
+#: src/pages/ModelSettingsOverlay.tsx
+msgid "Choose a saved model"
+msgstr "Gespeichertes Modell wählen"
+
+#: src/components/OpenAiCompatibleSetup.tsx
+msgid "Choose a supported default reasoning effort."
+msgstr "Wähle einen unterstützten Standard-Denkaufwand."
+
+#: src/components/OpenAiCompatibleSetup.tsx
+msgid "Choose at least one model."
+msgstr "Wähle mindestens ein Modell."
 
 #: src/pages/shell/avatar-studio-popover.tsx
 msgid "Choose file"
@@ -1224,8 +1283,7 @@ msgstr "Verbindungstest fehlgeschlagen."
 msgid "Connection to {0} is still pending. You can close this and check again."
 msgstr "Die Verbindung zu {0} steht noch aus. Du kannst dieses Fenster schließen und später erneut nachsehen."
 
-#: src/pages/ModelSettingsOverlay.tsx
-#: src/pages/Onboarding.tsx
+#: src/components/OpenAiCompatibleSetup.tsx
 msgid "Context limit"
 msgstr "Kontextlimit"
 
@@ -1482,6 +1540,9 @@ msgid "Could not load MCP servers"
 msgstr "MCP-Server konnten nicht geladen werden"
 
 #: src/pages/ModelSettingsOverlay.tsx
+#: src/pages/Onboarding.tsx
+#: src/pages/RoutineEditor.tsx
+#: src/pages/shell/bot-panel.tsx
 msgid "Could not load model settings"
 msgstr "Modelleinstellungen konnten nicht geladen werden"
 
@@ -1835,25 +1896,34 @@ msgstr "Tage"
 msgid "Decline"
 msgstr ""
 
-#: src/pages/ModelSettingsOverlay.tsx
-#: src/pages/Onboarding.tsx
 #: src/pages/shell/avatar-studio-popover.tsx
 msgid "Default"
 msgstr "Standard"
 
 #. js-lingui-explicit-id
-#. placeholder {0}: thinkingLevelLabel("medium")
+#. placeholder {0}: level
+#. placeholder {0}: thinkingLevelLabel( effectiveThinkingLevel(selected.thinkingLevels ?? [], null, null), )
+#: src/components/OpenAiCompatibleSetup.tsx
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "Default ({0})"
 msgstr ""
 
-#. placeholder {0}: thinkingLevelLabel("medium")
-#. placeholder {0}: thinkingLevelLabel(defaultThinkingLevel)
+#. placeholder {0}: thinkingLevelLabel( effectiveThinkingLevel(selected?.thinkingLevels ?? [], null, null), )
+#. placeholder {0}: thinkingLevelLabel(effortChoices.defaultLevel)
 #: src/pages/Onboarding.tsx
 #: src/pages/RoutineEditor.tsx
 #: src/pages/shell/bot-panel.tsx
 msgid "Default ({0})"
 msgstr "Standard ({0})"
+
+#: src/components/OpenAiCompatibleSetup.tsx
+#: src/pages/ModelSettingsOverlay.tsx
+msgid "Default model"
+msgstr "Standardmodell"
+
+#: src/components/OpenAiCompatibleSetup.tsx
+msgid "Default reasoning effort"
+msgstr "Standard-Denkaufwand"
 
 #: src/pages/MemorySettingsOverlay.tsx
 msgid "Default scope"
@@ -2100,18 +2170,16 @@ msgstr ""
 msgid "Enter a valid email"
 msgstr "Gib eine gültige E-Mail-Adresse ein"
 
-#: src/pages/ModelSettingsOverlay.tsx
-#: src/pages/Onboarding.tsx
+#: src/components/OpenAiCompatibleSetup.tsx
 msgid "Enter a whole number from 1 to {MAX_MODEL_CONTEXT_WINDOW} for the context limit."
 msgstr "Gib eine ganze Zahl von 1 bis {MAX_MODEL_CONTEXT_WINDOW} für das Kontextlimit ein."
 
+#: src/components/OpenAiCompatibleSetup.tsx
 #: src/pages/ModelSettingsOverlay.tsx
-#: src/pages/Onboarding.tsx
 msgid "Enter a whole number from 1 to {MAX_MODEL_MAX_TOKENS} for maximum output tokens."
 msgstr "Gib eine ganze Zahl von 1 bis {MAX_MODEL_MAX_TOKENS} für die maximalen Ausgabetokens ein."
 
-#: src/pages/ModelSettingsOverlay.tsx
-#: src/pages/Onboarding.tsx
+#: src/components/OpenAiCompatibleSetup.tsx
 msgid "Enter a whole number from 1 to 1000 for the image limit."
 msgstr "Gib eine ganze Zahl von 1 bis 1000 für das Bilderlimit ein."
 
@@ -2184,11 +2252,6 @@ msgstr "Exportiere die Liste dieser Woche aus dem CRM und lege sie im freigegebe
 msgid "External conversation"
 msgstr ""
 
-#: src/pages/ModelSettingsOverlay.tsx
-#: src/pages/Onboarding.tsx
-msgid "Extra high"
-msgstr "Sehr hoch"
-
 #. js-lingui-explicit-id
 #: src/lib/model-catalog.ts
 msgid "Extra high"
@@ -2235,13 +2298,15 @@ msgstr ""
 msgid "Filters"
 msgstr ""
 
-#: src/pages/ModelSettingsOverlay.tsx
-#: src/pages/Onboarding.tsx
+#: src/components/OpenAiCompatibleSetup.tsx
 msgid "Find models"
 msgstr "Modelle suchen"
 
-#: src/pages/ModelSettingsOverlay.tsx
-#: src/pages/Onboarding.tsx
+#: src/components/OpenAiCompatibleSetup.tsx
+msgid "Find models, or add one by its id."
+msgstr "Suche Modelle oder füge eines über seine ID hinzu."
+
+#: src/components/OpenAiCompatibleSetup.tsx
 msgid "Finding…"
 msgstr "Suche läuft…"
 
@@ -2267,6 +2332,10 @@ msgstr "Fertig."
 #: src/pages/McpOAuthCallback.tsx
 msgid "Finishing MCP connection…"
 msgstr "MCP-Verbindung wird abgeschlossen…"
+
+#: src/components/OpenAiCompatibleSetup.tsx
+msgid "Fix the model limits."
+msgstr "Korrigiere die Modellgrenzen."
 
 #: src/components/ApprovalRulesSettings.tsx
 msgid "Flag unexpected actions"
@@ -2385,16 +2454,14 @@ msgstr ""
 msgid "Hide transcript"
 msgstr "Transkript ausblenden"
 
-#: src/lib/ticket-priority.ts
-#: src/pages/ModelSettingsOverlay.tsx
-#: src/pages/Onboarding.tsx
-msgid "High"
-msgstr "Hoch"
-
 #. js-lingui-explicit-id
 #: src/lib/model-catalog.ts
 msgid "High"
 msgstr ""
+
+#: src/lib/ticket-priority.ts
+msgid "High"
+msgstr "Hoch"
 
 #: src/pages/RoutineSchedule.tsx
 msgid "hour"
@@ -2520,6 +2587,10 @@ msgstr "gerade eben"
 #: src/pages/shell/dialogs.tsx
 msgid "Keep memories"
 msgstr "Erinnerungen behalten"
+
+#: src/components/OpenAiCompatibleSetup.tsx
+msgid "Keep saved key"
+msgstr "Gespeicherten Schlüssel behalten"
 
 #: src/pages/RoutineEditor.tsx
 msgid "key"
@@ -2650,16 +2721,14 @@ msgstr ""
 msgid "Log out"
 msgstr "Abmelden"
 
-#: src/lib/ticket-priority.ts
-#: src/pages/ModelSettingsOverlay.tsx
-#: src/pages/Onboarding.tsx
-msgid "Low"
-msgstr "Niedrig"
-
 #. js-lingui-explicit-id
 #: src/lib/model-catalog.ts
 msgid "Low"
 msgstr ""
+
+#: src/lib/ticket-priority.ts
+msgid "Low"
+msgstr "Niedrig"
 
 #: src/pages/shell/bot-credentials.tsx
 msgid "Lowercase letters, numbers, hyphens and underscores, starting with a letter."
@@ -2705,11 +2774,6 @@ msgstr "Als gelesen markieren"
 msgid "Mark as Unread"
 msgstr "Als ungelesen markieren"
 
-#: src/pages/ModelSettingsOverlay.tsx
-#: src/pages/Onboarding.tsx
-msgid "Max"
-msgstr "Max."
-
 #. js-lingui-explicit-id
 #: src/lib/model-catalog.ts
 msgid "Max"
@@ -2719,8 +2783,7 @@ msgstr ""
 msgid "Maximize"
 msgstr ""
 
-#: src/pages/ModelSettingsOverlay.tsx
-#: src/pages/Onboarding.tsx
+#: src/components/OpenAiCompatibleSetup.tsx
 msgid "Maximum images per request"
 msgstr "Maximale Bilder pro Anfrage"
 
@@ -2728,10 +2791,14 @@ msgstr "Maximale Bilder pro Anfrage"
 msgid "Maximum of 10 backup models."
 msgstr "Maximal 10 Backup-Modelle."
 
+#: src/components/OpenAiCompatibleSetup.tsx
 #: src/pages/ModelSettingsOverlay.tsx
-#: src/pages/Onboarding.tsx
 msgid "Maximum output tokens"
 msgstr "Maximale Ausgabetokens"
+
+#: src/components/OpenAiCompatibleSetup.tsx
+msgid "Maximum output tokens must be below the context limit."
+msgstr "Die maximalen Ausgabe-Tokens müssen unter dem Kontextlimit liegen."
 
 #: src/pages/memory-providers/SerenitySettingsForm.tsx
 msgid "MCP endpoint"
@@ -2740,11 +2807,6 @@ msgstr ""
 #: src/pages/McpServersOverlay.tsx
 msgid "MCP servers"
 msgstr "MCP-Server"
-
-#: src/pages/ModelSettingsOverlay.tsx
-#: src/pages/Onboarding.tsx
-msgid "Medium"
-msgstr "Mittel"
 
 #. js-lingui-explicit-id
 #: src/lib/model-catalog.ts
@@ -2819,11 +2881,6 @@ msgstr ""
 msgid "Microphone failed"
 msgstr "Mikrofonfehler"
 
-#: src/pages/ModelSettingsOverlay.tsx
-#: src/pages/Onboarding.tsx
-msgid "Minimal"
-msgstr "Minimal"
-
 #. js-lingui-explicit-id
 #: src/lib/model-catalog.ts
 msgid "Minimal"
@@ -2856,14 +2913,17 @@ msgstr "Modell"
 msgid "Model \"{modelId}\" was not listed."
 msgstr "Modell \"{modelId}\" wurde nicht aufgelistet."
 
-#: src/pages/ModelSettingsOverlay.tsx
-#: src/pages/Onboarding.tsx
+#: src/components/OpenAiCompatibleSetup.tsx
 msgid "Model id"
 msgstr "Modell-ID"
 
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "Model options"
 msgstr "Modelloptionen"
+
+#: src/components/OpenAiCompatibleSetup.tsx
+msgid "Model settings changed; reload before saving."
+msgstr "Die Modelleinstellungen wurden geändert. Lade sie vor dem Speichern neu."
 
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Model spend uses your provider keys."
@@ -2873,6 +2933,7 @@ msgstr "Modellkosten werden über deine Anbieterschlüssel abgerechnet."
 msgid "Model updated."
 msgstr "Modell aktualisiert."
 
+#: src/components/OpenAiCompatibleSetup.tsx
 #: src/pages/LocalSettings.tsx
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/SettingsOverlay.tsx
@@ -2883,14 +2944,13 @@ msgstr "Modelle"
 msgid "Models for the server owner’s default space."
 msgstr ""
 
-#: src/pages/ModelSettingsOverlay.tsx
-#: src/pages/Onboarding.tsx
-msgid "Models from server"
-msgstr "Modelle vom Server"
-
 #: src/lib/model-connection-preflight.ts
 msgid "Models list OK. {modelCount, plural, one {# model} other {# models}} available. Chat was not tested."
 msgstr "Modellliste in Ordnung. {modelCount, plural, one {# Modell} other {# Modelle}} verfügbar. Der Chat wurde nicht getestet."
+
+#: src/pages/Onboarding.tsx
+msgid "Models saved, but the default model was not set. Try again."
+msgstr "Modelle gespeichert, aber das Standardmodell wurde nicht festgelegt. Versuche es erneut."
 
 #: src/lib/billing.ts
 msgid "month"
@@ -2957,6 +3017,10 @@ msgstr ""
 #: src/pages/ActivityList.tsx
 msgid "Needs input"
 msgstr "Eingabe erforderlich"
+
+#: src/components/OpenAiCompatibleSetup.tsx
+msgid "Needs setup"
+msgstr "Einrichtung nötig"
 
 #: src/pages/ActivityList.tsx
 msgid "Needs takeover"
@@ -3081,6 +3145,10 @@ msgstr "Kein Modellkatalog verfügbar."
 msgid "No models listed."
 msgstr "Keine Modelle aufgelistet."
 
+#: src/components/OpenAiCompatibleSetup.tsx
+msgid "No models match."
+msgstr "Keine passenden Modelle."
+
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "No providers found."
 msgstr "Keine Anbieter gefunden."
@@ -3179,6 +3247,11 @@ msgstr "OAuth-Verbindung fehlgeschlagen"
 msgid "OAuth expired"
 msgstr ""
 
+#. js-lingui-explicit-id
+#: src/lib/model-catalog.ts
+msgid "Off"
+msgstr "Aus"
+
 #. placeholder {0}: call.botName
 #: src/components/call/CallCard.tsx
 msgid "On a call with {0}"
@@ -3244,8 +3317,7 @@ msgstr "Shell öffnen"
 msgid "Open work"
 msgstr "Offene Arbeit"
 
-#: src/pages/ModelSettingsOverlay.tsx
-#: src/pages/Onboarding.tsx
+#: src/components/OpenAiCompatibleSetup.tsx
 msgid "OpenAI-compatible server URL"
 msgstr "URL eines OpenAI-kompatiblen Servers"
 
@@ -3265,8 +3337,7 @@ msgstr "Chat wird geöffnet…"
 msgid "Opening your Space…"
 msgstr "Dein Arbeitsbereich wird geöffnet…"
 
-#: src/pages/ModelSettingsOverlay.tsx
-#: src/pages/Onboarding.tsx
+#: src/components/OpenAiCompatibleSetup.tsx
 #: src/pages/VoiceSettingsOverlay.tsx
 msgid "Optional"
 msgstr "Optional"
@@ -3295,8 +3366,7 @@ msgstr "Organisations-API-Schlüssel"
 msgid "Original message unavailable"
 msgstr "Originalnachricht nicht verfügbar"
 
-#: src/pages/ModelSettingsOverlay.tsx
-#: src/pages/Onboarding.tsx
+#: src/components/OpenAiCompatibleSetup.tsx
 msgid "Other model…"
 msgstr "Anderes Modell…"
 
@@ -3337,12 +3407,13 @@ msgstr "Die Passwörter stimmen nicht überein"
 msgid "Past due"
 msgstr ""
 
+#: src/components/OpenAiCompatibleSetup.tsx
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/VoiceSettingsOverlay.tsx
 msgid "Paste a replacement key"
 msgstr "Ersatzschlüssel einfügen"
 
-#: src/pages/ModelSettingsOverlay.tsx
+#: src/components/OpenAiCompatibleSetup.tsx
 msgid "Paste the OpenAI-compatible address from your server. Rakazo adds /v1 if needed."
 msgstr "Füge die OpenAI-kompatible Adresse deines Servers ein. Rakazo ergänzt /v1 bei Bedarf."
 
@@ -3366,10 +3437,6 @@ msgstr "Foto"
 #: src/lib/model-connection-preflight.ts
 msgid "Pick a model from the catalog."
 msgstr "Wähle ein Modell aus dem Katalog."
-
-#: src/lib/model-connection-preflight.ts
-msgid "Pick a model from the list or enter a model id served by this endpoint."
-msgstr "Wähle ein Modell aus der Liste oder gib eine Modell-ID ein, die dieser Endpunkt bereitstellt."
 
 #: src/pages/BotContextMenu.tsx
 msgid "Pin"
@@ -3434,6 +3501,11 @@ msgstr "Pull Request"
 msgid "Queued"
 msgstr "In Warteschlange"
 
+#. js-lingui-explicit-id
+#: src/components/OpenAiCompatibleSetup.tsx
+msgid "Queued message"
+msgstr "Wartende Nachricht"
+
 #: src/pages/Shell.tsx
 msgid "Quote"
 msgstr ""
@@ -3450,10 +3522,18 @@ msgstr "Reaktionen"
 msgid "Read replies aloud"
 msgstr "Antworten vorlesen"
 
-#: src/pages/ModelSettingsOverlay.tsx
-#: src/pages/Onboarding.tsx
+#: src/pages/RoutineEditor.tsx
+#: src/pages/shell/bot-panel.tsx
 msgid "Reasoning effort"
 msgstr "Denkaufwand"
+
+#: src/components/OpenAiCompatibleSetup.tsx
+msgid "Reassign models before changing their connection."
+msgstr "Weise die Modelle neu zu, bevor du ihre Verbindung änderst."
+
+#: src/components/OpenAiCompatibleSetup.tsx
+msgid "Reassign models before disabling them."
+msgstr "Weise die Modelle neu zu, bevor du sie deaktivierst."
 
 #: src/pages/memory-providers/SerenitySettingsForm.tsx
 msgid "Recall and write"
@@ -3562,6 +3642,10 @@ msgstr "Kontrolle abgeben"
 msgid "Release interrupted computer?"
 msgstr ""
 
+#: src/components/OpenAiCompatibleSetup.tsx
+msgid "Reload"
+msgstr "Neu laden"
+
 #: src/components/ApprovalRulesSettings.tsx
 #: src/pages/ModelBackupsSettings.tsx
 #: src/pages/PluginsOverlay.tsx
@@ -3595,6 +3679,10 @@ msgstr "Erwähnung von {0} entfernen"
 #: src/pages/RoutineEditor.tsx
 msgid "Remove message trigger"
 msgstr ""
+
+#: src/components/OpenAiCompatibleSetup.tsx
+msgid "Remove saved key"
+msgstr "Gespeicherten Schlüssel entfernen"
 
 #: src/pages/RoutineEditor.tsx
 msgid "Remove schedule"
@@ -3766,6 +3854,11 @@ msgstr ""
 msgid "Rotate key"
 msgstr ""
 
+#. js-lingui-explicit-id
+#: src/components/OpenAiCompatibleSetup.tsx
+msgid "Routine"
+msgstr ""
+
 #: src/pages/RoutineEditor.tsx
 #: src/pages/Shell.tsx
 msgid "Routine"
@@ -3802,6 +3895,11 @@ msgstr "Läuft"
 #: src/pages/RoutineEditor.tsx
 msgid "Running · Stop"
 msgstr "Wird ausgeführt · Stoppen"
+
+#. js-lingui-explicit-id
+#: src/components/OpenAiCompatibleSetup.tsx
+msgid "Running task"
+msgstr "Laufende Aufgabe"
 
 #: src/pages/RoutineEditor.tsx
 msgid "Running…"
@@ -3918,6 +4016,7 @@ msgstr ""
 msgid "Search integrations.sh"
 msgstr ""
 
+#: src/components/OpenAiCompatibleSetup.tsx
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "Search models"
 msgstr "Modelle suchen"
@@ -3984,6 +4083,10 @@ msgstr ""
 msgid "Serenity endpoint is required."
 msgstr ""
 
+#: src/components/OpenAiCompatibleSetup.tsx
+msgid "Server found. Add a model by its id."
+msgstr "Server gefunden. Füge ein Modell über seine ID hinzu."
+
 #: src/components/integrations/IntegrationSetup.tsx
 #: src/pages/AccountSettingsOverlay.tsx
 #: src/pages/LocalSettings.tsx
@@ -3995,9 +4098,8 @@ msgid "Server name"
 msgstr "Servername"
 
 #: src/components/integrations/IntegrationSetup.tsx
+#: src/components/OpenAiCompatibleSetup.tsx
 #: src/pages/McpServersOverlay.tsx
-#: src/pages/ModelSettingsOverlay.tsx
-#: src/pages/Onboarding.tsx
 msgid "Server URL"
 msgstr "Server-URL"
 
@@ -4017,7 +4119,7 @@ msgid "Settings: Usage"
 msgstr "Einstellungen: Nutzung"
 
 #: src/components/integrations/IntegrationSetup.tsx
-#: src/pages/ModelSettingsOverlay.tsx
+#: src/components/OpenAiCompatibleSetup.tsx
 msgid "Setup help"
 msgstr "Einrichtungshilfe"
 
@@ -4161,6 +4263,11 @@ msgstr "Der Space wurde gewechselt. Öffne Modelle erneut, um die Backups zu lad
 msgid "Space changed. Reopen Models to save its backup list."
 msgstr "Der Space wurde gewechselt. Öffne Modelle erneut, um die Backups zu speichern."
 
+#. js-lingui-explicit-id
+#: src/components/OpenAiCompatibleSetup.tsx
+msgid "Space default"
+msgstr ""
+
 #: src/pages/shell/bot-panel.tsx
 msgid "Space default"
 msgstr "Space-Standard"
@@ -4267,13 +4374,15 @@ msgstr ""
 msgid "Subscription required"
 msgstr ""
 
-#: src/pages/ModelSettingsOverlay.tsx
-#: src/pages/Onboarding.tsx
+#: src/components/OpenAiCompatibleSetup.tsx
+msgid "Supported reasoning levels"
+msgstr "Unterstützte Denkstufen"
+
+#: src/components/OpenAiCompatibleSetup.tsx
 msgid "Supports images"
 msgstr "Unterstützt Bilder"
 
-#: src/pages/ModelSettingsOverlay.tsx
-#: src/pages/Onboarding.tsx
+#: src/components/OpenAiCompatibleSetup.tsx
 msgid "Supports thinking"
 msgstr "Unterstützt Denkmodus"
 
@@ -4357,6 +4466,10 @@ msgstr "Zeitüberschreitung der Verbindung."
 msgid "The provider is rate-limiting requests."
 msgstr "Der Anbieter drosselt die Anfragen."
 
+#: src/components/OpenAiCompatibleSetup.tsx
+msgid "The saved key will be removed"
+msgstr "Der gespeicherte Schlüssel wird entfernt"
+
 #: src/pages/MemorySettingsOverlay.tsx
 msgid "The selected memory provider is not available in this build."
 msgstr "Der ausgewählte Erinnerungsanbieter ist in diesem Build nicht verfügbar."
@@ -4367,8 +4480,6 @@ msgstr ""
 
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
-#: src/pages/RoutineEditor.tsx
-#: src/pages/shell/bot-panel.tsx
 msgid "Thinking"
 msgstr "Denkmodus"
 
@@ -4645,11 +4756,6 @@ msgstr "Nutzung"
 msgid "Use {hostLabel}"
 msgstr "{hostLabel} verwenden"
 
-#: src/pages/ModelSettingsOverlay.tsx
-#: src/pages/Onboarding.tsx
-msgid "Use a found model"
-msgstr "Gefundenes Modell verwenden"
-
 #: src/lib/model-connection-preflight.ts
 msgid "Use Connect to verify the key."
 msgstr "Nutze Verbinden, um den Schlüssel zu prüfen."
@@ -4657,6 +4763,10 @@ msgstr "Nutze Verbinden, um den Schlüssel zu prüfen."
 #: src/pages/ExternalConversationSettings.tsx
 msgid "Use default guidance"
 msgstr ""
+
+#: src/components/OpenAiCompatibleSetup.tsx
+msgid "Use detected settings"
+msgstr "Erkannte Einstellungen verwenden"
 
 #: src/components/teach/TeachRecordingChrome.tsx
 msgid "Use Protected input for passwords."

@@ -903,11 +903,13 @@ function modelPreference({
   secretId,
   modelId,
   isDefault,
+  enabledModelIds = [],
 }: {
   provider: string;
   secretId: string;
   modelId: string;
   isDefault: boolean;
+  enabledModelIds?: string[];
 }) {
   const now = new Date("2026-08-30T00:00:00.000Z");
   return {
@@ -920,6 +922,9 @@ function modelPreference({
       provider,
       label: provider,
       secretId,
+      supportsImages: false,
+      enabledModelIds,
+      modelConfigurationVersion: 1,
       createdAt: now,
       updatedAt: now,
     },
@@ -1517,6 +1522,7 @@ describe("createRunExecutor", () => {
       },
       $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) =>
         callback({
+          $queryRaw: vi.fn(async () => [{ id: "user-1" }]),
           routine: {
             updateMany,
             findUnique: vi.fn(async () => ({
@@ -1566,6 +1572,7 @@ describe("createRunExecutor", () => {
     const scheduledAt = new Date(Date.now() - 1_000);
     const taskCreate = vi.fn(async () => ({ id: "task-1" }));
     const runCreate = vi.fn(async () => ({ id: "run-1" }));
+    const order: string[] = [];
     function fixture(
       model: {
         modelProvider: string | null;
@@ -1596,8 +1603,15 @@ describe("createRunExecutor", () => {
         agentSkill: { findMany: vi.fn(async () => []) },
         $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) =>
           callback({
+            $queryRaw: vi.fn(async () => {
+              order.push("owner");
+              return [{ id: "user-1" }];
+            }),
             routine: {
-              updateMany: vi.fn(async () => ({ count: 1 })),
+              updateMany: vi.fn(async () => {
+                order.push("claim");
+                return { count: 1 };
+              }),
               findUnique: vi.fn(async () => claimedModel),
             },
             task: { create: taskCreate },
@@ -1618,13 +1632,16 @@ describe("createRunExecutor", () => {
       } as unknown as Parameters<typeof createRunExecutor>[0]);
     }
 
-    await executorFor(
-      fixture({
-        modelProvider: "routine-provider",
-        modelId: "routine-model",
-        thinkingLevel: "low",
-      }),
-    ).wakeRoutine("routine-1", scheduledAt.toISOString());
+    const pinned = fixture({
+      modelProvider: "routine-provider",
+      modelId: "routine-model",
+      thinkingLevel: "low",
+    });
+    await executorFor(pinned).wakeRoutine("routine-1", scheduledAt.toISOString());
+    expect(order).toEqual(["owner", "claim"]);
+    expect(pinned.$transaction).toHaveBeenCalledWith(expect.any(Function), {
+      isolationLevel: "ReadCommitted",
+    });
     expect(runCreate).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
@@ -1742,6 +1759,7 @@ describe("createRunExecutor", () => {
       agentSkill: { findMany: vi.fn(async () => []) },
       $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) =>
         callback({
+          $queryRaw: vi.fn(async () => [{ id: "user-1" }]),
           routine: {
             updateMany: vi.fn(async () => ({ count: 1 })),
             findUnique: vi.fn(async () => ({
@@ -1814,6 +1832,7 @@ describe("createRunExecutor", () => {
       agentSkill: { findMany: vi.fn(async () => []) },
       $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) =>
         callback({
+          $queryRaw: vi.fn(async () => [{ id: "user-1" }]),
           routine: {
             updateMany: vi.fn(async () => ({ count: 1 })),
             findUnique: vi.fn(async () => ({
@@ -1903,6 +1922,7 @@ description: Prepare standup notes
       },
       $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) =>
         callback({
+          $queryRaw: vi.fn(async () => [{ id: "user-1" }]),
           routine: {
             updateMany: vi.fn(async () => ({ count: 1 })),
             findUnique: vi.fn(async () => ({
@@ -1963,6 +1983,7 @@ description: Prepare standup notes
       },
       $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) =>
         callback({
+          $queryRaw: vi.fn(async () => [{ id: "user-1" }]),
           routine: {
             updateMany,
             findUnique: vi.fn(async () => ({
@@ -2028,6 +2049,7 @@ description: Prepare standup notes
         transactionCalls += 1;
         if (transactionCalls === 1) {
           return callback({
+            $queryRaw: vi.fn(async () => [{ id: "user-1" }]),
             routine: {
               updateMany: claimUpdateMany,
               findUnique: vi.fn(async () => ({
@@ -2618,21 +2640,16 @@ description: Prepare standup notes
     );
   });
 
-  it("rejects a free-form selection when the owning preference disappears", async () => {
+  it("rejects a compatible selection its chosen credential does not enable", async () => {
     const preference = modelPreference({
       provider: "openai-compatible",
       secretId: "secret-compat",
       modelId: "newest-model",
       isDefault: true,
+      enabledModelIds: ["newest-model"],
     });
     const findFirst = vi.fn(
-      async (args: {
-        where: { credential?: { provider?: string; userId?: string }; modelId?: string };
-        select?: unknown;
-      }) => {
-        if (args.select) {
-          return args.where.modelId === "private-model" ? { id: "saved" } : null;
-        }
+      async (args: { where: { credential?: { provider?: string }; modelId?: string } }) => {
         if (args.where.modelId === "private-model") return null;
         if (args.where.credential?.provider === "openai-compatible") return preference;
         return null;
@@ -2648,13 +2665,15 @@ description: Prepare standup notes
       secretStore: { load: vi.fn(), put: vi.fn() },
     } as unknown as Parameters<typeof createRunExecutor>[0]);
 
-    await expect(
-      executor.resolveConnectedModel(
-        { userId: "user-1", spaceId: "ws-1" },
-        "openai-compatible",
-        "private-model",
-      ),
-    ).rejects.toThrow("Unknown model for that provider");
+    for (const modelId of ["private-model", "custom"]) {
+      await expect(
+        executor.resolveConnectedModel(
+          { userId: "user-1", spaceId: "ws-1" },
+          "openai-compatible",
+          modelId,
+        ),
+      ).rejects.toThrow("This model is not enabled for the connection.");
+    }
   });
 
   it("rejects a saved Codex Spark model for ChatGPT subscription sign-in", async () => {
@@ -2856,8 +2875,9 @@ description: Prepare standup notes
     });
   });
 
-  it("keeps image support for a separately enabled bot model override", async () => {
+  it("runs each enabled compatible model with its own saved capabilities", async () => {
     const provider = "openai-compatible";
+    const enabledModelIds = ["bot-vision-model", "text-only-model", "space-model"];
     const findFirst = vi.fn(
       async (args: { where: { credential?: { provider?: string }; isDefault?: boolean } }) => {
         if (args.where.credential?.provider === provider || args.where.isDefault) {
@@ -2866,6 +2886,7 @@ description: Prepare standup notes
             secretId: "secret-openai-compatible",
             modelId: "space-model",
             isDefault: Boolean(args.where.isDefault),
+            enabledModelIds,
           });
         }
         return null;
@@ -2873,21 +2894,47 @@ description: Prepare standup notes
     );
     const plaintext = serializeModelSecret({
       kind: "openai_compatible",
+      format: "canonical",
       baseUrl: "http://127.0.0.1:8000/v1",
-      visionModelIds: ["bot-vision-model"],
-      maxImagesPerPrompt: 1,
-      maxTokens: 8192,
-      contextWindow: 65536,
+      models: [
+        {
+          modelId: "bot-vision-model",
+          thinkingLevels: ["off", "low", "high", "xhigh"],
+          defaultThinkingLevel: "low",
+          contextWindow: 65536,
+          maxTokens: 8192,
+          supportsImages: true,
+          maxImagesPerPrompt: 1,
+        },
+        {
+          modelId: "text-only-model",
+          thinkingLevels: ["off"],
+          defaultThinkingLevel: null,
+          contextWindow: 32768,
+          maxTokens: 4096,
+          supportsImages: false,
+        },
+      ],
     });
     const bot = {
       modelProvider: provider,
       modelId: "bot-vision-model",
-      thinkingLevel: null,
+      thinkingLevel: null as string | null,
+    };
+    const credentialRow = {
+      provider,
+      secretId: "secret-openai-compatible",
+      enabledModelIds,
+      supportsImages: false,
     };
     const prisma = {
       bot: { findFirst: vi.fn(async () => bot) },
       spaceModelPreference: { findFirst },
-      userModelCredential: { findFirst: vi.fn(async () => null) },
+      userModelCredential: {
+        findFirst: vi.fn(async (args: { where: { id?: string } }) =>
+          args.where.id === `credential-${provider}` ? credentialRow : null,
+        ),
+      },
       deploymentSettings: { findUnique: vi.fn(async () => null) },
       secret: {
         findFirst: vi.fn(async () => ({
@@ -2901,26 +2948,49 @@ description: Prepare standup notes
       prisma,
       secretStore: { load: vi.fn(() => plaintext), put: vi.fn() },
     } as unknown as Parameters<typeof createRunExecutor>[0]);
+    const resolve = () =>
+      executor.resolveModel({ userId: "user-1", spaceId: "ws-1", botId: "bot-1" });
 
-    await expect(
-      executor.resolveModel({ userId: "user-1", spaceId: "ws-1", botId: "bot-1" }),
-    ).resolves.toMatchObject({
+    await expect(resolve()).resolves.toMatchObject({
       provider,
       id: "bot-vision-model",
+      baseUrl: "http://127.0.0.1:8000/v1",
+      reasoning: true,
+      thinkingLevels: ["off", "low", "high", "xhigh"],
+      thinkingLevel: "low",
       acceptsImages: true,
       maxImagesPerPrompt: 1,
       maxTokens: 8192,
       contextWindow: 65536,
     });
 
+    bot.thinkingLevel = "xhigh";
+    await expect(resolve()).resolves.toMatchObject({ thinkingLevel: "xhigh" });
+
     bot.modelId = "text-only-model";
-    await expect(
-      executor.resolveModel({ userId: "user-1", spaceId: "ws-1", botId: "bot-1" }),
-    ).resolves.toMatchObject({
+    bot.thinkingLevel = null;
+    await expect(resolve()).resolves.toMatchObject({
       provider,
       id: "text-only-model",
+      reasoning: false,
+      thinkingLevels: ["off"],
+      thinkingLevel: null,
       acceptsImages: false,
+      maxTokens: 4096,
+      contextWindow: 32768,
     });
+
+    bot.modelId = "space-model";
+    await expect(resolve()).rejects.toBeInstanceOf(UnavailableModelForAuthError);
+
+    bot.modelId = "disabled-model";
+    const disabled = resolve();
+    await expect(disabled).rejects.toBeInstanceOf(UnavailableModelForAuthError);
+    await expect(disabled).rejects.toThrow("This model is not enabled for the connection.");
+
+    credentialRow.enabledModelIds = ["text-only-model"];
+    bot.modelId = "bot-vision-model";
+    await expect(resolve()).rejects.toThrow("This model is not enabled for the connection.");
   });
 
   it("falls back to the Space default when the override provider has no credential", async () => {

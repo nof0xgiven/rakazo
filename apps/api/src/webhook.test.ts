@@ -309,17 +309,11 @@ describe("inbound webhook HTTP route", () => {
     expect(deps.enqueue).toHaveBeenCalled();
   });
 
-  it("pins a routine model when every matching routine chose it", async () => {
+  it("forwards matching routine ids so the model pin is read under the owner lock", async () => {
     const deps = createDeps({
       routines: [
-        {
-          id: "routine-1",
-          name: "Review",
-          prompt: "Inspect",
-          modelProvider: "openai-compatible",
-          modelId: "private-model",
-          thinkingLevel: "low",
-        },
+        { id: "routine-1", name: "Review", prompt: "Inspect" },
+        { id: "routine-2", name: "Triage", prompt: "Sort" },
       ],
     });
     const app = mount(deps);
@@ -332,49 +326,9 @@ describe("inbound webhook HTTP route", () => {
       body: JSON.stringify({ event: "ping" }),
     });
     expect(res.status).toBe(200);
-    expect(deps.sendUserMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        modelPin: {
-          modelProvider: "openai-compatible",
-          modelId: "private-model",
-          thinkingLevel: "low",
-        },
-      }),
-    );
-  });
-
-  it("keeps the bot model when matching routines chose different models", async () => {
-    const deps = createDeps({
-      routines: [
-        {
-          id: "routine-1",
-          name: "Review",
-          prompt: "Inspect",
-          modelProvider: "openai",
-          modelId: "gpt",
-          thinkingLevel: null,
-        },
-        {
-          id: "routine-2",
-          name: "Triage",
-          prompt: "Sort",
-          modelProvider: "anthropic",
-          modelId: "claude",
-          thinkingLevel: null,
-        },
-      ],
-    });
-    const app = mount(deps);
-    const res = await app.request("/api/v1/bots/bot-1/webhook", {
-      method: "POST",
-      headers: {
-        authorization: `Bearer ${SECRET}`,
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({ event: "ping" }),
-    });
-    expect(res.status).toBe(200);
-    expect(deps.sendUserMessage.mock.calls[0]?.[0]).not.toHaveProperty("modelPin");
+    const sent = deps.sendUserMessage.mock.calls[0]?.[0];
+    expect(sent).toMatchObject({ routineIds: ["routine-1", "routine-2"] });
+    expect(sent).not.toHaveProperty("modelPin");
   });
 
   it("accepts a plain text payload as untrusted delivery data", async () => {

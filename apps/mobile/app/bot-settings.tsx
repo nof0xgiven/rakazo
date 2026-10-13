@@ -8,9 +8,12 @@ import {
 } from "@rakazo/contracts";
 import {
   connectedModelChoices,
+  findConnectedModelChoice,
+  modelEffortChoices,
   modelOptionKey,
   parseModelOptionKey,
   resolveSelectableModelId,
+  spaceDefaultModelCapabilities,
 } from "@rakazo/core";
 import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import type { Voice } from "expo-speech";
@@ -32,6 +35,7 @@ import { COMPUTER_LIFECYCLE_TIMEOUT_MS } from "../lib/computer";
 import { loadDeviceVoiceEnabled } from "../lib/device-voice";
 import { useI18n } from "../lib/i18n";
 import { native, useMobileTokens } from "../lib/native";
+import { thinkingLevelLabel } from "../lib/thinking-level-label";
 import { errorText } from "../lib/user-error";
 import { stopVoicePlayback } from "../lib/voice";
 
@@ -123,24 +127,27 @@ export default function BotSettingsScreen() {
     ? modelOptionKey(selectedModel.provider, selectedModel.modelId)
     : "";
 
-  const effectiveProvider = selectedModel?.provider ?? me?.defaultProvider ?? null;
-  const effectiveModelId = selectedModel?.modelId ?? me?.defaultModel ?? null;
-  const effectiveEntry =
-    effectiveProvider && effectiveModelId
-      ? catalog.find(
-          (entry) =>
-            entry.provider === effectiveProvider &&
-            resolveSelectableModelId(catalog, entry.provider, entry.id) === effectiveModelId,
+  const effectiveCapabilities = selectedModel
+    ? findConnectedModelChoice(
+        connectedOptions,
+        catalog,
+        selectedModel.provider,
+        selectedModel.modelId,
+      )?.capabilities
+    : me?.defaultProvider && me.defaultModel
+      ? spaceDefaultModelCapabilities(
+          connectedOptions,
+          catalog,
+          me.defaultProvider,
+          me.defaultModel,
         )
       : undefined;
-  const effectiveCredential = credentials.find(
-    (entry) => entry.provider === effectiveProvider && entry.modelId === effectiveModelId,
+  const savedModelKey =
+    bot?.modelProvider && bot.modelId ? modelOptionKey(bot.modelProvider, bot.modelId) : "";
+  const effort = modelEffortChoices(
+    effectiveCapabilities,
+    modelKey === savedModelKey ? (bot?.thinkingLevel ?? null) : null,
   );
-  const thinkingOptions = (
-    effectiveCredential?.thinkingLevels ??
-    effectiveEntry?.thinkingLevels ??
-    []
-  ).filter((level) => level !== "off");
 
   const spaceDefaultLabel = me?.defaultModel
     ? `${t("Space default")} (${catalogLabel(catalog, me.defaultProvider, me.defaultModel) ?? me.defaultModel})`
@@ -160,16 +167,25 @@ export default function BotSettingsScreen() {
     return choices;
   }, [connectedOptions, selectedModel?.modelId, selectedModelKey, spaceDefaultLabel]);
 
-  const thinkingChoices: MenuPickerChoice[] = useMemo(
-    () => [
-      { key: "", label: t("Default (medium)") },
-      ...thinkingOptions.map((level) => ({
-        key: level,
-        label: thinkingLevelLabel(level, t),
-      })),
-    ],
-    [t, thinkingOptions],
-  );
+  const thinkingChoices: MenuPickerChoice[] = effort
+    ? [
+        {
+          key: "",
+          label: t("Default ({level})", { level: thinkingLevelLabel(effort.defaultLevel, t) }),
+        },
+        ...effort.levels.map((level) => ({ key: level, label: thinkingLevelLabel(level, t) })),
+        ...(effort.unavailable && thinkingLevel === effort.unavailable
+          ? [
+              {
+                key: effort.unavailable,
+                label: t("{level} (unavailable)", {
+                  level: thinkingLevelLabel(effort.unavailable, t),
+                }),
+              },
+            ]
+          : []),
+      ]
+    : [];
 
   function selectModel(key: string) {
     if (key === selectedModelKey) return;
@@ -303,9 +319,7 @@ export default function BotSettingsScreen() {
         input.modelId = selected?.modelId ?? null;
       }
       if (modelMetaReady && (modelChanged || thinkingChanged)) {
-        input.thinkingLevel = thinkingOptions.length
-          ? ((thinkingLevel || null) as ThinkingLevel | null)
-          : null;
+        input.thinkingLevel = effort ? ((thinkingLevel || null) as ThinkingLevel | null) : null;
       }
       if (autoSpeak !== bot.autoSpeak) input.autoSpeak = autoSpeak;
       if (computerMode !== bot.computerMode) {
@@ -510,30 +524,34 @@ export default function BotSettingsScreen() {
         </Pressable>
         {advancedOpen ? (
           <View>
-            <View
-              style={{
-                marginTop: 8,
-                borderRadius: 14,
-                backgroundColor: native.fill,
-                overflow: "hidden",
-              }}
-            >
-              <MenuPicker
-                choices={modelChoices}
-                label={t("Model")}
-                onChange={selectModel}
-                value={selectedModelKey}
-              />
-              {thinkingOptions.length ? (
+            {modelMetaReady ? (
+              <View
+                style={{
+                  marginTop: 8,
+                  borderRadius: 14,
+                  backgroundColor: native.fill,
+                  overflow: "hidden",
+                }}
+              >
                 <MenuPicker
-                  choices={thinkingChoices}
-                  divider
-                  label={t("Thinking")}
-                  onChange={setThinkingLevel}
-                  value={thinkingLevel}
+                  choices={modelChoices}
+                  label={t("Model")}
+                  onChange={selectModel}
+                  value={selectedModelKey}
                 />
-              ) : null}
-            </View>
+                {effort ? (
+                  <MenuPicker
+                    choices={thinkingChoices}
+                    divider
+                    label={t("Reasoning effort")}
+                    onChange={(key) => {
+                      if (key !== effort.unavailable) setThinkingLevel(key);
+                    }}
+                    value={thinkingLevel}
+                  />
+                ) : null}
+              </View>
+            ) : null}
             {modelMetaError ? (
               <Text style={{ color: tokens.mutedForeground, marginTop: 12, fontSize: 13 }}>
                 {modelMetaError}
@@ -560,16 +578,6 @@ function catalogLabel(
 ) {
   if (!provider) return undefined;
   return catalog.find((entry) => entry.provider === provider && entry.id === modelId)?.label;
-}
-
-function thinkingLevelLabel(level: ThinkingLevel, t: (message: string) => string) {
-  if (level === "xhigh") return t("Extra high");
-  if (level === "low") return t("Low");
-  if (level === "medium") return t("Medium");
-  if (level === "high") return t("High");
-  if (level === "minimal") return t("Minimal");
-  if (level === "max") return t("Max");
-  return `${level.slice(0, 1).toUpperCase()}${level.slice(1)}`;
 }
 
 const styles = StyleSheet.create({

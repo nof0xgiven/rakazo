@@ -20,7 +20,6 @@ import type {
   Space,
   SpaceMemoryConfig,
   TaughtSkill,
-  ThinkingLevel,
   ThreadMessage,
   ThreadSnapshot,
   VoiceStatus,
@@ -192,7 +191,6 @@ import { scheduleFocusPrompt } from "../lib/focus-prompt";
 import { localTimezone } from "../lib/local-timezone";
 import { copyableMessageText } from "../lib/message-text";
 import { messageProviderLabel } from "../lib/messaging";
-import { parseModelOptionKey } from "../lib/model-catalog";
 import {
   isFileDrag,
   isFilePaste,
@@ -260,6 +258,7 @@ import {
   RoutineEditor,
   RoutineListHeader,
   RoutineListRow,
+  routineModelPatch,
   routineNeedsOneShotArm,
 } from "./RoutineEditor";
 import type { SettingsSection } from "./SettingsOverlay";
@@ -4046,16 +4045,7 @@ export function ShellPage() {
                       await ensureWebhookSecret(targetBotId);
                     }
                     const crons = routineDraft.schedules.map(cronFromPreset);
-                    const model = routineDraft.modelKey
-                      ? parseModelOptionKey(routineDraft.modelKey)
-                      : null;
-                    const routineModel = {
-                      modelProvider: model?.provider ?? null,
-                      modelId: model?.modelId ?? null,
-                      thinkingLevel: (model && routineDraft.thinkingLevel
-                        ? routineDraft.thinkingLevel
-                        : null) as ThinkingLevel | null,
-                    };
+                    const routineModel = routineModelPatch(routineDraft, targetRoutine);
                     let saved: Routine;
                     if (targetRoutine) {
                       const armOneShot = routineNeedsOneShotArm(targetRoutine, crons);
@@ -4081,11 +4071,7 @@ export function ShellPage() {
                         webhookEnabled: routineDraft.webhookEnabled,
                         githubEnabled: routineDraft.githubEnabled,
                         messageProvider: routineDraft.messageProvider,
-                        ...(routineModel.modelProvider !== targetRoutine.modelProvider ||
-                        routineModel.modelId !== targetRoutine.modelId ||
-                        routineModel.thinkingLevel !== targetRoutine.thinkingLevel
-                          ? routineModel
-                          : {}),
+                        ...routineModel,
                         ...(runAt ? { runAt } : {}),
                       });
                     } else {

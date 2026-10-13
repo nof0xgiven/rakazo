@@ -380,6 +380,11 @@ describe("reconcileStuckWork", () => {
       }),
       expect.anything(),
     );
+    expect(client.$transaction).toHaveBeenCalledWith(expect.any(Function), {
+      isolationLevel: "ReadCommitted",
+    });
+    expect(client.$queryRaw.mock.calls[0]?.[0].join("")).toContain('FROM "user"');
+    expect(client.$queryRaw.mock.calls[0]?.slice(1)).toEqual([run.userId]);
   });
 
   it("does not write a status line when the cancel loses the race", async () => {
@@ -562,6 +567,7 @@ function expireClient(run: ReturnType<typeof candidate>, options?: { cancelled?:
       updateMany: vi.fn(async () => ({ count: options?.cancelled ?? 1 })),
       findUnique: vi
         .fn()
+        .mockResolvedValueOnce({ userId: run.userId })
         .mockResolvedValueOnce({ status: run.status, updatedAt: run.updatedAt, startedAt: null })
         .mockResolvedValue({ status: "cancelled", startedAt: null }),
       findUniqueOrThrow: vi.fn(async () => ({
@@ -598,7 +604,9 @@ function expireClient(run: ReturnType<typeof candidate>, options?: { cancelled?:
         },
       ]),
     },
-    $queryRaw: vi.fn(async () => []),
+    $queryRaw: vi.fn(async (_query: TemplateStringsArray, ..._values: unknown[]) => [
+      { id: run.userId },
+    ]),
   };
   return Object.assign(client, {
     $transaction: vi.fn(async (fn: (tx: typeof client) => Promise<unknown>) => fn(client)),

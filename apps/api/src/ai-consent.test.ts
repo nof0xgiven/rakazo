@@ -83,7 +83,7 @@ describe("consent grants", () => {
     vi.mocked(deps.prisma.spaceBackupModel.findMany).mockResolvedValue([
       { provider: "anthropic", modelId: "claude-backup" },
     ] as never);
-    vi.mocked(deps.prisma.userModelCredential.findMany).mockResolvedValue([
+    const credentials = [
       {
         id: "backup-credential",
         userId: actor.userId,
@@ -93,7 +93,13 @@ describe("consent grants", () => {
         createdAt: new Date(0),
         updatedAt: new Date(0),
       },
-    ] as never);
+    ];
+    vi.mocked(deps.prisma.userModelCredential.findMany).mockImplementation((async (args: {
+      where: { provider?: string };
+    }) =>
+      credentials.filter(
+        (credential) => !args.where.provider || credential.provider === args.where.provider,
+      )) as never);
 
     const status = await aiConsentStatus(deps, actor, { uses: ["model"] });
 
@@ -111,6 +117,80 @@ describe("consent grants", () => {
       where: { userId: actor.userId, spaceId: actor.spaceId },
       orderBy: { position: "asc" },
     });
+  });
+  it("discloses every enabled compatible model at the endpoint its credential chooser picks", async () => {
+    const { deps, actor } = setup();
+    deps.env.agentRuntime = "pi";
+    const compatible = (id: string, enabledModelIds: string[], updatedAt: number) => ({
+      id,
+      userId: actor.userId,
+      provider: "openai-compatible",
+      label: id,
+      secretId: `secret-${id}`,
+      supportsImages: false,
+      enabledModelIds,
+      modelConfigurationVersion: 1,
+      createdAt: new Date(0),
+      updatedAt: new Date(updatedAt),
+    });
+    const preferred = compatible("preferred", ["shared", "helper"], 1);
+    const shadowing = compatible("shadowing", ["shared"], 2);
+    const config = (modelId: string) => ({
+      modelId,
+      thinkingLevels: ["off"],
+      defaultThinkingLevel: null,
+      contextWindow: 32_000,
+      maxTokens: 4_000,
+      supportsImages: false,
+    });
+    const ciphertexts: Record<string, string> = {
+      "secret-preferred": JSON.stringify({
+        kind: "openai_compatible",
+        baseUrl: "http://10.0.0.1:8000/v1",
+        models: [config("shared"), config("helper")],
+      }),
+      "secret-shadowing": JSON.stringify({
+        kind: "openai_compatible",
+        baseUrl: "http://10.0.0.2:8000/v1",
+        models: [config("shared")],
+      }),
+    };
+    const preference = {
+      id: "preference",
+      modelId: "shared",
+      thinkingLevel: null,
+      isDefault: true,
+      updatedAt: new Date(0),
+      credential: preferred,
+    };
+    vi.mocked(deps.prisma.spaceModelPreference.findMany).mockResolvedValue([preference] as never);
+    vi.mocked(deps.prisma.userModelCredential.findMany).mockResolvedValue([
+      shadowing,
+      preferred,
+    ] as never);
+    vi.mocked(deps.prisma.secret.findMany).mockImplementation((async (args: {
+      where: { id: { in: string[] } };
+    }) =>
+      args.where.id.in.flatMap((id) =>
+        ciphertexts[id] ? [{ id, ciphertext: ciphertexts[id] }] : [],
+      )) as never);
+    deps.secrets = { load: vi.fn(async (ciphertext: string) => ciphertext) } as never;
+
+    const status = await aiConsentStatus(deps, actor, { uses: ["model"] });
+
+    const compatibleNames = status.recipients
+      .filter((recipient) => recipient.use === "model")
+      .map((recipient) => [recipient.name, recipient.detail]);
+    expect(compatibleNames).toEqual(
+      expect.arrayContaining([
+        [expect.stringContaining("http://10.0.0.1:8000"), "shared"],
+        [expect.stringContaining("http://10.0.0.1:8000"), "helper"],
+      ]),
+    );
+    expect(compatibleNames).not.toContainEqual([
+      expect.stringContaining("http://10.0.0.2:8000"),
+      expect.anything(),
+    ]);
   });
   it("discloses only the selected voice provider before a voice action", async () => {
     const { deps, actor } = setup();

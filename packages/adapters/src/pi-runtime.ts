@@ -801,6 +801,7 @@ export function modelsForRequest(
     return registerOpenAiCompatibleRuntime(models, {
       modelId: request.model.id,
       baseUrl: request.model.baseUrl,
+      thinkingLevels: request.model.thinkingLevels,
       reasoning: request.model.reasoning,
       acceptsImages: request.model.acceptsImages,
       maxTokens: request.model.maxTokens,

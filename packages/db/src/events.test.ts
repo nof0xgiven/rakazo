@@ -61,6 +61,9 @@ function event(seq: number) {
 }
 
 describe("finalizeRun", () => {
+  const runOwner = { findFirst: vi.fn(async () => ({ userId: "user-1" })) };
+  const ownerRow = async (..._args: unknown[]) => [{ id: "user-1" }];
+
   it("stamps the final steps block with wall-clock run duration", () => {
     const blocks = [
       { kind: "steps" as const, steps: [{ label: "Read file", count: 1 }] },
@@ -82,9 +85,9 @@ describe("finalizeRun", () => {
     const conflict = Object.assign(new Error("serialization conflict"), { code: "P2034" });
     const createEvent = vi.fn(async () => ({ threadId: "thread-1", seq: 0 }));
     const tx = {
-      $queryRaw: vi.fn(async () => []),
+      $queryRaw: vi.fn(ownerRow),
       run: {
-        findUnique: vi.fn(async () => ({ status: "running" })),
+        findUnique: vi.fn(async () => ({ status: "running", userId: "user-1" })),
         findUniqueOrThrow: vi.fn(async () => ({ sourceMessage: null })),
         findFirst: vi.fn(async () => null),
         updateMany: vi.fn(async () => ({ count: 1 })),
@@ -107,7 +110,7 @@ describe("finalizeRun", () => {
 
     await expect(
       finalizeRun(
-        { $transaction: transaction } as unknown as PrismaClient,
+        { run: runOwner, $transaction: transaction } as unknown as PrismaClient,
         {
           spaceId: "space-1",
           threadId: "thread-1",
@@ -130,9 +133,9 @@ describe("finalizeRun", () => {
 
   it("resumes a held messaging inbound as a messaging run", async () => {
     const tx = {
-      $queryRaw: vi.fn(async () => []),
+      $queryRaw: vi.fn(ownerRow),
       run: {
-        findUnique: vi.fn(async () => ({ status: "running", startedAt: null })),
+        findUnique: vi.fn(async () => ({ status: "running", startedAt: null, userId: "user-1" })),
         findUniqueOrThrow: vi.fn(async () => ({ sourceMessage: null })),
         findFirst: vi.fn(async () => null),
         updateMany: vi.fn(async () => ({ count: 1 })),
@@ -166,6 +169,7 @@ describe("finalizeRun", () => {
       bot: { update: vi.fn(async () => ({})) },
     };
     const prisma = {
+      run: runOwner,
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
     } as unknown as PrismaClient;
 
@@ -191,13 +195,30 @@ describe("finalizeRun", () => {
         status: "queued",
       }),
     });
+    const queries = tx.$queryRaw.mock.calls.map((call) => (call[0] as string[]).join(""));
+    expect(queries[0]).toContain('FROM "user"');
+    expect(tx.$queryRaw.mock.calls[0]?.slice(1)).toEqual(["user-1"]);
+    expect(queries[1]).toContain("FROM threads");
+    const ownership = tx.run.findUnique.mock.invocationCallOrder[0]!;
+    expect(tx.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(ownership);
+    expect(ownership).toBeLessThan(tx.$queryRaw.mock.invocationCallOrder[1]!);
+    expect(tx.run.findUnique).toHaveBeenNthCalledWith(1, {
+      where: { id: "intro-run" },
+      select: { userId: true },
+    });
+    expect(prisma.$transaction).toHaveBeenCalledWith(expect.any(Function), {
+      isolationLevel: "ReadCommitted",
+    });
+    expect(tx.run.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ userId: "user-1" }) }),
+    );
   });
 
   it("pins the continuation when every waited message chose the same model", async () => {
     const tx = {
-      $queryRaw: vi.fn(async () => []),
+      $queryRaw: vi.fn(ownerRow),
       run: {
-        findUnique: vi.fn(async () => ({ status: "running", startedAt: null })),
+        findUnique: vi.fn(async () => ({ status: "running", startedAt: null, userId: "user-1" })),
         findUniqueOrThrow: vi.fn(async () => ({ sourceMessage: null })),
         findFirst: vi.fn(async () => null),
         updateMany: vi.fn(async () => ({ count: 1 })),
@@ -234,6 +255,7 @@ describe("finalizeRun", () => {
       bot: { update: vi.fn(async () => ({})) },
     };
     const prisma = {
+      run: runOwner,
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
     } as unknown as PrismaClient;
 
@@ -272,9 +294,9 @@ describe("finalizeRun", () => {
       text: "What is the status?",
     };
     const tx = {
-      $queryRaw: vi.fn(async () => []),
+      $queryRaw: vi.fn(ownerRow),
       run: {
-        findUnique: vi.fn(async () => ({ status: "running", startedAt: null })),
+        findUnique: vi.fn(async () => ({ status: "running", startedAt: null, userId: "user-1" })),
         findUniqueOrThrow: vi.fn(async () => ({ sourceMessage: null })),
         findFirst: vi.fn(async () => null),
         updateMany: vi.fn(async () => ({ count: 1 })),
@@ -324,6 +346,7 @@ describe("finalizeRun", () => {
       bot: { update: vi.fn(async () => ({})) },
     };
     const prisma = {
+      run: runOwner,
       $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
     } as unknown as PrismaClient;
 
@@ -2178,22 +2201,44 @@ describe("sendUserMessage", () => {
     expect(publish).toHaveBeenCalledWith("thread:thread-1", JSON.stringify({ cursor: 8 }));
   });
 
-  it("pins an agreed inbound model onto the run it creates", async () => {
+  function inboundSend(
+    routines: Array<{
+      modelProvider: string | null;
+      modelId: string | null;
+      thinkingLevel: string | null;
+    }>,
+    activeRuns: Array<{ id: string; taskId: string; trigger: string }> = [],
+  ) {
+    const order: string[] = [];
     const tx = {
+      $queryRaw: vi.fn(async () => {
+        order.push("owner");
+        return [{ id: "user-1" }];
+      }),
       thread: {
         update: vi
           .fn()
-          .mockResolvedValueOnce({ nextMessageSeq: 5 })
+          .mockImplementationOnce(async () => {
+            order.push("thread");
+            return { nextMessageSeq: 5 };
+          })
           .mockResolvedValueOnce({ nextEventSeq: 9 }),
       },
       message: {
         create: vi.fn().mockResolvedValue({ id: "message-1", seq: 4 }),
-        update: vi.fn(),
+        update: vi.fn().mockResolvedValue({ id: "message-1" }),
       },
+      routine: {
+        findMany: vi.fn(async () => {
+          order.push("routines");
+          return routines;
+        }),
+      },
+      steeringMessage: { create: vi.fn() },
       task: { create: vi.fn().mockResolvedValue({ id: "task-1" }) },
       run: {
         create: vi.fn().mockResolvedValue({ id: "run-1" }),
-        findMany: vi.fn().mockResolvedValue([]),
+        findMany: vi.fn().mockResolvedValue(activeRuns),
         findUnique: vi.fn().mockResolvedValue({ status: "queued" }),
       },
       event: {
@@ -2204,26 +2249,49 @@ describe("sendUserMessage", () => {
         })),
       },
     };
+    const transaction = vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx));
     const prisma = {
       message: { findUnique: vi.fn().mockResolvedValue(null) },
-      $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
+      $transaction: transaction,
     } as unknown as PrismaClient;
+    const send = (routineIds?: string[]) =>
+      sendUserMessage(prisma, {
+        spaceId: "workspace-1",
+        threadId: "thread-1",
+        botId: "bot-1",
+        userId: "user-1",
+        blocks: [{ kind: "text", text: "ping" }],
+        prompt: "ping",
+        trigger: "webhook",
+        ...(routineIds ? { routineIds } : {}),
+      });
+    return { tx, transaction, order, send };
+  }
 
-    await sendUserMessage(prisma, {
-      spaceId: "workspace-1",
-      threadId: "thread-1",
-      botId: "bot-1",
-      userId: "user-1",
-      blocks: [{ kind: "text", text: "ping" }],
-      prompt: "ping",
-      trigger: "webhook",
-      modelPin: {
-        modelProvider: "openai-compatible",
-        modelId: "private-model",
-        thinkingLevel: "low",
-      },
+  const pinnedRoutine = {
+    modelProvider: "openai-compatible",
+    modelId: "private-model",
+    thinkingLevel: "low",
+  };
+
+  it("pins the model its routines agree on, read under the owner lock", async () => {
+    const { tx, transaction, order, send } = inboundSend([pinnedRoutine, pinnedRoutine]);
+
+    await send(["routine-1", "routine-2", "routine-1"]);
+
+    expect(order).toEqual(["owner", "thread", "routines"]);
+    expect(transaction).toHaveBeenCalledWith(expect.any(Function), {
+      isolationLevel: "ReadCommitted",
     });
-
+    expect(tx.routine.findMany).toHaveBeenCalledWith({
+      where: {
+        id: { in: ["routine-1", "routine-2"] },
+        userId: "user-1",
+        spaceId: "workspace-1",
+        botId: "bot-1",
+      },
+      select: { modelProvider: true, modelId: true, thinkingLevel: true },
+    });
     expect(tx.run.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
@@ -2235,6 +2303,34 @@ describe("sendUserMessage", () => {
         }),
       }),
     );
+  });
+
+  it.each([
+    ["disagree", [pinnedRoutine, { ...pinnedRoutine, thinkingLevel: "high" }]],
+    [
+      "follow the bot",
+      [pinnedRoutine, { modelProvider: null, modelId: null, thinkingLevel: null }],
+    ],
+    ["no longer exist", [pinnedRoutine]],
+  ])("follows the bot when the delivery's routines %s", async (_case, routines) => {
+    const { tx, send } = inboundSend(routines);
+
+    await send(["routine-1", "routine-2"]);
+
+    const data = tx.run.create.mock.calls[0]?.[0]?.data;
+    expect(data).toMatchObject({ trigger: "webhook" });
+    expect(data).not.toHaveProperty("modelPinned");
+    expect(data).not.toHaveProperty("modelId");
+  });
+
+  it("does not take the owner lock for an ordinary send", async () => {
+    const { tx, transaction, order, send } = inboundSend([]);
+
+    await send();
+
+    expect(order).toEqual(["thread"]);
+    expect(tx.routine.findMany).not.toHaveBeenCalled();
+    expect(transaction).toHaveBeenCalledWith(expect.any(Function));
   });
 
   it("persists steering instead of starting a parallel run when the bot is busy", async () => {
@@ -2291,51 +2387,12 @@ describe("sendUserMessage", () => {
   });
 
   it("keeps an agreed inbound model on steering while a routine run is busy", async () => {
-    const tx = {
-      thread: {
-        update: vi
-          .fn()
-          .mockResolvedValueOnce({ nextMessageSeq: 5 })
-          .mockResolvedValueOnce({ nextEventSeq: 9 }),
-      },
-      message: {
-        create: vi.fn().mockResolvedValue({ id: "message-1", seq: 4 }),
-        update: vi.fn().mockResolvedValue({ id: "message-1" }),
-      },
-      steeringMessage: { create: vi.fn() },
-      task: { create: vi.fn() },
-      run: {
-        findMany: vi
-          .fn()
-          .mockResolvedValue([{ id: "run-routine", taskId: "task-routine", trigger: "routine" }]),
-        findUnique: vi.fn().mockResolvedValue({ status: "running" }),
-        create: vi.fn(),
-      },
-      event: {
-        create: vi.fn(async ({ data }: { data: { seq: number; type: string } }) => ({
-          ...event(data.seq),
-          type: data.type,
-        })),
-      },
-    };
-    const prisma = {
-      $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
-    } as unknown as PrismaClient;
+    const { tx, send } = inboundSend(
+      [pinnedRoutine],
+      [{ id: "run-routine", taskId: "task-routine", trigger: "routine" }],
+    );
 
-    await sendUserMessage(prisma, {
-      spaceId: "workspace-1",
-      threadId: "thread-1",
-      botId: "bot-1",
-      userId: "user-1",
-      blocks: [{ kind: "text", text: "ping" }],
-      prompt: "ping",
-      trigger: "webhook",
-      modelPin: {
-        modelProvider: "openai-compatible",
-        modelId: "private-model",
-        thinkingLevel: "low",
-      },
-    });
+    await send(["routine-1"]);
 
     expect(tx.run.create).not.toHaveBeenCalled();
     expect(tx.steeringMessage.create).toHaveBeenCalledWith({

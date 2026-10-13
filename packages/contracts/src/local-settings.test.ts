@@ -13,3 +13,12 @@ describe("backup models in desktop local settings", () => {
     expect(isLocalSettingsProcedure("/rpc/models/setBackups")).toBe(false);
   });
 });
+
+describe("model discovery in desktop local settings", () => {
+  it.each(["models/probeOpenAiCompatible", "models/describeOpenAiCompatible"])(
+    "allows %s through the shared settings gate",
+    (procedure) => {
+      expect(isLocalSettingsProcedure(`${LOCAL_SETTINGS_RPC}/${procedure}`)).toBe(true);
+    },
+  );
+});

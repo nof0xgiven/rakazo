@@ -113,4 +113,131 @@ describe("team chat engagement judge", () => {
       },
     });
   });
+
+  describe("OpenAI-compatible judge model", () => {
+    const now = new Date(0);
+    const compatibleCredential = {
+      id: "credential-compat",
+      userId: "user-1",
+      provider: "openai-compatible",
+      label: "Server",
+      secretId: "secret-compat",
+      supportsImages: false,
+      enabledModelIds: ["model-a", "model-b"],
+      modelConfigurationVersion: 2,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const preference = {
+      id: "preference-1",
+      isDefault: true,
+      modelId: "model-a",
+      thinkingLevel: "xhigh",
+      updatedAt: now,
+      credential: compatibleCredential,
+    };
+    const plaintext = JSON.stringify({
+      kind: "openai_compatible",
+      baseUrl: "http://127.0.0.1:9000/v1",
+      models: [
+        {
+          modelId: "model-a",
+          thinkingLevels: ["off", "low", "high", "xhigh"],
+          defaultThinkingLevel: "low",
+          contextWindow: 64_000,
+          maxTokens: 8_000,
+          supportsImages: true,
+        },
+        {
+          modelId: "model-b",
+          thinkingLevels: ["low", "medium"],
+          defaultThinkingLevel: "medium",
+          contextWindow: 16_000,
+          maxTokens: 2_000,
+          supportsImages: false,
+        },
+      ],
+    });
+
+    function judgeFor(modelId: string) {
+      const run = vi.fn(async function* () {
+        yield { type: "done", text: '{"act":false}' };
+      });
+      const judge = new ModelTeamChatEngagementJudge({
+        prisma: {
+          deploymentSettings: { findUnique: vi.fn(async () => null) },
+          spaceModelPreference: {
+            findFirst: vi.fn(async () => preference),
+            findMany: vi.fn(async () => [preference]),
+          },
+          userModelCredential: {
+            findMany: vi.fn(async () => [compatibleCredential]),
+            findFirst: vi.fn(async () => compatibleCredential),
+          },
+          secret: {
+            findFirst: vi.fn(async () => ({ id: "secret-compat", ciphertext: plaintext })),
+          },
+          usageRecord: { create: vi.fn() },
+        } as never,
+        runtime: { run } as never,
+        secrets: { load: vi.fn(async () => plaintext) } as never,
+        deploymentProvider: "google",
+        deploymentModel: "gemini-3.8-flash",
+        deploymentModelKey: "test-key",
+      });
+      const decide = () =>
+        judge.decide({
+          bot: {
+            id: "bot-1",
+            spaceId: "space-1",
+            userId: "user-1",
+            name: "Arthur",
+            modelProvider: "openai-compatible",
+            modelId,
+          },
+          channelId: "C1",
+          rules: "",
+          messages: [],
+        });
+      return { run, decide };
+    }
+
+    it("runs the requested model with its own configuration and default effort", async () => {
+      const { run, decide } = judgeFor("model-b");
+      await expect(decide()).resolves.toEqual({ act: false });
+      expect(run).toHaveBeenCalledWith(
+        expect.objectContaining({
+          model: expect.objectContaining({
+            provider: "openai-compatible",
+            id: "model-b",
+            baseUrl: "http://127.0.0.1:9000/v1",
+            reasoning: true,
+            thinkingLevels: ["low", "medium"],
+            thinkingLevel: "medium",
+            contextWindow: 16_000,
+            maxTokens: 2_000,
+            acceptsImages: false,
+          }),
+        }),
+        expect.anything(),
+      );
+    });
+
+    it("uses the exact-model space preference effort", async () => {
+      const { run, decide } = judgeFor("model-a");
+      await decide();
+      expect(run).toHaveBeenCalledWith(
+        expect.objectContaining({
+          model: expect.objectContaining({ id: "model-a", thinkingLevel: "xhigh" }),
+        }),
+        expect.anything(),
+      );
+    });
+
+    it("stays silent instead of falling back when the model is not enabled", async () => {
+      const { run, decide } = judgeFor("model-c");
+      await expect(decide()).resolves.toEqual({ act: false });
+      expect(run).not.toHaveBeenCalled();
+    });
+  });
 });

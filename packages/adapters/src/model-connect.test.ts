@@ -1,9 +1,17 @@
+import type { OpenAiCompatibleModelConfig } from "@rakazo/contracts";
 import {
   CLOUDFLARE_AI_GATEWAY_CONFIG_MESSAGE,
   CLOUDFLARE_AI_GATEWAY_PROVIDER_ID,
+  DEFAULT_MODEL_CONTEXT_WINDOW,
+  MAX_OPENAI_COMPATIBLE_ENABLED_MODELS,
+  OPENAI_COMPATIBLE_MODEL_ID_MAX_LENGTH,
 } from "@rakazo/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { buildModelConnectPlaintext, modelCredentialDto } from "./model-connect.js";
+import {
+  buildModelConnectPlaintext,
+  modelCredentialDto,
+  UNREADABLE_COMPATIBLE_CONNECTION_MESSAGE,
+} from "./model-connect.js";
 import { parseModelSecret, serializeModelSecret } from "./pi-oauth.js";
 
 describe("built-in provider output limits", () => {
@@ -288,123 +296,235 @@ describe("openai-codex API key guard", () => {
   });
 });
 
+const compatibleRow = {
+  id: "cred-compatible",
+  provider: "openai-compatible",
+  label: "Local server",
+  isDefault: true,
+};
+
+function config(
+  modelId: string,
+  overrides: Partial<OpenAiCompatibleModelConfig> = {},
+): OpenAiCompatibleModelConfig {
+  return {
+    modelId,
+    thinkingLevels: ["off", "low", "high"],
+    defaultThinkingLevel: null,
+    contextWindow: 32768,
+    maxTokens: 4096,
+    supportsImages: false,
+    ...overrides,
+  };
+}
+
+describe("OpenAI-compatible connection saves", () => {
+  const baseUrl = "http://localhost:8000/v1";
+  const models = [config("model-a", { supportsImages: true }), config("model-b")];
+  const create = {
+    provider: "openai-compatible",
+    baseUrl,
+    modelId: "model-a",
+    models,
+  };
+  const saved = serializeModelSecret({
+    kind: "openai_compatible",
+    format: "canonical",
+    baseUrl,
+    apiKey: "fake-saved-key",
+    models,
+  });
+  const edit = { provider: "openai-compatible", baseUrl, models };
+  const previousEnabledModelIds = ["model-a", "model-b"];
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("writes only the canonical endpoint, key and per-model settings", () => {
+    const plaintext = buildModelConnectPlaintext({ ...create, apiKey: "fake-new-key" });
+    expect(JSON.parse(plaintext)).toEqual({
+      kind: "openai_compatible",
+      baseUrl,
+      apiKey: "fake-new-key",
+      models,
+    });
+  });
+
+  it("rejects an empty model selection", () => {
+    expect(() => buildModelConnectPlaintext({ ...create, models: [] })).toThrow(
+      "Choose at least one model",
+    );
+  });
+
+  it("reuses the saved key when the key is omitted for the same normalized endpoint", () => {
+    const plaintext = buildModelConnectPlaintext(
+      { ...edit, baseUrl: "http://localhost:8000" },
+      saved,
+      { previousEnabledModelIds },
+    );
+    expect(parseModelSecret(plaintext)).toMatchObject({ apiKey: "fake-saved-key" });
+  });
+
+  it("removes the saved key only when an empty key is sent", () => {
+    const plaintext = buildModelConnectPlaintext({ ...edit, apiKey: "" }, saved, {
+      previousEnabledModelIds,
+    });
+    expect(JSON.parse(plaintext)).not.toHaveProperty("apiKey");
+  });
+
+  it("inherits neither key nor settings on a changed endpoint", () => {
+    const plaintext = buildModelConnectPlaintext(
+      { ...edit, baseUrl: "http://localhost:8001/v1", models: [config("model-a")] },
+      saved,
+      { previousEnabledModelIds },
+    );
+    expect(JSON.parse(plaintext)).toEqual({
+      kind: "openai_compatible",
+      baseUrl: "http://localhost:8001/v1",
+      models: [config("model-a")],
+    });
+  });
+
+  it("requires an explicit key choice when the saved connection cannot be read", () => {
+    expect(() => buildModelConnectPlaintext(edit, undefined, { previousEnabledModelIds })).toThrow(
+      UNREADABLE_COMPATIBLE_CONNECTION_MESSAGE,
+    );
+    expect(
+      JSON.parse(
+        buildModelConnectPlaintext({ ...edit, apiKey: "" }, undefined, { previousEnabledModelIds }),
+      ),
+    ).toEqual({ kind: "openai_compatible", baseUrl, models });
+  });
+
+  it("bounds newly enabled ids but keeps an already enabled longer id", () => {
+    const longId = "m".repeat(OPENAI_COMPATIBLE_MODEL_ID_MAX_LENGTH + 1);
+    const withLong = [...models, config(longId)];
+    expect(() => buildModelConnectPlaintext({ ...create, models: withLong })).toThrow(
+      `Model id must be at most ${OPENAI_COMPATIBLE_MODEL_ID_MAX_LENGTH} characters`,
+    );
+    expect(() =>
+      buildModelConnectPlaintext({ ...edit, models: withLong }, saved, {
+        previousEnabledModelIds: [...previousEnabledModelIds, longId],
+      }),
+    ).not.toThrow();
+    expect(() =>
+      buildModelConnectPlaintext(
+        { ...edit, baseUrl: "http://localhost:8001/v1", models: withLong },
+        saved,
+        { previousEnabledModelIds: [...previousEnabledModelIds, longId] },
+      ),
+    ).toThrow(`Model id must be at most ${OPENAI_COMPATIBLE_MODEL_ID_MAX_LENGTH} characters`);
+  });
+
+  it("keeps a legacy set above the cap but rejects additions to it", () => {
+    const many = Array.from({ length: MAX_OPENAI_COMPATIBLE_ENABLED_MODELS + 1 }, (_, index) =>
+      config(`model-${index}`),
+    );
+    const enabled = many.map((model) => model.modelId);
+    expect(() =>
+      buildModelConnectPlaintext({ ...edit, models: many }, saved, {
+        previousEnabledModelIds: enabled,
+      }),
+    ).not.toThrow();
+    expect(() =>
+      buildModelConnectPlaintext(
+        { ...edit, models: [...many.slice(1), config("new-model")] },
+        saved,
+        {
+          previousEnabledModelIds: enabled,
+        },
+      ),
+    ).toThrow(`Enable at most ${MAX_OPENAI_COMPATIBLE_ENABLED_MODELS} models`);
+  });
+
+  it("revalidates an inherited key against the public-HTTPS policy", () => {
+    vi.stubEnv("RAKAZO_OPENAI_COMPAT_ALLOW_PUBLIC", "1");
+    const publicUrl = "http://example.invalid/v1";
+    const legacy = JSON.stringify({
+      kind: "openai_compatible",
+      baseUrl: publicUrl,
+      apiKey: "fake-key",
+    });
+    expect(() =>
+      buildModelConnectPlaintext({ ...edit, baseUrl: publicUrl }, legacy, {
+        previousEnabledModelIds,
+      }),
+    ).toThrow(/HTTPS/);
+  });
+});
+
 describe("modelCredentialDto", () => {
-  it("returns stored baseUrl and modelId for openai-compatible credentials", () => {
+  it("returns the allowlist, version and enabled per-model settings without singleton fields", () => {
     const plaintext = serializeModelSecret({
       kind: "openai_compatible",
+      format: "canonical",
       baseUrl: "https://example.invalid/v1",
+      apiKey: "fake-secret-key",
+      models: [config("model-b"), config("model-a"), config("disabled-model")],
     });
-    expect(
-      modelCredentialDto(
-        {
-          id: "cred-1",
-          provider: "openai-compatible",
-          label: "Local MLX",
-          isDefault: true,
-          defaultModel: "qwen3-4b",
-        },
-        plaintext,
-      ),
-    ).toEqual({
-      id: "cred-1",
-      provider: "openai-compatible",
-      label: "Local MLX",
-      hasKey: false,
-      isDefault: true,
-      supportsImages: false,
+    const dto = modelCredentialDto(
+      {
+        ...compatibleRow,
+        defaultModel: "model-a",
+        thinkingLevel: "off",
+        enabledModelIds: ["model-a", "model-b"],
+        modelConfigurationVersion: 3,
+      },
+      plaintext,
+    );
+    expect(dto).toEqual({
+      ...compatibleRow,
+      hasKey: true,
       authKind: "openai_compatible",
       baseUrl: "https://example.invalid/v1",
-      modelId: "qwen3-4b",
-      reasoning: false,
-      thinkingLevels: ["off"],
+      modelId: "model-a",
+      thinkingLevel: "off",
+      enabledModelIds: ["model-a", "model-b"],
+      configurationVersion: 3,
+      models: [config("model-a"), config("model-b")],
     });
+    expect(JSON.stringify(dto)).not.toContain("fake-secret-key");
   });
 
-  it("projects image support for the selected model only", () => {
-    const plaintext = serializeModelSecret({
-      kind: "openai_compatible",
-      baseUrl: "https://example.invalid/v1",
-      visionModelIds: ["vision-model", "another-vision-model"],
-    });
-    const row = {
-      id: "cred-vision",
-      provider: "openai-compatible",
-      label: "Vision server",
-      isDefault: true,
-      supportsImages: false,
-    };
-
-    expect(modelCredentialDto({ ...row, defaultModel: "vision-model" }, plaintext)).toMatchObject({
-      supportsImages: true,
-      modelId: "vision-model",
-    });
-    expect(modelCredentialDto({ ...row, defaultModel: "text-model" }, plaintext)).toMatchObject({
-      supportsImages: false,
-      modelId: "text-model",
-    });
-  });
-
-  it("projects the configured image limit for an OpenAI-compatible connection", () => {
-    const plaintext = serializeModelSecret({
-      kind: "openai_compatible",
-      baseUrl: "https://example.invalid/v1",
-      maxImagesPerPrompt: 1,
-    });
-
+  it("keeps the allowlist and version when the secret is unreadable", () => {
     expect(
-      modelCredentialDto(
-        {
-          id: "cred-one-image",
-          provider: "openai-compatible",
-          label: "Single-image server",
-          isDefault: true,
-          defaultModel: "custom-vision-model",
-        },
-        plaintext,
-      ),
-    ).toMatchObject({ maxImagesPerPrompt: 1 });
+      modelCredentialDto({
+        ...compatibleRow,
+        enabledModelIds: ["model-a"],
+        modelConfigurationVersion: 2,
+      }),
+    ).toEqual({
+      ...compatibleRow,
+      hasKey: false,
+      enabledModelIds: ["model-a"],
+      configurationVersion: 2,
+      models: [],
+    });
   });
 
-  it("projects the configured output-token limit for an OpenAI-compatible connection", () => {
-    const plaintext = serializeModelSecret({
+  it("projects a legacy secret only onto seeded ids without merging its effort", () => {
+    const legacy = JSON.stringify({
       kind: "openai_compatible",
-      baseUrl: "https://example.invalid/v1",
-      maxTokens: 8192,
+      baseUrl: "http://localhost:8000/v1",
+      reasoning: true,
+      thinkingLevel: "xhigh",
     });
-
-    expect(
-      modelCredentialDto(
-        {
-          id: "cred-output-tokens",
-          provider: "openai-compatible",
-          label: "Reasoning server",
-          isDefault: true,
-          defaultModel: "qwen-model",
-        },
-        plaintext,
-      ),
-    ).toMatchObject({ maxTokens: 8192 });
-  });
-
-  it("projects the configured context window for an OpenAI-compatible connection", () => {
-    const plaintext = serializeModelSecret({
-      kind: "openai_compatible",
-      baseUrl: "https://example.invalid/v1",
-      contextWindow: 65536,
-    });
-
-    expect(
-      modelCredentialDto(
-        {
-          id: "cred-context-window",
-          provider: "openai-compatible",
-          label: "Long-context server",
-          isDefault: true,
-          defaultModel: "qwen-model",
-        },
-        plaintext,
-      ),
-    ).toMatchObject({ contextWindow: 65536 });
+    const dto = modelCredentialDto(
+      { ...compatibleRow, defaultModel: "seeded", enabledModelIds: ["seeded"] },
+      legacy,
+    );
+    expect(dto.models).toEqual([
+      {
+        modelId: "seeded",
+        thinkingLevels: ["off", "minimal", "low", "medium", "high"],
+        defaultThinkingLevel: "high",
+        contextWindow: DEFAULT_MODEL_CONTEXT_WINDOW,
+        maxTokens: 4096,
+        supportsImages: false,
+      },
+    ]);
+    expect(dto).not.toHaveProperty("thinkingLevel");
+    expect(modelCredentialDto({ ...compatibleRow, enabledModelIds: [] }, legacy).models).toEqual(
+      [],
+    );
   });
 
   it("reports a stored API key without returning the secret", () => {
@@ -422,26 +542,13 @@ describe("modelCredentialDto", () => {
     expect(modelCredentialDto(row, deepseek)).toMatchObject({ hasKey: true });
     expect(JSON.stringify(modelCredentialDto(row, deepseek))).not.toContain("sk-deepseek-test");
 
-    const compatible = serializeModelSecret({
-      kind: "openai_compatible",
-      baseUrl: "https://api.deepseek.com/v1",
-      apiKey: "sk-deepseek-test",
-    });
-    const compatibleDto = modelCredentialDto({ ...row, provider: "openai-compatible" }, compatible);
-    expect(compatibleDto.hasKey).toBe(true);
-    expect(JSON.stringify(compatibleDto)).not.toContain("sk-deepseek-test");
-
     const keyless = buildModelConnectPlaintext({
       provider: "openai-compatible",
       baseUrl: "http://127.0.0.1:8000/v1",
       modelId: "local-model",
+      models: [config("local-model")],
     });
-    expect(
-      modelCredentialDto(
-        { ...row, provider: "openai-compatible", defaultModel: "local-model" },
-        keyless,
-      ).hasKey,
-    ).toBe(false);
+    expect(modelCredentialDto({ ...compatibleRow }, keyless).hasKey).toBe(false);
 
     const oauth = serializeModelSecret({
       kind: "oauth",
@@ -468,207 +575,5 @@ describe("modelCredentialDto", () => {
       isDefault: false,
       modelId: "grok-4.6",
     });
-  });
-});
-
-it.each([true, false])(
-  "persists generic reasoning capability %s with the connection",
-  (reasoning) => {
-    const plaintext = buildModelConnectPlaintext({
-      provider: "openai-compatible",
-      baseUrl: "http://localhost:8000/v1",
-      modelId: "arbitrary-model",
-      reasoning,
-    });
-    expect(parseModelSecret(plaintext)).toEqual({
-      kind: "openai_compatible",
-      baseUrl: "http://localhost:8000/v1",
-      reasoning,
-    });
-    expect(
-      modelCredentialDto(
-        {
-          id: "cred",
-          provider: "openai-compatible",
-          label: "Server",
-          isDefault: true,
-          defaultModel: "arbitrary-model",
-        },
-        plaintext,
-      ),
-    ).toMatchObject({
-      reasoning,
-      thinkingLevels: reasoning ? ["off", "minimal", "low", "medium", "high"] : ["off"],
-    });
-  },
-);
-
-it.each([null, "low", "high"] as const)(
-  "round-trips the nullable custom reasoning effort %s",
-  (thinkingLevel) => {
-    const plaintext = buildModelConnectPlaintext({
-      provider: "openai-compatible",
-      baseUrl: "http://localhost:8000/v1",
-      modelId: "arbitrary-model",
-      reasoning: true,
-      thinkingLevel,
-    });
-    expect(parseModelSecret(plaintext)).toMatchObject({
-      kind: "openai_compatible",
-      thinkingLevel,
-    });
-    expect(
-      modelCredentialDto(
-        {
-          id: "cred",
-          provider: "openai-compatible",
-          label: "Server",
-          isDefault: true,
-          defaultModel: "arbitrary-model",
-        },
-        plaintext,
-      ),
-    ).toMatchObject({ thinkingLevel });
-  },
-);
-
-describe("compatible connection updates", () => {
-  const input = {
-    provider: "openai-compatible",
-    modelId: "arbitrary-model",
-    baseUrl: "http://localhost:8000/v1",
-    reasoning: true,
-  };
-  const previous = serializeModelSecret({
-    kind: "openai_compatible",
-    baseUrl: input.baseUrl,
-    apiKey: "fake-saved-key",
-  });
-  afterEach(() => vi.unstubAllEnvs());
-
-  it("preserves a saved key on a capability-only update to the same normalized URL", () => {
-    expect(
-      parseModelSecret(
-        buildModelConnectPlaintext({ ...input, baseUrl: "http://localhost:8000" }, previous),
-      ),
-    ).toMatchObject({ apiKey: "fake-saved-key", reasoning: true });
-  });
-  it("does not transfer a saved key to a different endpoint", () => {
-    expect(
-      parseModelSecret(
-        buildModelConnectPlaintext({ ...input, baseUrl: "http://localhost:8001/v1" }, previous),
-      ),
-    ).not.toHaveProperty("apiKey");
-  });
-
-  it("keeps image capability scoped to each explicitly enabled model", () => {
-    const vision = buildModelConnectPlaintext({ ...input, supportsImages: true });
-    const text = buildModelConnectPlaintext(
-      { ...input, modelId: "text-model", supportsImages: false },
-      vision,
-    );
-    const nextVision = buildModelConnectPlaintext(
-      { ...input, modelId: "another-vision-model", supportsImages: true },
-      text,
-    );
-
-    expect(parseModelSecret(text)).toMatchObject({
-      visionModelIds: ["arbitrary-model"],
-    });
-    expect(parseModelSecret(nextVision)).toMatchObject({
-      visionModelIds: ["arbitrary-model", "another-vision-model"],
-    });
-  });
-  it("persists the image limit while preserving it on connection updates", () => {
-    const configured = buildModelConnectPlaintext({
-      ...input,
-      maxImagesPerPrompt: 1,
-    });
-    const updated = buildModelConnectPlaintext({ ...input, reasoning: false }, configured);
-
-    expect(parseModelSecret(configured)).toMatchObject({ maxImagesPerPrompt: 1 });
-    expect(parseModelSecret(updated)).toMatchObject({ maxImagesPerPrompt: 1 });
-  });
-  it("clears a saved image limit when explicitly requested", () => {
-    const configured = buildModelConnectPlaintext({
-      ...input,
-      maxImagesPerPrompt: 1,
-    });
-    const cleared = buildModelConnectPlaintext(
-      {
-        ...input,
-        maxImagesPerPrompt: null,
-      },
-      configured,
-    );
-
-    expect(parseModelSecret(cleared)).not.toHaveProperty("maxImagesPerPrompt");
-  });
-
-  it("persists the output-token limit while preserving it on connection updates", () => {
-    const configured = buildModelConnectPlaintext({
-      ...input,
-      maxTokens: 8192,
-    });
-    const updated = buildModelConnectPlaintext({ ...input, reasoning: false }, configured);
-
-    expect(parseModelSecret(configured)).toMatchObject({ maxTokens: 8192 });
-    expect(parseModelSecret(updated)).toMatchObject({ maxTokens: 8192 });
-  });
-  it("persists the context window while preserving it on connection updates", () => {
-    const configured = buildModelConnectPlaintext({
-      ...input,
-      contextWindow: 65536,
-    });
-    const updated = buildModelConnectPlaintext({ ...input, reasoning: false }, configured);
-
-    expect(parseModelSecret(configured)).toMatchObject({ contextWindow: 65536 });
-    expect(parseModelSecret(updated)).toMatchObject({ contextWindow: 65536 });
-  });
-  it.each(["", "fake-replacement-key"])(
-    "honors an explicit key replacement or removal",
-    (apiKey) => {
-      const saved = parseModelSecret(buildModelConnectPlaintext({ ...input, apiKey }, previous));
-      if (apiKey) expect(saved).toHaveProperty("apiKey", apiKey);
-      else expect(saved).not.toHaveProperty("apiKey");
-    },
-  );
-  it("omits visionModelIds when prior plaintext is unavailable during key replacement", () => {
-    const saved = parseModelSecret(
-      buildModelConnectPlaintext(
-        { ...input, apiKey: "fake-replacement-key", supportsImages: true },
-        undefined,
-        { omitVisionModelIds: true },
-      ),
-    );
-    expect(saved).toMatchObject({
-      kind: "openai_compatible",
-      apiKey: "fake-replacement-key",
-    });
-    expect(saved).not.toHaveProperty("visionModelIds");
-  });
-  it("preserves multi-model visionModelIds when prior plaintext loads during key replacement", () => {
-    const prior = serializeModelSecret({
-      kind: "openai_compatible",
-      baseUrl: input.baseUrl,
-      apiKey: "fake-saved-key",
-      visionModelIds: ["bot-vision-model", "another-vision-model"],
-    });
-    const saved = parseModelSecret(
-      buildModelConnectPlaintext(
-        { ...input, apiKey: "fake-replacement-key", supportsImages: true },
-        prior,
-      ),
-    );
-    expect(saved).toMatchObject({
-      apiKey: "fake-replacement-key",
-      visionModelIds: ["bot-vision-model", "another-vision-model", "arbitrary-model"],
-    });
-  });
-  it("revalidates inherited keys against the public-HTTPS policy", () => {
-    vi.stubEnv("RAKAZO_OPENAI_COMPAT_ALLOW_PUBLIC", "1");
-    const baseUrl = "http://example.invalid/v1";
-    const legacy = serializeModelSecret({ kind: "openai_compatible", baseUrl, apiKey: "fake-key" });
-    expect(() => buildModelConnectPlaintext({ ...input, baseUrl }, legacy)).toThrow(/HTTPS/);
   });
 });

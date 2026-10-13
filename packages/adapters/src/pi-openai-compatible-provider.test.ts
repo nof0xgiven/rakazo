@@ -14,6 +14,7 @@ import { parseModelSecret, secretValuesToRedact, serializeModelSecret } from "./
 import {
   createOpenAiCompatibleFetch,
   createOpenAiCompatibleLookup,
+  listOpenAiCompatibleModels,
   OPENAI_COMPATIBLE_CATALOG_MODEL_ID,
   openAiCompatibleCatalogProvider,
   prepareOpenAiCompatibleConnect,
@@ -99,19 +100,6 @@ describe("model connect", () => {
       }).success,
     ).toBe(false);
   });
-  it("serializes keyless openai-compatible credentials", () => {
-    const plaintext = buildModelConnectPlaintext({
-      provider: OPENAI_COMPATIBLE_PROVIDER_ID,
-      baseUrl: "http://127.0.0.1:8000",
-      modelId: "qwen3-4b",
-    });
-    const parsed = parseModelSecret(plaintext);
-    expect(parsed).toEqual({
-      kind: "openai_compatible",
-      baseUrl: "http://127.0.0.1:8000/v1",
-    });
-    expect(secretValuesToRedact(parsed)).toEqual([]);
-  });
 
   it("still requires hosted providers to supply a real API key", () => {
     expect(() => buildModelConnectPlaintext({ provider: "openrouter", apiKey: "short" })).toThrow(
@@ -122,26 +110,30 @@ describe("model connect", () => {
   it("round-trips optional openai-compatible API keys", () => {
     const secret = {
       kind: "openai_compatible" as const,
+      format: "canonical" as const,
       baseUrl: "http://127.0.0.1:8000/v1",
       apiKey: "local-secret",
+      models: [],
     };
     const parsed = parseModelSecret(serializeModelSecret(secret));
     expect(parsed).toEqual(secret);
     expect(secretValuesToRedact(parsed)).toEqual(["local-secret"]);
   });
 
-  it("keeps private http openai-compatible connects when an API key is set", () => {
-    const plaintext = buildModelConnectPlaintext({
-      provider: OPENAI_COMPATIBLE_PROVIDER_ID,
-      baseUrl: "http://127.0.0.1:8000",
-      modelId: "local-model",
-      apiKey: "local-secret",
-    });
-    expect(parseModelSecret(plaintext)).toEqual({
-      kind: "openai_compatible",
+  it("prepares only the endpoint and an optional key", () => {
+    expect(prepareOpenAiCompatibleConnect({ baseUrl: "http://127.0.0.1:8000" })).toEqual({
       baseUrl: "http://127.0.0.1:8000/v1",
-      apiKey: "local-secret",
     });
+    expect(
+      prepareOpenAiCompatibleConnect({
+        baseUrl: "http://127.0.0.1:8000",
+        apiKey: " local-secret ",
+      }),
+    ).toEqual({ baseUrl: "http://127.0.0.1:8000/v1", apiKey: "local-secret" });
+    expect(
+      prepareOpenAiCompatibleConnect({ baseUrl: "http://127.0.0.1:8000", apiKey: "  " }),
+    ).toEqual({ baseUrl: "http://127.0.0.1:8000/v1" });
+    expect(() => prepareOpenAiCompatibleConnect({ baseUrl: " " })).toThrow(/Base URL is required/);
   });
 
   it("rejects public http openai-compatible connects when an API key is set", () => {
@@ -150,17 +142,7 @@ describe("model connect", () => {
     try {
       expect(() =>
         prepareOpenAiCompatibleConnect({
-          provider: OPENAI_COMPATIBLE_PROVIDER_ID,
           baseUrl: "http://api.example.com/v1",
-          modelId: "my-model-id",
-          apiKey: "secret-key",
-        }),
-      ).toThrow(/must use HTTPS/);
-      expect(() =>
-        buildModelConnectPlaintext({
-          provider: OPENAI_COMPATIBLE_PROVIDER_ID,
-          baseUrl: "http://api.example.com/v1",
-          modelId: "my-model-id",
           apiKey: "secret-key",
         }),
       ).toThrow(/must use HTTPS/);
@@ -175,14 +157,11 @@ describe("model connect", () => {
     process.env.RAKAZO_OPENAI_COMPAT_ALLOW_PUBLIC = "1";
     try {
       const prepared = prepareOpenAiCompatibleConnect({
-        provider: OPENAI_COMPATIBLE_PROVIDER_ID,
         baseUrl: "https://api.example.com/v1",
-        modelId: "my-model-id",
         apiKey: "secret-key",
       });
       expect(prepared).toEqual({
         baseUrl: "https://api.example.com/v1",
-        modelId: "my-model-id",
         apiKey: "secret-key",
       });
     } finally {
@@ -434,6 +413,77 @@ describe("openai-compatible provider", () => {
     await expect(
       probeOpenAiCompatibleModels({ baseUrl: "http://127.0.0.1:8000/v1" }, fetchImpl),
     ).resolves.toEqual(["legacy"]);
+  });
+
+  it("lists exact trimmed ids once with owned_by only when duplicates agree", async () => {
+    let requests = 0;
+    const fetchImpl = async () => {
+      requests += 1;
+      return new Response(
+        JSON.stringify({
+          data: [
+            { id: " gpt-x ", owned_by: "openai" },
+            { id: "gpt-x", owned_by: "openai" },
+            { id: "Gpt-X", owned_by: "openai" },
+            { id: "mixed", owned_by: "openai" },
+            { id: "mixed", owned_by: "anthropic" },
+            { id: "half", owned_by: "openai" },
+            { id: "half" },
+            { id: "plain", owned_by: 7 },
+            { id: "  " },
+            null,
+          ],
+        }),
+      );
+    };
+    await expect(
+      listOpenAiCompatibleModels({ baseUrl: "http://127.0.0.1:8000/v1" }, fetchImpl),
+    ).resolves.toEqual([
+      { id: "gpt-x", ownedBy: "openai" },
+      { id: "Gpt-X", ownedBy: "openai" },
+      { id: "mixed" },
+      { id: "half" },
+      { id: "plain" },
+    ]);
+    expect(requests).toBe(1);
+  });
+
+  it("bounds custom listings to 500 unique ids of at most 256 characters", async () => {
+    const respond = (ids: string[]) => async () =>
+      new Response(JSON.stringify({ data: ids.map((id) => ({ id })) }));
+    const unique = Array.from({ length: 500 }, (_, index) => `m${index}`);
+    await expect(
+      probeOpenAiCompatibleModels(
+        { baseUrl: "http://127.0.0.1:8000/v1" },
+        respond([...unique, ...unique.slice(0, 20)]),
+      ),
+    ).resolves.toHaveLength(500);
+    await expect(
+      probeOpenAiCompatibleModels(
+        { baseUrl: "http://127.0.0.1:8000/v1" },
+        respond([...unique, "m500"]),
+      ),
+    ).rejects.toThrow(/too many or overly long/);
+    await expect(
+      probeOpenAiCompatibleModels(
+        { baseUrl: "http://127.0.0.1:8000/v1" },
+        respond(["x".repeat(256)]),
+      ),
+    ).resolves.toEqual(["x".repeat(256)]);
+    await expect(
+      probeOpenAiCompatibleModels(
+        { baseUrl: "http://127.0.0.1:8000/v1" },
+        respond(["x".repeat(257)]),
+      ),
+    ).rejects.toThrow(/too many or overly long/);
+    await expect(
+      probeOpenAiCompatibleModels(
+        { baseUrl: "http://127.0.0.1:8000/v1" },
+        respond([...unique, "m500"]),
+        undefined,
+        { catalogProbe: true },
+      ),
+    ).resolves.toHaveLength(501);
   });
 
   it("rejects redirect responses during probing", async () => {

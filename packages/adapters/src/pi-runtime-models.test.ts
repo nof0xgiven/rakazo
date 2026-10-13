@@ -1,10 +1,9 @@
 import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import type { AgentRunRequest } from "@rakazo/adapter-kit";
+import type { ThinkingLevel } from "@rakazo/contracts";
 import { describe, expect, it } from "vitest";
-import { buildModelConnectPlaintext, modelCredentialDto } from "./model-connect.js";
 import { modelAcceptsImageInput } from "./model-vision.js";
 import { listPiCatalog } from "./pi-models.js";
-import { resolveModelAuth } from "./pi-oauth.js";
 import { OPENAI_COMPATIBLE_PROVIDER_ID } from "./pi-openai-compatible-provider.js";
 import { modelsForRequest, resolveRuntimeModel } from "./pi-runtime.js";
 
@@ -77,42 +76,37 @@ describe("request model catalogs", () => {
   });
 });
 
-it.each([true, false, undefined])(
-  "keeps saved capability %s consistent between metadata and runtime",
-  async (reasoning) => {
-    const plaintext = buildModelConnectPlaintext({
-      provider: OPENAI_COMPATIBLE_PROVIDER_ID,
-      modelId: "same-model",
-      baseUrl: "http://localhost:8000/v1",
-      reasoning,
-    });
-    const auth = await resolveModelAuth(plaintext, OPENAI_COMPATIBLE_PROVIDER_ID);
-    expect(auth.secret.kind).toBe("openai_compatible");
-    if (auth.secret.kind !== "openai_compatible") throw new Error("Wrong credential type");
-    const models = modelsForRequest(
+it.each<{ thinkingLevels: ThinkingLevel[] }>([
+  { thinkingLevels: ["off"] },
+  { thinkingLevels: ["low", "medium"] },
+  { thinkingLevels: ["off", "low", "high", "xhigh"] },
+  { thinkingLevels: ["off", "minimal", "low", "medium", "high", "xhigh", "max"] },
+])(
+  "runs a saved model with exactly its configured levels $thinkingLevels",
+  ({ thinkingLevels }) => {
+    const model = modelsForRequest(
       {
         model: {
           provider: OPENAI_COMPATIBLE_PROVIDER_ID,
           id: "same-model",
-          baseUrl: auth.secret.baseUrl,
-          reasoning: auth.secret.reasoning,
+          baseUrl: "http://localhost:8000/v1",
+          thinkingLevels,
+          acceptsImages: false,
+          contextWindow: 32_000,
+          maxTokens: 4_000,
         },
       },
       OPENAI_COMPATIBLE_PROVIDER_ID,
-    );
-    const model = models.getModel(OPENAI_COMPATIBLE_PROVIDER_ID, "same-model")!;
-    const credential = modelCredentialDto(
-      {
-        id: "cred",
-        provider: OPENAI_COMPATIBLE_PROVIDER_ID,
-        label: "Server",
-        isDefault: true,
-        defaultModel: "same-model",
-      },
-      plaintext,
-    );
-    expect(model.reasoning).toBe(reasoning ?? false);
-    expect(credential.thinkingLevels).toEqual(getSupportedThinkingLevels(model));
+    ).getModel(OPENAI_COMPATIBLE_PROVIDER_ID, "same-model")!;
+    expect(model.reasoning).toBe(thinkingLevels.some((level) => level !== "off"));
+    expect(getSupportedThinkingLevels(model)).toEqual(thinkingLevels);
+    expect(Object.keys(model.thinkingLevelMap ?? {})).toHaveLength(7);
+    expect(model.api).toBe("openai-completions");
+    expect(model.baseUrl).toBe("http://localhost:8000/v1");
+    expect({ contextWindow: model.contextWindow, maxTokens: model.maxTokens }).toEqual({
+      contextWindow: 32_000,
+      maxTokens: 4_000,
+    });
   },
 );
 

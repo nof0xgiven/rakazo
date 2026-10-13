@@ -116,6 +116,7 @@ import {
   retireModelCredential,
   SpaceLimitError,
   searchHistory,
+  withModelConfigurationOwnerLock,
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import { parse as parseShellCommand } from "shell-quote";
@@ -263,7 +264,7 @@ import { loadAgentMemoryContext } from "./memory-context.js";
 import type { MemoryProviderResolver } from "./memory-provider-factory.js";
 import { selectMemoryTools } from "./memory-tools.js";
 import {
-  isCatalogModelChoice,
+  loadCompatibleModelRuntime,
   pinnedModelCredentialError,
   routineRunModelPin,
   runModelChoice,
@@ -277,7 +278,6 @@ import {
   IMAGE_RETURNING_COMPUTER_TOOLS,
   MODEL_CANNOT_SEE_MESSAGE,
   modelAcceptsImageInput,
-  modelIdSupportsImages,
 } from "./model-vision.js";
 import type { CodexLiveCatalog } from "./pi-codex-catalog.js";
 import { codexLiveListsModel } from "./pi-codex-catalog.js";
@@ -2968,12 +2968,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
     if (validationError) throw new Error(validationError);
     const credential = await findModelCredential(deps.prisma, scope, provider, modelId);
     if (!credential) throw new Error("Connect that model provider first");
-    // Free-form selections must keep the preference that owns this modelId. A
-    // intervening delete/change can make findModelCredential fall back to another
-    // same-provider credential; reject that mismatch instead of mixing baseUrl.
-    if (!isCatalogModelChoice(provider, modelId) && credential.defaultModel !== modelId) {
-      throw new Error("Unknown model for that provider");
-    }
     const resolved = await resolveModelKey(
       deps,
       scope.userId,
@@ -2997,11 +2991,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
       maxTokens: resolved.maxTokens,
       acceptsImages: resolved.acceptsImages,
       maxImagesPerPrompt: resolved.maxImagesPerPrompt,
+      thinkingLevels: resolved.thinkingLevels,
       thinkingLevel:
         ((credential.defaultModel === modelId
           ? credential.thinkingLevel
           : null) as AgentRunRequest["model"]["thinkingLevel"]) ??
-        resolved.thinkingLevel ??
+        resolved.defaultThinkingLevel ??
         null,
       oauth: resolved.oauth
         ? {
@@ -3047,6 +3042,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
         settings,
         deployment: deps.deploymentModelConfigured ? resolveDeploymentModel() : null,
       });
+      if (selected.unavailable) throw new UnavailableModelForAuthError(selected.unavailable);
       const { credential, thinkingLevel } = selected;
       let { provider, id } = selected;
       if (!provider || !id) {
@@ -3077,7 +3073,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
         maxTokens: resolved.maxTokens,
         acceptsImages: resolved.acceptsImages,
         maxImagesPerPrompt: resolved.maxImagesPerPrompt,
-        thinkingLevel: thinkingLevel ?? resolved.thinkingLevel ?? null,
+        thinkingLevels: resolved.thinkingLevels,
+        thinkingLevel: thinkingLevel ?? resolved.defaultThinkingLevel ?? null,
         oauth: resolved.oauth
           ? {
               credential: resolved.oauth,
@@ -3145,10 +3142,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
         userId: routine.userId,
       });
       const routinePrompt = expandSkillReferencesInPrompt(routine.prompt, skillRecords);
-      const claimed = await deps.prisma.$transaction(async (tx) => {
+      const claim = async (tx: Prisma.TransactionClient) => {
         const updated = await tx.routine.updateMany({
           where: {
             id: routine.id,
+            userId: routine.userId,
             active: true,
             nextRunAt: scheduledAt,
             bot: { archivedAt: null },
@@ -3189,7 +3187,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
             ...routineRunModelPin(currentModel),
           },
         });
-      });
+      };
+      const claimed = await withModelConfigurationOwnerLock(deps.prisma, routine.userId, claim);
       if (!claimed) return;
       // Enqueue continuation first so a thread-signal failure cannot strand the run.
       try {
@@ -3630,9 +3629,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
         }
         const runDeployment = deps.deploymentModelConfigured ? resolveDeploymentModel() : null;
         const runtimeFallback = runtimeFallbackModel(deps.runtime);
-        const pinError = run.modelPinned
-          ? pinnedModelCredentialError(modelChoice, overrideCredential)
-          : undefined;
         const selected = selectConfiguredModel({
           override: modelChoice,
           overrideCredential,
@@ -3640,6 +3636,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
           settings,
           deployment: runDeployment,
         });
+        const pinError =
+          (run.modelPinned
+            ? pinnedModelCredentialError(modelChoice, overrideCredential)
+            : undefined) ?? selected.unavailable;
         const { credential, thinkingLevel } = selected;
         const runModelProvider = selected.provider ?? runtimeFallback?.provider;
         const runModelId = selected.id ?? runtimeFallback?.id;
@@ -4377,6 +4377,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     checker!.provider,
                     checker!.model,
                   );
+                  if (!reviewCredential && checker!.provider === OPENAI_COMPATIBLE_PROVIDER_ID) {
+                    throw new UnavailableModelForAuthError("Connect that model provider first");
+                  }
                   const judgeKey = await resolveModelKey(
                     deps,
                     run.userId,
@@ -4408,6 +4411,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
                       contextWindow: judgeKey.contextWindow,
                       maxTokens: judgeKey.maxTokens,
                       reasoning: judgeKey.reasoning,
+                      thinkingLevels: judgeKey.thinkingLevels,
+                      thinkingLevel:
+                        ((reviewCredential?.defaultModel === checker!.model
+                          ? reviewCredential.thinkingLevel
+                          : null) as AgentRunRequest["model"]["thinkingLevel"]) ??
+                        judgeKey.defaultThinkingLevel ??
+                        null,
                       oauth: judgeKey.oauth
                         ? {
                             credential: judgeKey.oauth,
@@ -6550,7 +6560,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 maxTokens: resolved.maxTokens,
                 acceptsImages: resolved.acceptsImages,
                 maxImagesPerPrompt: resolved.maxImagesPerPrompt,
-                thinkingLevel: thinkingLevel ?? resolved.thinkingLevel ?? null,
+                thinkingLevels: resolved.thinkingLevels,
+                thinkingLevel: thinkingLevel ?? resolved.defaultThinkingLevel ?? null,
                 oauth: resolved.oauth
                   ? {
                       credential: resolved.oauth,
@@ -8410,13 +8421,7 @@ async function resolveModelKey(
   deps: ExecutorDeps,
   userId: string,
   spaceId: string,
-  credential: {
-    id: string;
-    secretId: string;
-    provider: string;
-    defaultModel?: string | null;
-    supportsImages?: boolean;
-  } | null,
+  credential: { id: string; secretId: string; provider: string } | null,
   provider: string,
   modelId: string,
   registerSecrets?: (values: string[]) => void,
@@ -8430,7 +8435,8 @@ async function resolveModelKey(
   contextWindow?: number;
   reasoning?: boolean;
   maxTokens?: number;
-  thinkingLevel?: AgentRunRequest["model"]["thinkingLevel"];
+  thinkingLevels?: AgentRunRequest["model"]["thinkingLevels"];
+  defaultThinkingLevel?: AgentRunRequest["model"]["thinkingLevel"];
   acceptsImages?: boolean;
   maxImagesPerPrompt?: number;
   oauth?: AgentModelOAuthCredential;
@@ -8442,6 +8448,17 @@ async function resolveModelKey(
   ) => Promise<boolean | undefined>;
   redact: string[];
 }> {
+  if (credential?.provider === OPENAI_COMPATIBLE_PROVIDER_ID) {
+    const runtime = await loadCompatibleModelRuntime(
+      deps.prisma,
+      deps.secretStore,
+      userId,
+      credential.id,
+      modelId,
+    );
+    registerSecrets?.(runtime.redact);
+    return runtime;
+  }
   if (credential) {
     return withModelCredentialLock(credential.secretId, async () => {
       const row = await deps.prisma.secret.findFirst({
@@ -8503,39 +8520,21 @@ async function resolveModelKey(
         if (!liveListed) throw new UnavailableModelForAuthError(authError);
       }
       resolved ??= await resolveAuth();
-      const oauth = resolved.secret.kind === "oauth" ? resolved.secret.credential : undefined;
-      const baseUrl =
-        resolved.secret.kind === "openai_compatible" ? resolved.secret.baseUrl : undefined;
-      const acceptsImages =
-        credential.provider === OPENAI_COMPATIBLE_PROVIDER_ID &&
-        resolved.secret.kind === "openai_compatible" &&
-        (modelIdSupportsImages(resolved.secret.visionModelIds, modelId) ||
-          // Legacy secrets have no per-model list, so keep their existing
-          // capability scoped to the model saved in the space preference.
-          (resolved.secret.visionModelIds === undefined &&
-            credential.supportsImages === true &&
-            credential.defaultModel?.trim() === modelId.trim()));
-      const accountId = resolved.secret.kind === "api_key" ? resolved.secret.accountId : undefined;
-      const gatewayId = resolved.secret.kind === "api_key" ? resolved.secret.gatewayId : undefined;
-      cloudflareGatewayProviderEnv({ provider, accountId, gatewayId });
+      const secret = resolved.secret;
+      const oauth = secret.kind === "oauth" ? secret.credential : undefined;
+      const apiKeySecret = secret.kind === "api_key" ? secret : undefined;
+      cloudflareGatewayProviderEnv({
+        provider,
+        accountId: apiKeySecret?.accountId,
+        gatewayId: apiKeySecret?.gatewayId,
+      });
       return {
         apiKey: resolved.apiKey,
-        accountId,
-        gatewayId,
-        baseUrl,
-        cacheCapabilities:
-          resolved.secret.kind !== "oauth" ? resolved.secret.cacheCapabilities : undefined,
-        contextWindow: resolved.secret.kind !== "oauth" ? resolved.secret.contextWindow : undefined,
-        reasoning:
-          resolved.secret.kind === "openai_compatible" ? resolved.secret.reasoning : undefined,
-        maxTokens: resolved.secret.maxTokens,
-        thinkingLevel:
-          resolved.secret.kind === "openai_compatible" ? resolved.secret.thinkingLevel : undefined,
-        acceptsImages,
-        maxImagesPerPrompt:
-          resolved.secret.kind === "openai_compatible"
-            ? resolved.secret.maxImagesPerPrompt
-            : undefined,
+        accountId: apiKeySecret?.accountId,
+        gatewayId: apiKeySecret?.gatewayId,
+        cacheCapabilities: apiKeySecret?.cacheCapabilities,
+        contextWindow: apiKeySecret?.contextWindow,
+        maxTokens: secret.kind === "openai_compatible" ? undefined : secret.maxTokens,
         oauth,
         persistOAuth: oauth
           ? async (next) => {
@@ -8562,7 +8561,9 @@ async function resolveModelKey(
                   serializeModelSecret({
                     kind: "oauth",
                     credential: toOAuthCredential(next),
-                    ...(current.maxTokens !== undefined ? { maxTokens: current.maxTokens } : {}),
+                    ...(current.kind !== "openai_compatible" && current.maxTokens !== undefined
+                      ? { maxTokens: current.maxTokens }
+                      : {}),
                   }),
                 );
               });

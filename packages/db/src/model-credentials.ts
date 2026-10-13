@@ -220,6 +220,7 @@ function appendCredential<C extends OrderedCredential>(
  * Credentials to try when saving a space default, best first.
  * The preference that already owns the model is the only candidate.
  * Otherwise the space preference comes first, ahead of a newer unused account.
+ * OpenAI-compatible defaults never fall through: the chooser's credential is the only candidate.
  */
 export function defaultModelCredentialCandidates<C extends OrderedCredential>(input: {
   provider: string;
@@ -227,6 +228,11 @@ export function defaultModelCredentialCandidates<C extends OrderedCredential>(in
   preferences: Array<OrderedPreference<C>>;
   credentials: C[];
 }): C[] {
+  if (input.provider === OPENAI_COMPATIBLE_PROVIDER_ID) {
+    const choice = chooseModelCredential(input);
+    if (!choice) return [];
+    return [choice.source === "preference" ? choice.preference.credential : choice.credential];
+  }
   const requestedModelId = usableModelId(input.modelId);
   const preferences = input.preferences
     .filter((preference) => preference.credential.provider === input.provider)

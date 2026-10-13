@@ -11,15 +11,24 @@ function tx(options?: {
   sibling?: boolean;
   steering?: boolean;
   status?: "queued" | "waiting_input" | "waiting_takeover";
+  runOwner?: string;
 }) {
   let reads = 0;
+  const order: string[] = [];
   const messages: Array<Record<string, unknown>> = [];
   const events: Array<Record<string, unknown>> = [];
   const client = {
-    $queryRaw: vi.fn(async () => []),
+    $queryRaw: vi.fn(async (query: TemplateStringsArray, ..._values: unknown[]) => {
+      order.push(query.join("").includes('FROM "user"') ? "owner" : "thread");
+      return [{ id: "user-1" }];
+    }),
     run: {
       updateMany: vi.fn(async () => ({ count: options?.cancelled ?? 1 })),
-      findUnique: vi.fn(async () => {
+      findUnique: vi.fn(async (args: { select: Record<string, boolean> }) => {
+        if (args.select.userId) {
+          order.push("ownership");
+          return { userId: options?.runOwner ?? "user-1" };
+        }
         reads += 1;
         if (reads === 1) {
           return { status: options?.status ?? "queued", updatedAt, startedAt: null };
@@ -76,6 +85,7 @@ function tx(options?: {
     },
   };
   return Object.assign(client, {
+    order,
     snapshot: () => ({
       messages: messages.map((row) => ({ ...row })),
       events: events.map((row) => ({ ...row })),
@@ -89,12 +99,15 @@ describe("expireStuckRun", () => {
     const result = await expireStuckRun(client as unknown as Prisma.TransactionClient, {
       runId: "run-1",
       threadId: "thread-1",
+      ownerUserId: "user-1",
       status: "queued",
       updatedAt,
       now,
     });
 
     expect(result).toEqual({ seq: 8, continuationRunId: "run-next" });
+    expect(client.order.slice(0, 3)).toEqual(["owner", "ownership", "thread"]);
+    expect(client.$queryRaw.mock.calls[0]?.slice(1)).toEqual(["user-1"]);
     expect(client.run.updateMany).toHaveBeenCalledWith({
       where: { id: "run-1", status: "queued", updatedAt },
       data: {
@@ -150,6 +163,7 @@ describe("expireStuckRun", () => {
     const result = await expireStuckRun(client as unknown as Prisma.TransactionClient, {
       runId: "run-1",
       threadId: "thread-1",
+      ownerUserId: "user-1",
       status: "waiting_takeover",
       updatedAt,
       now,
@@ -158,11 +172,27 @@ describe("expireStuckRun", () => {
     expect(client.message.create).not.toHaveBeenCalled();
   });
 
+  it("does nothing when the run no longer belongs to the locked owner", async () => {
+    const client = tx({ runOwner: "user-2" });
+    const result = await expireStuckRun(client as unknown as Prisma.TransactionClient, {
+      runId: "run-1",
+      threadId: "thread-1",
+      ownerUserId: "user-1",
+      status: "queued",
+      updatedAt,
+      now,
+    });
+    expect(result).toBeNull();
+    expect(client.run.updateMany).not.toHaveBeenCalled();
+    expect(client.order).toEqual(["owner", "ownership"]);
+  });
+
   it("leaves the task running when a sibling attempt is still active", async () => {
     const client = tx({ sibling: true, status: "waiting_input" });
     await expireStuckRun(client as unknown as Prisma.TransactionClient, {
       runId: "run-1",
       threadId: "thread-1",
+      ownerUserId: "user-1",
       status: "waiting_input",
       updatedAt,
       now,

@@ -30,22 +30,15 @@ describe("classifyModelConnectionFailure", () => {
       "unknown",
     );
   });
-
-  it("keeps manual model entry for custom servers and catalog picks for catalog providers", () => {
-    expect(unavailableSelectedModel("gpt-missing", ["gpt-test"])?.nextAction).toMatch(
-      /enter a model id/,
-    );
-    expect(
-      unavailableSelectedModel("gpt-missing", ["gpt-test"], { manualEntry: false })?.nextAction,
-    ).toBe("Pick a model from the catalog.");
-  });
 });
 
 describe("unavailableSelectedModel", () => {
   it("fails only when a non-empty list omits the selected id", () => {
-    expect(unavailableSelectedModel("gpt-missing", ["gpt-test"])?.outcome).toBe(
-      "unavailable_model",
-    );
+    expect(unavailableSelectedModel("gpt-missing", ["gpt-test"])).toEqual({
+      outcome: "unavailable_model",
+      message: 'Model "gpt-missing" was not listed.',
+      nextAction: "Pick a model from the catalog.",
+    });
     expect(unavailableSelectedModel("gpt-test", ["gpt-test"])).toBeNull();
     expect(unavailableSelectedModel("", ["gpt-test"])).toBeNull();
     expect(unavailableSelectedModel("gpt-missing", [])).toBeNull();

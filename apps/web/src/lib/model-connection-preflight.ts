@@ -39,26 +39,9 @@ function messageFromError(error: unknown): string {
   return sanitizeModelConnectionError(String(error));
 }
 
-export function classifyModelConnectionFailure(
-  error: unknown,
-  context: { modelId?: string; discoveredModels?: string[]; manualEntry?: boolean } = {},
-): ModelPreflightFailure {
+export function classifyModelConnectionFailure(error: unknown): ModelPreflightFailure {
   const message = messageFromError(error);
   const lower = message.toLowerCase();
-
-  if (context.modelId && context.discoveredModels && context.discoveredModels.length > 0) {
-    const modelId = sanitizeModelConnectionError(context.modelId.trim());
-    if (modelId && !context.discoveredModels.includes(context.modelId.trim())) {
-      return {
-        outcome: "unavailable_model",
-        message: t`Model "${modelId}" was not listed.`,
-        nextAction:
-          context.manualEntry === false
-            ? t`Pick a model from the catalog.`
-            : t`Pick a model from the list or enter a model id served by this endpoint.`,
-      };
-    }
-  }
 
   if (lower.includes("timed out") || lower.includes("timeout")) {
     return {
@@ -112,19 +95,19 @@ export function classifyModelConnectionFailure(
   };
 }
 
-/** Failure when a non-empty model list omits the selected id. Empty lists stay reachable. */
+/** Failure when a non-empty catalog list omits the selected id. Empty lists stay reachable. */
 export function unavailableSelectedModel(
-  modelId: string | undefined,
+  selectedModelId: string | undefined,
   discoveredModels: string[],
-  options?: { manualEntry?: boolean },
 ): ModelPreflightFailure | null {
-  const trimmed = modelId?.trim() ?? "";
+  const trimmed = selectedModelId?.trim() ?? "";
   if (!trimmed || discoveredModels.length === 0 || discoveredModels.includes(trimmed)) return null;
-  return classifyModelConnectionFailure(new Error("model not listed"), {
-    modelId: trimmed,
-    discoveredModels,
-    manualEntry: options?.manualEntry,
-  });
+  const modelId = sanitizeModelConnectionError(trimmed);
+  return {
+    outcome: "unavailable_model",
+    message: t`Model "${modelId}" was not listed.`,
+    nextAction: t`Pick a model from the catalog.`,
+  };
 }
 
 type ListedModelCredential = {
@@ -265,18 +248,18 @@ export async function runModelConnectionPreflight(
       provider: input.provider,
       apiKey: trimmedKey,
     });
-    const unavailable = unavailableSelectedModel(trimmedModel, models, { manualEntry: false });
+    const unavailable = unavailableSelectedModel(trimmedModel, models);
     if (unavailable) return { ok: false, failure: unavailable };
     return { ok: true, discoveredModels: models };
   } catch (error) {
     return {
       ok: false,
-      failure: classifyModelConnectionFailure(error, { modelId: trimmedModel }),
+      failure: classifyModelConnectionFailure(error),
     };
   }
 }
 
-/** Catalog models-list result. Custom servers use `openAiCompatibleProbeSuccessMessage`. */
+/** Catalog models-list result. */
 export function modelPreflightSuccessMessage(modelCount: number): string {
   if (modelCount === 0) {
     return t`No models listed.`;

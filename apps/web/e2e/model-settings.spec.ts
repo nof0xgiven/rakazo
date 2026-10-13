@@ -6,7 +6,7 @@ import { captureScreenshot, completeOnboarding, openUserSettings, rpc, signup } 
 const LOCAL_MODEL_ID = "rakazo-e2e-local";
 const LOCAL_MODEL_REPLY = "OpenAI-compatible endpoint verified end to end.";
 
-test("custom connections persist reasoning support and bot thinking", async ({
+test("custom connections persist per-model reasoning support and bot thinking", async ({
   page,
 }, testInfo) => {
   const stamp = Date.now();
@@ -17,65 +17,62 @@ test("custom connections persist reasoning support and bot thinking", async ({
   await page.getByPlaceholder("Search providers").fill("openai-compatible");
   await page.getByRole("button", { name: /OpenAI-compatible/ }).click();
   await page.getByLabel("OpenAI-compatible server URL").fill("http://127.0.0.1:8090/v1");
+  await page.getByRole("button", { name: "Other model…" }).click();
   await page.getByLabel("Model id").fill("arbitrary-model");
-  await expect(page.getByRole("checkbox", { name: "Supports thinking" })).toBeHidden();
-  await expect(page.getByRole("checkbox", { name: "Supports images" })).toBeHidden();
-  await page.getByText("Advanced", { exact: true }).click();
-  await page.getByRole("checkbox", { name: "Supports thinking" }).check();
-  await page.getByRole("combobox", { name: "Reasoning effort", exact: true }).selectOption("low");
-  await page.getByLabel("Maximum output tokens").fill("8192");
-  await page.getByLabel("Context limit").fill("65536");
-  await page.getByRole("checkbox", { name: "Supports images" }).check();
-  await page.getByLabel("Maximum images per request").fill("1");
+  await page.getByRole("button", { name: "Add", exact: true }).click();
+  const setup = page.getByRole("group", { name: "Advanced: arbitrary-model" });
+  await expect(setup).toBeVisible();
+  await expect(page.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
+  await setup.getByRole("checkbox", { name: "Supports thinking" }).check();
+  await setup.getByRole("checkbox", { name: "Low", exact: true }).check();
+  await setup.getByRole("checkbox", { name: "High", exact: true }).check();
+  await setup.getByLabel("Default reasoning effort").selectOption("low");
+  await setup.getByLabel("Maximum output tokens").fill("8192");
+  await setup.getByLabel("Context limit").fill("65536");
+  await setup.getByRole("checkbox", { name: "Supports images" }).check();
+  await setup.getByLabel("Maximum images per request").fill("1");
   await captureScreenshot(page, testInfo, "openai-compatible-thinking-connection");
+  await setup.getByRole("button", { name: "Apply" }).click();
+  await expect(page.getByLabel("Default model")).toHaveValue("arbitrary-model");
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.getByText("Saved.", { exact: true })).toBeVisible();
-  const credentials = await rpc<
-    Array<{
-      modelId?: string;
-      reasoning?: boolean;
-      thinkingLevel?: string | null;
-      maxTokens?: number;
-      contextWindow?: number;
-      supportsImages?: boolean;
-      maxImagesPerPrompt?: number;
-    }>
-  >(page, "models/credentials", {});
-  expect(credentials.find((entry) => entry.modelId === "arbitrary-model")?.reasoning).toBe(true);
-  expect(credentials.find((entry) => entry.modelId === "arbitrary-model")?.thinkingLevel).toBe(
-    "low",
-  );
-  expect(credentials.find((entry) => entry.modelId === "arbitrary-model")?.maxTokens).toBe(8192);
-  expect(credentials.find((entry) => entry.modelId === "arbitrary-model")?.contextWindow).toBe(
-    65536,
-  );
-  expect(credentials.find((entry) => entry.modelId === "arbitrary-model")?.supportsImages).toBe(
-    true,
-  );
-  expect(credentials.find((entry) => entry.modelId === "arbitrary-model")?.maxImagesPerPrompt).toBe(
-    1,
-  );
+  type CompatibleCredential = {
+    provider: string;
+    enabledModelIds?: string[];
+    models?: Array<{ modelId: string; maxImagesPerPrompt?: number }>;
+  };
+  const credentials = await rpc<CompatibleCredential[]>(page, "models/credentials", {});
+  const connection = credentials.find((entry) => entry.provider === "openai-compatible");
+  expect(connection?.enabledModelIds).toEqual(["arbitrary-model"]);
+  expect(connection?.models).toEqual([
+    {
+      modelId: "arbitrary-model",
+      thinkingLevels: ["low", "high"],
+      defaultThinkingLevel: "low",
+      contextWindow: 65536,
+      maxTokens: 8192,
+      supportsImages: true,
+      maxImagesPerPrompt: 1,
+    },
+  ]);
   await page.reload();
   await openUserSettings(page, "models");
-  await page.getByText("Advanced", { exact: true }).click();
-  await expect(page.getByRole("checkbox", { name: "Supports thinking" })).toBeChecked();
-  await expect(page.getByRole("combobox", { name: "Reasoning effort", exact: true })).toHaveValue(
-    "low",
-  );
-  await expect(page.getByLabel("Maximum output tokens")).toHaveValue("8192");
-  await expect(page.getByLabel("Context limit")).toHaveValue("65536");
-  await expect(page.getByRole("checkbox", { name: "Supports images" })).toBeChecked();
-  await expect(page.getByLabel("Maximum images per request")).toHaveValue("1");
-  await page.getByLabel("Maximum images per request").fill("");
+  await expect(page.getByRole("checkbox", { name: "arbitrary-model" })).toBeChecked();
+  await page.getByRole("button", { name: "Advanced: arbitrary-model" }).click();
+  await expect(setup.getByRole("checkbox", { name: "Supports thinking" })).toBeChecked();
+  await expect(setup.getByLabel("Default reasoning effort")).toHaveValue("low");
+  await expect(setup.getByLabel("Maximum output tokens")).toHaveValue("8192");
+  await expect(setup.getByLabel("Context limit")).toHaveValue("65536");
+  await expect(setup.getByRole("checkbox", { name: "Supports images" })).toBeChecked();
+  await expect(setup.getByLabel("Maximum images per request")).toHaveValue("1");
+  await setup.getByLabel("Maximum images per request").fill("");
+  await setup.getByRole("button", { name: "Apply" }).click();
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.getByText("Saved.", { exact: true })).toBeVisible();
-  const clearedCredentials = await rpc<Array<{ modelId?: string; maxImagesPerPrompt?: number }>>(
-    page,
-    "models/credentials",
-    {},
-  );
+  const clearedCredentials = await rpc<CompatibleCredential[]>(page, "models/credentials", {});
   expect(
-    clearedCredentials.find((entry) => entry.modelId === "arbitrary-model")?.maxImagesPerPrompt,
+    clearedCredentials.find((entry) => entry.provider === "openai-compatible")?.models?.[0]
+      ?.maxImagesPerPrompt,
   ).toBeUndefined();
   await page.getByRole("button", { name: "Close model settings" }).click();
   await page.locator("main").getByRole("button", { name: "Chief", exact: true }).click();
@@ -93,9 +90,10 @@ test("custom connections persist reasoning support and bot thinking", async ({
   await expect(model).toContainText("arbitrary-model");
   // Value key — not a /arbitrary-model/ label match, which also hits "Space default (arbitrary-model)".
   await model.selectOption("openai-compatible::arbitrary-model");
-  const thinking = settings.getByRole("combobox", { name: "Thinking", exact: true });
+  const thinking = settings.getByRole("combobox", { name: "Reasoning effort", exact: true });
   await expect(thinking).toBeVisible();
-  await thinking.selectOption("low");
+  await expect(thinking.locator("option")).toHaveText(["Default (Low)", "Low", "High"]);
+  await thinking.selectOption("high");
   await thinking.scrollIntoViewIfNeeded();
   await captureScreenshot(page, testInfo, "openai-compatible-thinking");
   const saved = page.waitForResponse(
@@ -109,7 +107,7 @@ test("custom connections persist reasoning support and bot thinking", async ({
   await advanced.evaluate((element) => {
     (element as HTMLDetailsElement).open = true;
   });
-  await expect(thinking).toHaveValue("low");
+  await expect(thinking).toHaveValue("high");
 });
 
 test("connects, lists, and uses an OpenAI-compatible endpoint", async ({ page }, testInfo) => {
@@ -186,18 +184,15 @@ test("connects, lists, and uses an OpenAI-compatible endpoint", async ({ page },
       page.getByText("Paste the OpenAI-compatible address", { exact: false }),
     ).toBeHidden();
     await page.getByLabel("OpenAI-compatible server URL").fill(baseUrl);
-    await page.getByLabel("Model id").fill("manual-model-not-listed");
     await page.getByRole("button", { name: "Find models" }).click();
-
-    await expect(page.getByLabel("Model id")).toHaveValue("manual-model-not-listed");
-    await page.getByRole("button", { name: "Use a found model" }).click();
-    const discoveredModels = page.getByRole("combobox", { name: "Models from server" });
-    await expect(discoveredModels).toHaveValue(LOCAL_MODEL_ID);
-    await discoveredModels.selectOption("");
-    await expect(page.getByLabel("Model id")).toBeVisible();
-    await page.getByRole("button", { name: "Find models" }).click();
-    await expect(discoveredModels).toHaveValue(LOCAL_MODEL_ID);
     await expect(page.getByText("Found 1 model.")).toBeVisible();
+    const localModel = page.getByRole("checkbox", { name: LOCAL_MODEL_ID });
+    await expect(localModel).not.toBeChecked();
+    await expect(page.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
+    await localModel.check();
+    const setup = page.getByRole("group", { name: `Advanced: ${LOCAL_MODEL_ID}` });
+    await expect(page.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
+    await setup.getByRole("button", { name: "Apply" }).click();
     await expect(page.getByRole("button", { name: "Save", exact: true })).toBeEnabled();
     await captureScreenshot(page, testInfo, "openai-compatible-model-discovery");
 
@@ -212,6 +207,7 @@ test("connects, lists, and uses an OpenAI-compatible endpoint", async ({ page },
     await expect(page.getByRole("button", { name: "Find models" })).toBeDisabled();
     await expect(page.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
     await page.getByLabel("OpenAI-compatible server URL").fill(baseUrl);
+    await expect(localModel).toBeChecked();
     await expect(page.getByRole("button", { name: "Save", exact: true })).toBeEnabled();
 
     if (process.env.AGENT_RUNTIME === "pi") {

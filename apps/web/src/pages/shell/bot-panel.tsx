@@ -17,9 +17,11 @@ import {
 } from "@rakazo/contracts";
 import {
   connectedModelChoices,
+  findConnectedModelChoice,
+  modelEffortChoices,
   modelOptionKey,
   parseModelOptionKey,
-  resolveSelectableModelId,
+  spaceDefaultModelCapabilities,
 } from "@rakazo/core";
 import {
   Button,
@@ -34,7 +36,7 @@ import { X } from "lucide-react";
 import { lazy, Suspense, useEffect, useId, useRef, useState } from "react";
 import { ErrorBoundary, SectionLoadFailed } from "../../components/ErrorBoundary";
 import { botProfilePatch } from "../../lib/bot-profile-patch";
-import { thinkingLevelLabel } from "../../lib/model-catalog";
+import { thinkingLevelLabel, thinkingLevelOptions } from "../../lib/model-catalog";
 import { rpc } from "../../lib/rpc";
 import { errorText } from "../../lib/user-error";
 import { AvatarStudioPopover } from "./avatar-studio-popover";
@@ -248,7 +250,10 @@ export function BotSettings({
   const [modelKey, setModelKey] = useState(
     bot.modelProvider && bot.modelId ? modelOptionKey(bot.modelProvider, bot.modelId) : "",
   );
-  const [thinkingLevel, setThinkingLevel] = useState(bot.thinkingLevel ?? "");
+  const [thinkingLevel, setThinkingLevel] = useState<string>(bot.thinkingLevel ?? "");
+  // Last model and effort the server accepted from this panel. Unchanged values
+  // stay off the wire so an unrelated save never rewrites or revalidates them.
+  const savedModelRef = useRef({ modelKey, thinkingLevel });
   const [disabledBuiltinTools, setDisabledBuiltinTools] = useState<string[]>(
     bot.disabledBuiltinTools ?? [],
   );
@@ -269,6 +274,7 @@ export function BotSettings({
   const [catalog, setCatalog] = useState<ModelCatalogEntry[]>([]);
   const [me, setMe] = useState<Me | null>(null);
   const [modelMetaReady, setModelMetaReady] = useState(false);
+  const [modelMetaFailed, setModelMetaFailed] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const saveQueueRef = useRef(Promise.resolve());
@@ -293,44 +299,30 @@ export function BotSettings({
         setCredentials(nextCredentials);
         setCatalog(nextCatalog);
         setMe(nextMe);
-        // Only mark ready on success — a failed catalog load must not clear
-        // an existing thinkingLevel override on save.
         setModelMetaReady(true);
       })
-      .catch(() => undefined);
+      .catch(() => setModelMetaFailed(true));
   }, []);
 
   const connectedOptions = connectedModelChoices(credentials, catalog);
   const storedModel = modelKey ? parseModelOptionKey(modelKey) : null;
-  const selectedModel = storedModel
-    ? {
-        provider: storedModel.provider,
-        modelId: resolveSelectableModelId(catalog, storedModel.provider, storedModel.modelId),
-      }
-    : null;
-  const selectedModelKey = selectedModel
-    ? modelOptionKey(selectedModel.provider, selectedModel.modelId)
-    : "";
-
-  const effectiveProvider = selectedModel?.provider ?? me?.defaultProvider ?? null;
-  const effectiveModelId = selectedModel?.modelId ?? me?.defaultModel ?? null;
-  const effectiveEntry =
-    effectiveProvider && effectiveModelId
-      ? catalog.find(
-          (entry) =>
-            entry.provider === effectiveProvider &&
-            resolveSelectableModelId(catalog, entry.provider, entry.id) === effectiveModelId,
+  const selectedChoice = storedModel
+    ? findConnectedModelChoice(connectedOptions, catalog, storedModel.provider, storedModel.modelId)
+    : undefined;
+  const selectedModelKey = selectedChoice?.key ?? modelKey;
+  const effectiveCapabilities = storedModel
+    ? selectedChoice?.capabilities
+    : me?.defaultProvider && me.defaultModel
+      ? spaceDefaultModelCapabilities(
+          connectedOptions,
+          catalog,
+          me.defaultProvider,
+          me.defaultModel,
         )
       : undefined;
-  const effectiveCredential = credentials.find(
-    (entry) => entry.provider === effectiveProvider && entry.modelId === effectiveModelId,
-  );
-  const thinkingOptions = (
-    effectiveCredential?.thinkingLevels ??
-    effectiveEntry?.thinkingLevels ??
-    []
-  ).filter((level) => level !== "off");
-  const defaultThinkingLevel = effectiveCredential?.thinkingLevel ?? "medium";
+  const effortChoices = modelMetaReady
+    ? modelEffortChoices(effectiveCapabilities, (thinkingLevel || null) as ThinkingLevel | null)
+    : null;
 
   async function executeSave(patchOverrides?: {
     name?: string;
@@ -341,7 +333,10 @@ export function BotSettings({
     disabledBuiltinTools?: string[];
     baseDisabledBuiltinTools?: string[];
   }) {
-    const selected = selectedModel;
+    const sentModel = { modelKey, thinkingLevel };
+    const modelChanged = sentModel.modelKey !== savedModelRef.current.modelKey;
+    const effortChanged =
+      modelChanged || sentModel.thinkingLevel !== savedModelRef.current.thinkingLevel;
     const nextName = (patchOverrides?.name !== undefined ? patchOverrides.name : name).trim();
     const nextTitle = (patchOverrides?.title !== undefined ? patchOverrides.title : title).trim();
     const nextDescription = (
@@ -372,14 +367,14 @@ export function BotSettings({
         memoryScope,
         autoSpeak,
         voiceId: voiceId || null,
-        modelProvider: selected?.provider ?? null,
-        modelId: selected?.modelId ?? null,
-        ...(modelMetaReady
+        ...(modelChanged
           ? {
-              thinkingLevel: thinkingOptions.length
-                ? ((thinkingLevel || null) as ThinkingLevel | null)
-                : null,
+              modelProvider: storedModel?.provider ?? null,
+              modelId: selectedChoice?.modelId ?? storedModel?.modelId ?? null,
             }
+          : {}),
+        ...(effortChanged
+          ? { thinkingLevel: (sentModel.thinkingLevel || null) as ThinkingLevel | null }
           : {}),
       };
       const requestedTools = patchOverrides?.disabledBuiltinTools;
@@ -415,6 +410,7 @@ export function BotSettings({
         break;
       }
       savedDescriptionRef.current = nextDescription;
+      savedModelRef.current = sentModel;
     } catch (err) {
       setError(errorText(err, t`Could not save`));
     } finally {
@@ -573,6 +569,7 @@ export function BotSettings({
             id={`${ids}-model`}
             className="mt-2 w-full"
             value={selectedModelKey}
+            disabled={!modelMetaReady}
             onChange={(event) => {
               setModelKey(event.target.value);
               setThinkingLevel("");
@@ -584,10 +581,9 @@ export function BotSettings({
                 ? ` (${catalogLabel(catalog, me.defaultProvider, me.defaultModel) ?? me.defaultModel})`
                 : ""}
             </NativeSelectOption>
-            {selectedModelKey &&
-            !connectedOptions.some((option) => option.key === selectedModelKey) ? (
+            {selectedModelKey && !selectedChoice ? (
               <NativeSelectOption value={selectedModelKey}>
-                {selectedModel?.modelId ?? selectedModelKey}
+                {storedModel?.modelId ?? selectedModelKey}
               </NativeSelectOption>
             ) : null}
             {connectedOptions.map((option) => (
@@ -597,9 +593,14 @@ export function BotSettings({
             ))}
           </NativeSelect>
         </label>
-        {thinkingOptions.length ? (
+        {modelMetaFailed ? (
+          <p role="alert" className="mt-2 text-[13px] text-destructive">
+            {t`Could not load model settings`}
+          </p>
+        ) : null}
+        {effortChoices ? (
           <label htmlFor={`${ids}-thinking`} className={fieldLabelClass}>
-            <Trans>Thinking</Trans>
+            <Trans>Reasoning effort</Trans>
             <NativeSelect
               id={`${ids}-thinking`}
               className="mt-2 w-full"
@@ -607,11 +608,15 @@ export function BotSettings({
               onChange={(event) => setThinkingLevel(event.target.value)}
             >
               <NativeSelectOption value="">
-                {t`Default (${thinkingLevelLabel(defaultThinkingLevel)})`}
+                {t`Default (${thinkingLevelLabel(effortChoices.defaultLevel)})`}
               </NativeSelectOption>
-              {thinkingOptions.map((level) => (
-                <NativeSelectOption key={level} value={level}>
-                  {thinkingLevelLabel(level)}
+              {thinkingLevelOptions(effortChoices).map((option) => (
+                <NativeSelectOption
+                  key={option.value}
+                  value={option.value}
+                  disabled={option.disabled}
+                >
+                  {option.label}
                 </NativeSelectOption>
               ))}
             </NativeSelect>

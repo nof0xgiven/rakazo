@@ -52,50 +52,43 @@ test("onboarding uses compact model selects without misleading latest labels", a
   await page.route("**/rpc/models/probeOpenAiCompatible", async (route) => {
     await route.fulfill({
       contentType: "application/json",
-      body: JSON.stringify({ json: { models: ["probed-model"] } }),
+      body: JSON.stringify({ json: { models: [{ modelId: "probed-model", capabilities: null }] } }),
+    });
+  });
+  await page.route("**/rpc/models/describeOpenAiCompatible", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ json: { models: [] } }),
     });
   });
   await provider.click();
   await page.getByRole("option", { name: "OpenAI-compatible" }).click();
-  await page.getByLabel("OpenAI-compatible server URL").fill("http://127.0.0.1:8090/v1");
-  const manualModel = page.getByLabel("Model id");
-  await expect(manualModel).toBeVisible();
-  // Typing before the first probe must keep freeform even if the probe returns that id.
-  await manualModel.fill("probed-model");
-  const firstProbeResponse = page.waitForResponse("**/rpc/models/probeOpenAiCompatible");
+  const serverUrl = page.getByLabel("OpenAI-compatible server URL");
+  await serverUrl.fill("http://127.0.0.1:8090/v1");
+  await page.getByRole("button", { name: "Other model…" }).click();
+  await page.getByLabel("Model id").fill("manual-model");
+  await page.getByRole("button", { name: "Add", exact: true }).click();
+  const manual = page.getByRole("checkbox", { name: "manual-model" });
+  await expect(manual).toBeChecked();
+  const setup = page.getByRole("group", { name: "Advanced: manual-model" });
+  await expect(setup).toBeVisible();
+  await expect(page.getByRole("button", { name: "Continue" })).toBeDisabled();
+  await setup.getByRole("button", { name: "Apply" }).click();
+  await expect(page.getByLabel("Default model")).toHaveValue("manual-model");
+  await expect(page.getByRole("button", { name: "Continue" })).toBeEnabled();
+
+  const probeResponse = page.waitForResponse("**/rpc/models/probeOpenAiCompatible");
   await page.getByRole("button", { name: "Find models" }).click();
-  await firstProbeResponse;
-  await expect(manualModel).toBeVisible();
-  await expect(manualModel).toHaveValue("probed-model");
-  await expect(page.getByRole("combobox", { name: "Models from server" })).toHaveCount(0);
-  await page.getByRole("button", { name: "Use a found model" }).click();
-  const discovered = page.getByRole("combobox", { name: "Models from server" });
-  await expect(discovered).toBeVisible();
-  await expect(discovered).toContainText("probed-model");
-  await discovered.click();
-  await page.getByRole("option", { name: "Other model…" }).click();
-  await expect(manualModel).toBeVisible();
-  // Typing a discovered id (or its prefix) must keep the freeform field.
-  await manualModel.fill("probed-model");
-  await expect(manualModel).toBeVisible();
-  await expect(manualModel).toHaveValue("probed-model");
-  // Re-probe while the typed id matches a discovered model must stay freeform.
-  const reProbeResponse = page.waitForResponse("**/rpc/models/probeOpenAiCompatible");
-  await page.getByRole("button", { name: "Find models" }).click();
-  await reProbeResponse;
-  await expect(manualModel).toBeVisible();
-  await expect(manualModel).toHaveValue("probed-model");
-  await expect(page.getByRole("combobox", { name: "Models from server" })).toHaveCount(0);
-  // Editing the server URL must not drop Other model… mode either.
-  await page.getByLabel("OpenAI-compatible server URL").fill("http://127.0.0.1:8091/v1");
-  const editedUrlProbeResponse = page.waitForResponse("**/rpc/models/probeOpenAiCompatible");
-  await page.getByRole("button", { name: "Find models" }).click();
-  await editedUrlProbeResponse;
-  await expect(manualModel).toBeVisible();
-  await expect(manualModel).toHaveValue("probed-model");
-  await expect(page.getByRole("combobox", { name: "Models from server" })).toHaveCount(0);
-  await manualModel.fill("probed-model-custom");
-  await expect(manualModel).toHaveValue("probed-model-custom");
+  await probeResponse;
+  await expect(page.getByRole("checkbox", { name: "probed-model" })).not.toBeChecked();
+  await expect(manual).toBeChecked();
+  await page.getByLabel("Search models").fill("probed");
+  await expect(manual).toHaveCount(0);
+  await page.getByLabel("Search models").fill("");
+  await expect(manual).toBeChecked();
+
+  await serverUrl.fill("http://127.0.0.1:8091/v1");
+  await expect(manual).toHaveCount(0);
 
   await captureScreenshot(page, testInfo, "onboarding-model-labels");
 });

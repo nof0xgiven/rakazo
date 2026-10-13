@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { PrismaClient } from "./client.js";
 import { Prisma } from "./client.js";
+import { withModelConfigurationOwnerLock } from "./model-references.js";
 import { IsolationError } from "./scope.js";
 import { withTransactionRetry } from "./transaction-retry.js";
 
@@ -156,6 +157,7 @@ async function copyProviderPreferences(
             userId: input.userId,
             credentialId: preference.credentialId,
             modelId: preference.modelId,
+            thinkingLevel: preference.thinkingLevel,
             isDefault: preference.isDefault,
             createdAt: input.createdAt,
             updatedAt: input.createdAt,
@@ -199,49 +201,45 @@ export async function createSpaceForMember(
   const spaceMembershipId = randomUUID();
   const createdAt = new Date();
 
-  await withTransactionRetry(() =>
-    prisma.$transaction(
-      async (tx) => {
-        const currentMembership = await tx.spaceMember.findUnique({
-          where: {
-            spaceId_userId: {
-              spaceId: input.currentSpaceId,
-              userId: input.userId,
-            },
-          },
-          select: { organizationId: true },
-        });
-        if (!currentMembership) throw new IsolationError();
-        const count = await tx.spaceMember.count({
-          where: {
-            userId: input.userId,
-            organizationId: currentMembership.organizationId,
-          },
-        });
-        if (count >= MAX_SPACES_PER_MEMBER) throw new SpaceLimitError();
-        await createSpace(tx, {
-          spaceId,
-          spaceMembershipId,
-          organizationId: currentMembership.organizationId,
+  // The new space has no model references yet, so copying preferences cannot rebind one.
+  await withModelConfigurationOwnerLock(prisma, input.userId, async (tx) => {
+    const currentMembership = await tx.spaceMember.findUnique({
+      where: {
+        spaceId_userId: {
+          spaceId: input.currentSpaceId,
           userId: input.userId,
-          name,
-          createdAt,
-        });
-        await createSpaceDefaults(tx, {
-          spaceId,
-          userId: input.userId,
-          memoryContent: "# Space memory\n\n",
-        });
-        await copyProviderPreferences(tx, {
-          sourceSpaceId: input.currentSpaceId,
-          targetSpaceId: spaceId,
-          userId: input.userId,
-          createdAt,
-        });
+        },
       },
-      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
-    ),
-  );
+      select: { organizationId: true },
+    });
+    if (!currentMembership) throw new IsolationError();
+    const count = await tx.spaceMember.count({
+      where: {
+        userId: input.userId,
+        organizationId: currentMembership.organizationId,
+      },
+    });
+    if (count >= MAX_SPACES_PER_MEMBER) throw new SpaceLimitError();
+    await createSpace(tx, {
+      spaceId,
+      spaceMembershipId,
+      organizationId: currentMembership.organizationId,
+      userId: input.userId,
+      name,
+      createdAt,
+    });
+    await createSpaceDefaults(tx, {
+      spaceId,
+      userId: input.userId,
+      memoryContent: "# Space memory\n\n",
+    });
+    await copyProviderPreferences(tx, {
+      sourceSpaceId: input.currentSpaceId,
+      targetSpaceId: spaceId,
+      userId: input.userId,
+      createdAt,
+    });
+  });
 
   return { id: spaceId, name };
 }

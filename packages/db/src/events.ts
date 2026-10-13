@@ -27,6 +27,7 @@ import {
   createThreadMessageInTransaction,
   RunHistoryWriteError,
 } from "./messages.js";
+import { withModelConfigurationOwnerLock } from "./model-references.js";
 import { withTransactionRetry } from "./transaction-retry.js";
 
 const EVENT_BATCH_SIZE = 200;
@@ -213,12 +214,8 @@ export interface SendUserMessageInput {
   createRun?: boolean;
   /** When true, start a new run even if the bot is already busy (team-chat delivery). */
   allowParallelRun?: boolean;
-  /** Model every routine in an inbound delivery agreed on. */
-  modelPin?: {
-    modelProvider: string;
-    modelId: string;
-    thinkingLevel: string | null;
-  };
+  /** Routines this inbound delivery runs; their agreed model is read under the owner lock. */
+  routineIds?: string[];
 }
 
 export interface SendUserMessageResult {
@@ -385,114 +382,113 @@ export async function sendUserMessage(
   const existing = await replay();
   if (existing) return existing;
 
-  const commit = () =>
-    prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-      // Message first: its thread-row lock serializes the whole send against clearThread, so a
-      // concurrent clear either sees the committed run and cancels it, or strictly precedes this
-      // transaction. Created in separate transactions, the run could land inside the clear's
-      // window and later repopulate the cleared conversation, and a clear could strand the
-      // message without its event.
-      const message = await createThreadMessageInTransaction(tx, {
-        threadId: input.threadId,
-        role: "user",
-        blocks: input.blocks,
-        clientNonce: input.clientNonce,
-      });
-      const createRun = input.createRun !== false;
-      // Include the creation intro. It has no tools, so it must not absorb the message, and a
-      // second run would overlap it on a dedicated computer. Pending steering waits for the
-      // continuation that starts when the intro finishes.
-      const activeRuns =
-        createRun && !input.allowParallelRun
-          ? await tx.run.findMany({
-              where: {
-                threadId: input.threadId,
-                botId: input.botId,
-                status: {
-                  in: ["running", "queued", "leased", "waiting_input", "waiting_takeover"],
-                },
+  const routineIds = [...new Set(input.routineIds ?? [])];
+  const send = async (tx: Prisma.TransactionClient) => {
+    // Message first: its thread-row lock serializes the whole send against clearThread, so a
+    // concurrent clear either sees the committed run and cancels it, or strictly precedes this
+    // transaction. Created in separate transactions, the run could land inside the clear's
+    // window and later repopulate the cleared conversation, and a clear could strand the
+    // message without its event.
+    const message = await createThreadMessageInTransaction(tx, {
+      threadId: input.threadId,
+      role: "user",
+      blocks: input.blocks,
+      clientNonce: input.clientNonce,
+    });
+    const modelPin =
+      routineIds.length > 0 ? await routineDeliveryModelPin(tx, input, routineIds) : null;
+    const createRun = input.createRun !== false;
+    // Include the creation intro. It has no tools, so it must not absorb the message, and a
+    // second run would overlap it on a dedicated computer. Pending steering waits for the
+    // continuation that starts when the intro finishes.
+    const activeRuns =
+      createRun && !input.allowParallelRun
+        ? await tx.run.findMany({
+            where: {
+              threadId: input.threadId,
+              botId: input.botId,
+              status: {
+                in: ["running", "queued", "leased", "waiting_input", "waiting_takeover"],
               },
-              select: { id: true, taskId: true, trigger: true },
-            })
-          : [];
-      // Steer a conversational run when there is one; a routine, webhook, or intro turn only holds the queue.
-      const busy =
-        activeRuns.find((run) => isConversationalRun(run.trigger)) ?? activeRuns[0] ?? null;
-      let task = null;
-      let run = null;
-      if (createRun && !busy) {
-        task = await tx.task.create({
-          data: {
-            spaceId: input.spaceId,
-            botId: input.botId,
-            threadId: input.threadId,
-            userId: input.userId,
-            prompt: input.prompt,
-            status: "queued",
-          },
-        });
-        run = await tx.run.create({
-          data: {
-            spaceId: input.spaceId,
-            botId: input.botId,
-            threadId: input.threadId,
-            taskId: task.id,
-            userId: input.userId,
-            status: "queued",
-            trigger: input.trigger,
-            clientNonce: input.clientNonce ? `send:${message.id}` : undefined,
-            sourceMessageId: message.id,
-            ...(input.modelPin
-              ? {
-                  modelProvider: input.modelPin.modelProvider,
-                  modelId: input.modelPin.modelId,
-                  thinkingLevel: input.modelPin.thinkingLevel,
-                  modelPinned: true,
-                }
-              : {}),
-          },
-        });
-        if (input.linkMessageToRun) {
-          await tx.message.update({ where: { id: message.id }, data: { runId: run.id } });
-        }
-      } else if (createRun && busy) {
-        const held = !isConversationalRun(busy.trigger);
-        await tx.steeringMessage.create({
-          data: {
-            messageId: message.id,
-            botId: input.botId,
-            userId: input.userId,
-            // Keep messaging on the hold so the later run is mirrored back to that app.
-            runId: held ? null : busy.id,
-            ...(held && input.trigger === "messaging" ? { originTrigger: "messaging" } : {}),
-            ...(input.modelPin
-              ? {
-                  modelProvider: input.modelPin.modelProvider,
-                  modelId: input.modelPin.modelId,
-                  thinkingLevel: input.modelPin.thinkingLevel,
-                }
-              : {}),
-          },
-        });
-        await tx.message.update({ where: { id: message.id }, data: { runId: busy.id } });
-      }
-      const event = await appendEventInTransaction(tx, {
-        spaceId: input.spaceId,
-        threadId: input.threadId,
-        botId: input.botId,
-        type: "thread.message.created",
-        runId: run?.id ?? busy?.id,
-        payload: {
-          messageId: message.id,
-          role: "user",
-          blocks: input.blocks,
-          // Carries the call id on the live event so a spoken turn groups into the
-          // call card immediately, instead of after a refetch reads the nonce.
-          callId: callIdFromClientNonce(message.clientNonce),
+            },
+            select: { id: true, taskId: true, trigger: true },
+          })
+        : [];
+    // Steer a conversational run when there is one; a routine, webhook, or intro turn only holds the queue.
+    const busy =
+      activeRuns.find((run) => isConversationalRun(run.trigger)) ?? activeRuns[0] ?? null;
+    let task = null;
+    let run = null;
+    if (createRun && !busy) {
+      task = await tx.task.create({
+        data: {
+          spaceId: input.spaceId,
+          botId: input.botId,
+          threadId: input.threadId,
+          userId: input.userId,
+          prompt: input.prompt,
+          status: "queued",
         },
       });
-      return { message, task, run, busy, event };
+      run = await tx.run.create({
+        data: {
+          spaceId: input.spaceId,
+          botId: input.botId,
+          threadId: input.threadId,
+          taskId: task.id,
+          userId: input.userId,
+          status: "queued",
+          trigger: input.trigger,
+          clientNonce: input.clientNonce ? `send:${message.id}` : undefined,
+          sourceMessageId: message.id,
+          ...(modelPin ?? {}),
+        },
+      });
+      if (input.linkMessageToRun) {
+        await tx.message.update({ where: { id: message.id }, data: { runId: run.id } });
+      }
+    } else if (createRun && busy) {
+      const held = !isConversationalRun(busy.trigger);
+      await tx.steeringMessage.create({
+        data: {
+          messageId: message.id,
+          botId: input.botId,
+          userId: input.userId,
+          // Keep messaging on the hold so the later run is mirrored back to that app.
+          runId: held ? null : busy.id,
+          ...(held && input.trigger === "messaging" ? { originTrigger: "messaging" } : {}),
+          ...(modelPin
+            ? {
+                modelProvider: modelPin.modelProvider,
+                modelId: modelPin.modelId,
+                thinkingLevel: modelPin.thinkingLevel,
+              }
+            : {}),
+        },
+      });
+      await tx.message.update({ where: { id: message.id }, data: { runId: busy.id } });
+    }
+    const event = await appendEventInTransaction(tx, {
+      spaceId: input.spaceId,
+      threadId: input.threadId,
+      botId: input.botId,
+      type: "thread.message.created",
+      runId: run?.id ?? busy?.id,
+      payload: {
+        messageId: message.id,
+        role: "user",
+        blocks: input.blocks,
+        // Carries the call id on the live event so a spoken turn groups into the
+        // call card immediately, instead of after a refetch reads the nonce.
+        callId: callIdFromClientNonce(message.clientNonce),
+      },
     });
+    return { message, task, run, busy, event };
+  };
+  const commit = () =>
+    routineIds.length > 0
+      ? withModelConfigurationOwnerLock(prisma, input.userId, send)
+      : prisma.$transaction(send);
   const committed = await commit().catch(async (error) => {
     const winner = await replay();
     if (winner) return { replay: winner } as const;
@@ -1107,7 +1103,7 @@ export async function finalizeRun(
   input: FinalizeRunInput,
   realtime?: RealtimeFanout,
 ): Promise<FinalizeRunResult | false> {
-  const committed = await withTransactionRetry(() => finalizeRunOnce(prisma, input));
+  const committed = await commitRunFinalization(prisma, input);
   if (!committed) return false;
   await notifyRealtime(realtime, committed.threadId, committed.seq);
   return { continuationRunId: committed.continuationRunId };
@@ -1131,11 +1127,22 @@ export function completedRunBlocks(
   );
 }
 
-async function finalizeRunOnce(
+async function commitRunFinalization(
   prisma: PrismaClient,
   input: FinalizeRunInput,
 ): Promise<{ threadId: string; seq: number; continuationRunId: string | null } | null> {
-  return prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+  const owner = await prisma.run.findFirst({
+    where: { id: input.runId, spaceId: input.spaceId, botId: input.botId },
+    select: { userId: true },
+  });
+  if (!owner) return null;
+  // Pending steering becomes a run here, so finalization queues behind model configuration changes.
+  return withModelConfigurationOwnerLock(prisma, owner.userId, async (tx) => {
+    const owned = await tx.run.findUnique({
+      where: { id: input.runId },
+      select: { userId: true },
+    });
+    if (owned?.userId !== owner.userId) return null;
     await tx.$queryRaw`SELECT id FROM threads WHERE id = ${input.threadId} FOR UPDATE`;
     let writableRun: { startedAt: Date | null } | undefined;
     try {
@@ -1151,6 +1158,7 @@ async function finalizeRunOnce(
         spaceId: input.spaceId,
         threadId: input.threadId,
         botId: input.botId,
+        userId: owner.userId,
         taskId: input.taskId,
         status: "running",
         leaseOwner: input.leaseOwner,
@@ -1332,6 +1340,24 @@ function continuationModelPin(
     thinkingLevel: first.thinkingLevel ?? null,
     modelPinned: true,
   };
+}
+
+/** A delivery pins a model only when every routine still exists and all agree. */
+async function routineDeliveryModelPin(
+  tx: Prisma.TransactionClient,
+  input: Pick<SendUserMessageInput, "userId" | "spaceId" | "botId">,
+  routineIds: string[],
+) {
+  const routines = await tx.routine.findMany({
+    where: {
+      id: { in: routineIds },
+      userId: input.userId,
+      spaceId: input.spaceId,
+      botId: input.botId,
+    },
+    select: { modelProvider: true, modelId: true, thinkingLevel: true },
+  });
+  return routines.length === routineIds.length ? continuationModelPin(routines) : null;
 }
 
 function steeringOrigin(item: {

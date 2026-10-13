@@ -2,6 +2,7 @@ import type {
   CacheCapabilities as ConnectionCacheCapabilities,
   ConnectionCatalogItem,
   SandboxKind,
+  ThinkingLevel,
 } from "@rakazo/contracts";
 
 export interface AdapterContext {
@@ -424,7 +425,9 @@ export interface AgentRunModel {
   /** Generic connection context window, overriding catalog limits when configured. */
   contextWindow?: number;
   /** Preferred thinking effort for reasoning models; clamped to the model’s supported set. */
-  thinkingLevel?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | null;
+  thinkingLevel?: ThinkingLevel | null;
+  /** Exact supported set for an OpenAI-compatible model; every other level is unsupported. */
+  thinkingLevels?: ThinkingLevel[];
   /** In-process OAuth credential from the encrypted store for this run. */
   oauth?: {
     credential: AgentModelOAuthCredential;

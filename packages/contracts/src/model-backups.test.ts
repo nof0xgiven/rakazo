@@ -78,67 +78,61 @@ describe("connected backup model choices", () => {
       },
       {
         provider: "openai-compatible",
-        modelId: "custom-model",
-        label: "custom-model",
-        providerName: "openai-compatible",
+        modelId: "custom-from-catalog",
+        label: "Custom from catalog",
+        providerName: "OpenAI-compatible",
       },
     ]);
   });
 
-  it("keeps an unnamed compatible model and skips disconnected catalog rows", () => {
-    const mobileCatalog: ModelCatalogEntry[] = [
+  it("takes compatible models only from authorized catalog rows, once each", () => {
+    const compatibleCatalog: ModelCatalogEntry[] = [
       {
-        provider: "anthropic",
-        providerName: "Anthropic",
-        id: "sonnet",
-        label: "Sonnet",
-        billing: "",
-      },
-      {
-        provider: "anthropic",
-        providerName: "Anthropic",
-        id: "haiku",
-        label: "Haiku",
-        billing: "",
-      },
-      { provider: "other", id: "other-model", label: "Other", billing: "" },
-      {
-        provider: "anthropic",
-        id: "placeholder",
-        label: "Anthropic",
+        provider: "openai-compatible",
+        id: "custom",
+        label: "Custom",
         billing: "",
         placeholder: true,
       },
-      { provider: "openai-compatible", id: "server-model", label: "Server model", billing: "" },
+      { provider: "openai-compatible", id: "Model-A", label: "Model-A", billing: "" },
+      { provider: "openai-compatible", id: "model-a", label: "model-a", billing: "" },
+      { provider: "openai-compatible", id: "Model-A", label: "Model-A", billing: "" },
     ];
-    const mobileCredentials: ModelCredential[] = [
+    const compatibleCredentials: ModelCredential[] = [
       {
-        id: "anthropic-credential",
-        provider: "anthropic",
-        label: "Anthropic",
+        id: "first",
+        provider: "openai-compatible",
+        label: "First",
         hasKey: true,
-        isDefault: false,
+        isDefault: true,
+        modelId: "saved-only",
+        enabledModelIds: ["Model-A", "shadowed"],
       },
       {
-        id: "compatible-credential",
+        id: "second",
         provider: "openai-compatible",
-        label: "Private endpoint",
-        hasKey: true,
+        label: "Second",
+        hasKey: false,
         isDefault: false,
-        modelId: "custom-model",
+        enabledModelIds: ["other"],
       },
     ];
 
-    expect(connectedBackupOptions(mobileCatalog, mobileCredentials)).toEqual([
-      { provider: "anthropic", modelId: "sonnet", label: "Sonnet", providerName: "Anthropic" },
-      { provider: "anthropic", modelId: "haiku", label: "Haiku", providerName: "Anthropic" },
+    expect(connectedBackupOptions(compatibleCatalog, compatibleCredentials)).toEqual([
       {
         provider: "openai-compatible",
-        modelId: "custom-model",
-        label: "custom-model",
+        modelId: "Model-A",
+        label: "Model-A",
+        providerName: "openai-compatible",
+      },
+      {
+        provider: "openai-compatible",
+        modelId: "model-a",
+        label: "model-a",
         providerName: "openai-compatible",
       },
     ]);
+    expect(connectedBackupOptions(compatibleCatalog, [])).toEqual([]);
   });
 
   it("moves a backup one place without changing the source list", () => {

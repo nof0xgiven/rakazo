@@ -25,6 +25,7 @@ export type PiCatalogEntry = {
   signIn?: ModelOAuthSignInMode;
   reasoning?: boolean;
   thinkingLevels?: ThinkingLevel[];
+  defaultThinkingLevel?: ThinkingLevel | null;
   placeholder?: boolean;
   /** Provider models share one pinned HTTPS models-list base URL. */
   catalogProbe?: boolean;

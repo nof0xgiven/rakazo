@@ -1,21 +1,16 @@
-import { type Model, Type } from "@earendil-works/pi-ai";
+import { getSupportedThinkingLevels, type Model, Type } from "@earendil-works/pi-ai";
 import { builtinModels } from "@earendil-works/pi-ai/providers/all";
+import type { ThinkingLevel } from "@rakazo/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { buildModelConnectPlaintext } from "./model-connect.js";
 import { registerOpenAiCompatibleRuntime } from "./pi-openai-compatible-provider.js";
 
 const modelId = "arbitrary-model";
 const baseUrl = "http://127.0.0.1:8090/v1";
+const LEGACY_LEVELS: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high"];
 
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
-});
-
-it("keeps the existing keyless connection format", () => {
-  const plaintext = buildModelConnectPlaintext({ provider: "openai-compatible", baseUrl, modelId });
-  expect(plaintext).toContain(baseUrl);
-  expect(plaintext).not.toContain("apiKey");
 });
 
 type Payload = {
@@ -63,10 +58,15 @@ function fixtureResponse(): Response {
 describe("OpenAI-compatible standard thinking transport", () => {
   const provider = "openai-compatible";
   async function capture(
-    reasoning?: "minimal" | "low" | "medium" | "high",
-    supportsThinking = true,
-    maxTokens?: number,
+    reasoning: ThinkingLevel | undefined,
+    runtime: {
+      id?: string;
+      thinkingLevels?: ThinkingLevel[];
+      reasoning?: boolean;
+      maxTokens?: number;
+    } = { thinkingLevels: LEGACY_LEVELS },
   ) {
+    const id = runtime.id ?? modelId;
     let payload: Payload | undefined;
     const mockFetch = vi.fn<typeof fetch>(async (input, init) => {
       expect(String(input)).toBe(`${baseUrl}/chat/completions`);
@@ -75,12 +75,13 @@ describe("OpenAI-compatible standard thinking transport", () => {
     });
     vi.stubGlobal("fetch", mockFetch);
     const models = registerOpenAiCompatibleRuntime(builtinModels(), {
-      modelId,
+      modelId: id,
       baseUrl,
-      reasoning: supportsThinking,
-      maxTokens,
+      thinkingLevels: runtime.thinkingLevels,
+      reasoning: runtime.reasoning,
+      maxTokens: runtime.maxTokens,
     });
-    const model = models.getModel(provider, modelId) as Model<"openai-completions">;
+    const model = models.getModel(provider, id) as Model<"openai-completions">;
     const stream = models.streamSimple(
       model,
       {
@@ -94,14 +95,14 @@ describe("OpenAI-compatible standard thinking transport", () => {
           },
         ],
       },
-      { reasoning, fetch: mockFetch },
+      { reasoning: reasoning === "off" ? undefined : reasoning, fetch: mockFetch },
     );
     const events = [];
     for await (const event of stream) events.push(event.type);
     const result = await stream.result();
     expect(mockFetch).toHaveBeenCalledOnce();
     expect(result.stopReason).toBe("toolUse");
-    return { payload: payload!, result, events };
+    return { payload: payload!, result, events, model };
   }
 
   it.each(["minimal", "low", "medium", "high"] as const)(
@@ -113,22 +114,61 @@ describe("OpenAI-compatible standard thinking transport", () => {
     },
   );
 
+  it("builds a complete seven-level map from the model's own levels", async () => {
+    const { model } = await capture("high", { thinkingLevels: ["off", "low", "high", "xhigh"] });
+    expect(model.thinkingLevelMap).toEqual({
+      off: "none",
+      minimal: null,
+      low: "low",
+      medium: null,
+      high: "high",
+      xhigh: "xhigh",
+      max: null,
+    });
+    expect(getSupportedThinkingLevels(model)).toEqual(["off", "low", "high", "xhigh"]);
+  });
+
+  it.each(["xhigh", "max"] as const)("preserves supported %s on the wire", async (level) => {
+    const { payload } = await capture(level, { thinkingLevels: ["low", "high", level] });
+    expect(payload.reasoning_effort).toBe(level);
+  });
+
+  it("clamps a legacy raw xhigh to high on an off-through-high model", async () => {
+    const { payload } = await capture("xhigh");
+    expect(payload.reasoning_effort).toBe("high");
+  });
+
+  it("runs distinct models on one endpoint with their own levels", async () => {
+    const a = await capture("xhigh", { id: "model-a", thinkingLevels: ["off", "low", "xhigh"] });
+    const b = await capture("xhigh", { id: "model-b", thinkingLevels: ["low", "medium"] });
+    expect(a.payload).toMatchObject({ model: "model-a", reasoning_effort: "xhigh" });
+    expect(b.payload).toMatchObject({ model: "model-b", reasoning_effort: "medium" });
+  });
+
   it("sends the configured maximum output-token limit", async () => {
-    const { payload } = await capture("medium", true, 8192);
+    const { payload } = await capture("medium", { thinkingLevels: LEGACY_LEVELS, maxTokens: 8192 });
     expect(payload.max_tokens ?? payload.max_completion_tokens).toBe(8192);
   });
 
-  it("sends none when thinking is off", async () => {
-    const { payload } = await capture();
+  it("sends none when thinking is explicitly off", async () => {
+    const { payload } = await capture("off");
     expect(payload.reasoning_effort).toBe("none");
     expect(payload.chat_template_kwargs).toBeUndefined();
   });
 
-  it("does not send reasoning fields on a connection without support, even for the same model ID", async () => {
+  it("does not send reasoning fields for a nonreasoning model, even for the same model ID", async () => {
     await capture("high");
-    const { payload } = await capture("high", false);
+    const { payload } = await capture("high", { thinkingLevels: ["off"] });
     expect(payload.reasoning_effort).toBeUndefined();
     expect(payload.chat_template_kwargs).toBeUndefined();
+  });
+
+  it("derives the old endpoint-wide levels only for a request without saved levels", async () => {
+    const reasoning = await capture("xhigh", { reasoning: true });
+    expect(getSupportedThinkingLevels(reasoning.model)).toEqual(LEGACY_LEVELS);
+    expect(reasoning.payload.reasoning_effort).toBe("high");
+    const plain = await capture("high", {});
+    expect(plain.payload.reasoning_effort).toBeUndefined();
   });
 
   it("streams system-role requests, reasoning, text and fragmented tool arguments", async () => {

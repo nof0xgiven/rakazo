@@ -47,6 +47,27 @@ name: Settings
     visible: "Active model"
     timeout: 15000
 - takeScreenshot: 06-models
+- tapOn: ".*OpenAI-compatible.*"
+- scrollUntilVisible:
+    element: "Enable fixture-writer"
+    direction: DOWN
+    timeout: 10000
+- assertVisible:
+    text: "Enable fixture-reasoner"
+    checked: true
+- takeScreenshot: 06a-models-enabled
+- tapOn: "Enable fixture-writer"
+- assertVisible:
+    text: "Enable fixture-writer"
+    checked: false
+- takeScreenshot: 06b-models-unchecked
+- tapOn: "Enable fixture-writer"
+- tapOn: "Advanced settings for fixture-reasoner"
+- scrollUntilVisible:
+    element: "Supported levels"
+    direction: DOWN
+    timeout: 10000
+- takeScreenshot: 06c-models-advanced
 - openLink: "rakazo:///integrations"
 - extendedWaitUntil:
     visible: "Search apps"
@@ -78,7 +99,19 @@ name: Settings
     visible: "Advanced"
     timeout: 15000
 - tapOn: "Advanced"
+- tapOn: "Model"
+- tapOn: ".*fixture-reasoner.*"
+- extendedWaitUntil:
+    visible: "Reasoning effort"
+    timeout: 10000
+- tapOn: "Reasoning effort"
+- tapOn: "High"
+- assertVisible: ".*High.*"
 - takeScreenshot: 12-bot-settings
+- tapOn: "Model"
+- tapOn: ".*fixture-writer.*"
+- assertNotVisible: "Reasoning effort"
+- takeScreenshot: 12a-bot-settings-nonreasoning
 - openLink: "rakazo:///group-settings?groupId=${RAKAZO_SCREENSHOT_GROUP_ID}"
 - extendedWaitUntil:
     visible: ".*Delete group.*"

@@ -1,17 +1,9 @@
-import type { ModelCatalogEntry } from "@rakazo/contracts";
+import type { ModelCatalogEntry, ThinkingLevel } from "@rakazo/contracts";
+import { OPENAI_COMPATIBLE_PROVIDER_ID, ThinkingLevelSchema } from "@rakazo/contracts";
+import type { ModelEffortCapabilities } from "./model-effort.js";
 import { matchesSearchQuery } from "./search.js";
 
-/** Effort choices an OpenAI-compatible endpoint stores when reasoning is enabled. */
-export const COMPATIBLE_THINKING_LEVELS = [
-  "minimal",
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-  "max",
-] as const;
-
-const THINKING_LEVELS = ["off", ...COMPATIBLE_THINKING_LEVELS] as const;
+const THINKING_LEVELS = ThinkingLevelSchema.options;
 
 /**
  * Map a staged effort onto the levels a model actually supports.
@@ -127,6 +119,8 @@ export type ConnectedModelChoice = {
   provider: string;
   modelId: string;
   label: string;
+  /** This model's own effort support; undefined when the catalog does not describe it. */
+  capabilities?: ModelEffortCapabilities;
 };
 
 type CatalogModelRef = {
@@ -135,12 +129,15 @@ type CatalogModelRef = {
   label: string;
   providerName?: string;
   placeholder?: boolean;
+  thinkingLevels?: readonly ThinkingLevel[];
+  defaultThinkingLevel?: ThinkingLevel | null;
 };
 
 type CredentialModelRef = {
   provider: string;
   label: string;
   modelId?: string | null;
+  thinkingLevel?: ThinkingLevel | null;
 };
 
 function modelToken(value: string): string {
@@ -172,6 +169,7 @@ export function parseModelOptionKey(key: string): { provider: string; modelId: s
  * Model id safe to submit. Catalog ids pass through. A display label such as
  * "DeepSeek-V4.1-Flash" resolves to the API id the catalog actually calls.
  * An id the catalog does not know stays unchanged so a custom model still works.
+ * OpenAI-compatible ids are opaque: they are only trimmed, never normalized.
  */
 export function resolveSelectableModelId(
   catalog: readonly CatalogModelRef[],
@@ -180,6 +178,7 @@ export function resolveSelectableModelId(
 ): string {
   const trimmed = modelId.trim();
   if (!trimmed) return "";
+  if (provider === OPENAI_COMPATIBLE_PROVIDER_ID) return trimmed;
   const canonical = canonicalApiModelId(provider, trimmed);
   if (canonical) return canonical;
   const entries = catalog.filter((entry) => entry.provider === provider && !entry.placeholder);
@@ -194,11 +193,80 @@ export function resolveSelectableModelId(
   return trimmed;
 }
 
+function catalogCapabilities(
+  entry: CatalogModelRef,
+  hostedPreference: ThinkingLevel | null | undefined,
+): ModelEffortCapabilities | undefined {
+  if (!entry.thinkingLevels) return undefined;
+  return {
+    thinkingLevels: entry.thinkingLevels,
+    defaultThinkingLevel:
+      entry.defaultThinkingLevel !== undefined
+        ? entry.defaultThinkingLevel
+        : (hostedPreference ?? null),
+  };
+}
+
 /**
- * Models a connected provider can run. Catalog entries submit their API ids.
- * A saved display label expands to those ids instead of becoming the only choice.
- * A custom id that is not a catalog label stays a single free-form option.
+ * Compatible models come only from the actor-scoped catalog rows the runtime
+ * authorizes; a compatible credential only proves the provider is connected.
  */
+function compatibleChoices(catalog: readonly CatalogModelRef[]): ConnectedModelChoice[] {
+  return catalog
+    .filter((entry) => entry.provider === OPENAI_COMPATIBLE_PROVIDER_ID && !entry.placeholder)
+    .map((entry) => ({
+      key: modelOptionKey(entry.provider, entry.id),
+      provider: entry.provider,
+      modelId: entry.id,
+      label: `${entry.providerName ?? entry.provider} · ${entry.label}`,
+      capabilities: catalogCapabilities(entry, undefined),
+    }));
+}
+
+/**
+ * Hosted catalog entries submit their API ids. A saved display label expands to
+ * those ids instead of becoming the only choice; a custom id that is not a
+ * catalog label stays a single free-form option.
+ */
+function hostedChoices(
+  credential: CredentialModelRef,
+  catalog: readonly CatalogModelRef[],
+): ConnectedModelChoice[] {
+  const providerModels = catalog.filter(
+    (entry) => entry.provider === credential.provider && !entry.placeholder,
+  );
+  const raw = credential.modelId?.trim() ?? "";
+  const resolved = raw ? resolveSelectableModelId(providerModels, credential.provider, raw) : "";
+  const resolvedInCatalog = providerModels.some(
+    (entry) => resolveSelectableModelId(providerModels, entry.provider, entry.id) === resolved,
+  );
+  if (raw && !resolvedInCatalog) {
+    return [
+      {
+        key: modelOptionKey(credential.provider, resolved || raw),
+        provider: credential.provider,
+        modelId: resolved || raw,
+        label: `${credential.label} · ${resolved || raw}`,
+      },
+    ];
+  }
+  return providerModels.map((entry) => {
+    const modelId = resolveSelectableModelId(providerModels, entry.provider, entry.id);
+    return {
+      key: modelOptionKey(entry.provider, modelId),
+      provider: entry.provider,
+      modelId,
+      label: `${entry.providerName ?? entry.provider} · ${entry.label}`,
+      // Hosted rows carry no actor default; the credential holds the exact-model space preference.
+      capabilities: catalogCapabilities(
+        entry,
+        resolved === modelId ? credential.thinkingLevel : undefined,
+      ),
+    };
+  });
+}
+
+/** Models the connected providers can run, deduplicated by provider and exact id. */
 export function connectedModelChoices(
   credentials: readonly CredentialModelRef[],
   catalog: readonly CatalogModelRef[],
@@ -206,33 +274,10 @@ export function connectedModelChoices(
   const choices: ConnectedModelChoice[] = [];
   const seen = new Set<string>();
   for (const credential of credentials) {
-    const providerModels = catalog.filter(
-      (entry) => entry.provider === credential.provider && !entry.placeholder,
-    );
-    const raw = credential.modelId?.trim() ?? "";
-    const resolved = raw ? resolveSelectableModelId(providerModels, credential.provider, raw) : "";
-    const resolvedInCatalog = providerModels.some(
-      (entry) => resolveSelectableModelId(providerModels, entry.provider, entry.id) === resolved,
-    );
-    const next: ConnectedModelChoice[] =
-      raw && !resolvedInCatalog
-        ? [
-            {
-              key: modelOptionKey(credential.provider, resolved || raw),
-              provider: credential.provider,
-              modelId: resolved || raw,
-              label: `${credential.label} · ${resolved || raw}`,
-            },
-          ]
-        : providerModels.map((entry) => {
-            const modelId = resolveSelectableModelId(providerModels, entry.provider, entry.id);
-            return {
-              key: modelOptionKey(entry.provider, modelId),
-              provider: entry.provider,
-              modelId,
-              label: `${entry.providerName ?? entry.provider} · ${entry.label}`,
-            };
-          });
+    const next =
+      credential.provider === OPENAI_COMPATIBLE_PROVIDER_ID
+        ? compatibleChoices(catalog)
+        : hostedChoices(credential, catalog);
     for (const choice of next) {
       if (seen.has(choice.key)) continue;
       seen.add(choice.key);
@@ -240,6 +285,41 @@ export function connectedModelChoices(
     }
   }
   return choices;
+}
+
+/** The listed choice for a saved or default model, resolving hosted display labels. */
+export function findConnectedModelChoice(
+  choices: readonly ConnectedModelChoice[],
+  catalog: readonly CatalogModelRef[],
+  provider: string,
+  modelId: string,
+): ConnectedModelChoice | undefined {
+  const key = modelOptionKey(provider, resolveSelectableModelId(catalog, provider, modelId));
+  return choices.find((choice) => choice.key === key);
+}
+
+/**
+ * Effort support of the Space default model. A hosted default may run on the
+ * deployment's own credentials, so its catalog row is used even without a user
+ * credential; compatible defaults stay limited to the actor's authorized rows.
+ */
+export function spaceDefaultModelCapabilities(
+  choices: readonly ConnectedModelChoice[],
+  catalog: readonly CatalogModelRef[],
+  provider: string,
+  modelId: string,
+): ModelEffortCapabilities | undefined {
+  const choice = findConnectedModelChoice(choices, catalog, provider, modelId);
+  if (choice) return choice.capabilities;
+  if (provider === OPENAI_COMPATIBLE_PROVIDER_ID) return undefined;
+  const resolved = resolveSelectableModelId(catalog, provider, modelId);
+  const entry = catalog.find(
+    (candidate) =>
+      candidate.provider === provider &&
+      !candidate.placeholder &&
+      resolveSelectableModelId(catalog, provider, candidate.id) === resolved,
+  );
+  return entry ? catalogCapabilities(entry, undefined) : undefined;
 }
 
 /** Match a model by name, id, or provider name; a blank query keeps every model. */
