@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
-import type { Bot, BotMemoryBank, SpaceMemoryConfig } from "@rakazo/contracts";
 import { setTimeout as sleep } from "node:timers/promises";
+import type { Bot, BotMemoryBank, SpaceMemoryConfig } from "@rakazo/contracts";
 import type { ComponentProps, ReactNode } from "react";
 import { act } from "react";
 import type { Root } from "react-dom/client";

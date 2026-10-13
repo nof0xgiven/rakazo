@@ -109,29 +109,23 @@ describe("HindsightClient transport", () => {
     ]);
   });
 
-  it.each([
-    "",
-    "   ",
-    ".",
-    "..",
-    "bank\u0000id",
-    "bank\u007fid",
-    "x".repeat(256),
-    "\ud800",
-  ])("rejects invalid bank ID %j without a request", async (bankId) => {
-    const { client, calls } = harness(() => json({}));
+  it.each(["", "   ", ".", "..", "bank\u0000id", "bank\u007fid", "x".repeat(256), "\ud800"])(
+    "rejects invalid bank ID %j without a request",
+    async (bankId) => {
+      const { client, calls } = harness(() => json({}));
 
-    expect(validateHindsightBankId(bankId)).toBeNull();
-    await expect(client.getBankProfile(bankId)).resolves.toEqual({
-      ok: false,
-      code: "invalid_request",
-    });
-    await expect(client.recall(bankId, { query: "hi" })).resolves.toEqual({
-      ok: false,
-      code: "invalid_request",
-    });
-    expect(calls).toHaveLength(0);
-  });
+      expect(validateHindsightBankId(bankId)).toBeNull();
+      await expect(client.getBankProfile(bankId)).resolves.toEqual({
+        ok: false,
+        code: "invalid_request",
+      });
+      await expect(client.recall(bankId, { query: "hi" })).resolves.toEqual({
+        ok: false,
+        code: "invalid_request",
+      });
+      expect(calls).toHaveLength(0);
+    },
+  );
 
   it("normalizes API keys and treats an unusable key as unauthorized without a request", async () => {
     expect(normalizeHindsightApiKey("  hsk_test_fixture  ")).toBe("hsk_test_fixture");
@@ -373,14 +367,17 @@ describe("HindsightClient bank listing", () => {
     ["bank with invalid ID", () => json({ banks: [{ bank_id: ".." }], total: 1 })],
     ["non-string name", () => json({ banks: [{ bank_id: "a", name: 7 }], total: 1 })],
     ["negative total", () => json({ banks: [], total: -1 })],
-  ])("rejects a malformed page (%s) instead of returning an empty list", async (_label, respond) => {
-    const { client } = harness(respond);
+  ])(
+    "rejects a malformed page (%s) instead of returning an empty list",
+    async (_label, respond) => {
+      const { client } = harness(respond);
 
-    await expect(client.listBanks({ offset: 0, limit: 50 })).resolves.toEqual({
-      ok: false,
-      code: "invalid_response",
-    });
-  });
+      await expect(client.listBanks({ offset: 0, limit: 50 })).resolves.toEqual({
+        ok: false,
+        code: "invalid_response",
+      });
+    },
+  );
 
   it("derives names from name, then display alias, then bank ID", async () => {
     const { client } = harness(() =>
@@ -745,9 +742,9 @@ describe("HindsightClient key handling", () => {
     ).resolves.toEqual(failed);
     await expect(client.recall(credentialId, { query: "tea" })).resolves.toEqual(failed);
     await expect(client.retain(credentialId, retainInput())).resolves.toEqual(failed);
-    await expect(client.operationStatus("bank-1", `op-${encodeURIComponent(KEY)}`)).resolves.toEqual(
-      failed,
-    );
+    await expect(
+      client.operationStatus("bank-1", `op-${encodeURIComponent(KEY)}`),
+    ).resolves.toEqual(failed);
     expect(calls).toHaveLength(0);
   });
 

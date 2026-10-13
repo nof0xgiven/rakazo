@@ -236,7 +236,7 @@ export interface SemanticMemoryProvider {
   save(
     request: SemanticMemorySaveRequest,
     context: AdapterContext,
-  ): Promise<SemanticMemoryResponse<void | SemanticMemorySaveReceipt>>;
+  ): Promise<SemanticMemoryResponse<SemanticMemorySaveReceipt | undefined>>;
   purgeHistory?(
     request: SemanticMemoryPurgeHistoryRequest,
     context: AdapterContext,

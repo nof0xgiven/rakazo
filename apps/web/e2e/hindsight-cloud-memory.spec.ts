@@ -400,9 +400,7 @@ test("shared banks and bound-bot deletion keep Cloud memories", async ({ page },
   await expect(deleteDialog).toHaveCount(0);
   await expect(sidebar.getByRole("button", { name: /^Scout/ })).toHaveCount(0);
   await expect
-    .poll(async () =>
-      (await rpc<Bot[]>(page, "bots/list", {})).some((bot) => bot.id === scoutId),
-    )
+    .poll(async () => (await rpc<Bot[]>(page, "bots/list", {})).some((bot) => bot.id === scoutId))
     .toBe(false);
   expect(await botMemoryBank(page, chiefId)).toMatchObject({ bankId: "shared-notes" });
 

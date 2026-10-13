@@ -3603,31 +3603,26 @@ export function createRunExecutor(deps: ExecutorDeps) {
             ? `Update from ${peerMessage.fromBotName}: ${peerMessage.text}`
             : DELEGATED_EMPTY_NOTICE
           : undefined;
-        const [
-          discovered,
-          currentTurnImages,
-          memoryContext,
-          scratchpadContext,
-          ticketContext,
-        ] = await Promise.all([
-          discoveredPromise,
-          loadCurrentTurnImages(deps, turnBlocks, context),
-          messagingChannelRun
-            ? Promise.resolve("")
-            : loadAgentMemoryContext(deps.memory, bot.id, context),
-          messagingChannelRun
-            ? Promise.resolve("")
-            : loadAgentScratchpadContext(deps, {
-                spaceId: run.spaceId,
-                botId: bot.id,
-              }),
-          messagingChannelRun || !deps.ticketBoardEnabled
-            ? Promise.resolve(undefined)
-            : loadAgentTicketContext(deps, {
-                spaceId: run.spaceId,
-                text: task.prompt,
-              }),
-        ]);
+        const [discovered, currentTurnImages, memoryContext, scratchpadContext, ticketContext] =
+          await Promise.all([
+            discoveredPromise,
+            loadCurrentTurnImages(deps, turnBlocks, context),
+            messagingChannelRun
+              ? Promise.resolve("")
+              : loadAgentMemoryContext(deps.memory, bot.id, context),
+            messagingChannelRun
+              ? Promise.resolve("")
+              : loadAgentScratchpadContext(deps, {
+                  spaceId: run.spaceId,
+                  botId: bot.id,
+                }),
+            messagingChannelRun || !deps.ticketBoardEnabled
+              ? Promise.resolve(undefined)
+              : loadAgentTicketContext(deps, {
+                  spaceId: run.spaceId,
+                  text: task.prompt,
+                }),
+          ]);
         const runDeployment = deps.deploymentModelConfigured ? resolveDeploymentModel() : null;
         const runtimeFallback = runtimeFallbackModel(deps.runtime);
         const pinError = run.modelPinned
@@ -3729,8 +3724,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
         ) {
           const query = redactSecrets(
             runMemory.capabilities.automaticRecall === true
-              ? ((await loadSourceMessageText(deps.prisma, run.sourceMessageId, thread.id, messages)) ??
-                  task.prompt)
+              ? ((await loadSourceMessageText(
+                  deps.prisma,
+                  run.sourceMessageId,
+                  thread.id,
+                  messages,
+                )) ?? task.prompt)
               : task.prompt,
             runSecrets,
           );
@@ -5742,14 +5741,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 error: MEMORY_FAILURE_MESSAGES[queued.error],
               });
             }
-            await deps.jobs
-              .enqueue(memoryRetainJob(queued.retentionId))
-              .catch(() =>
-                getLogger().error("memory retain enqueue failed", {
-                  runId,
-                  retentionId: queued.retentionId,
-                }),
-              );
+            await deps.jobs.enqueue(memoryRetainJob(queued.retentionId)).catch(() =>
+              getLogger().error("memory retain enqueue failed", {
+                runId,
+                retentionId: queued.retentionId,
+              }),
+            );
             return finish({ ok: true, value: { status: "queued" } });
           }
           if (name === "forget_memory") {

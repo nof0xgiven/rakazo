@@ -177,7 +177,10 @@ async function runWithModel(
     },
     home: { commit: vi.fn(async () => "fixture-revision") },
     memory: { read: async () => ({ documents: [] }) },
-    memoryProviders: { select: async () => ({ kind: "native" }), resolve: async () => ({ kind: "native" }) },
+    memoryProviders: {
+      select: async () => ({ kind: "native" }),
+      resolve: async () => ({ kind: "native" }),
+    },
     artifacts: { get },
     events: { append: vi.fn(async () => undefined), finalizeRun },
     jobs: { enqueue: vi.fn(async () => undefined) },

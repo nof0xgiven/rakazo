@@ -185,10 +185,14 @@ function fixture(
     },
   };
   const recall = vi.fn(
-    async (_request: SemanticMemoryRecallRequest): Promise<SemanticMemoryResponse<SemanticMemoryResult[]>> =>
+    async (
+      _request: SemanticMemoryRecallRequest,
+    ): Promise<SemanticMemoryResponse<SemanticMemoryResult[]>> =>
       options.recall ?? { ok: true, value: [] },
   );
-  const save = vi.fn(async (): Promise<SemanticMemoryResponse> => ({ ok: true, value: undefined }));
+  const save = vi.fn(
+    async (): Promise<SemanticMemoryResponse<undefined>> => ({ ok: true, value: undefined }),
+  );
   const capabilities = memoryKind === "legacy" ? LEGACY_CAPABILITIES : BANK_CAPABILITIES;
   const provider: SemanticMemoryProvider = {
     describe: () => ({
@@ -463,7 +467,9 @@ describe("executor bank memory", () => {
         memoryRetention: expect.objectContaining({
           bindingId: "binding-1",
           sourceMessageIds: ["message-0"],
-          content: expect.stringMatching(/Which code name did we pick\?[\s\S]*MARIGOLD-773 it is\./),
+          content: expect.stringMatching(
+            /Which code name did we pick\?[\s\S]*MARIGOLD-773 it is\./,
+          ),
         }),
       }),
     );

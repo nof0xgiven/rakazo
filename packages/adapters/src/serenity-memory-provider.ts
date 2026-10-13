@@ -270,7 +270,7 @@ export class SerenityMemoryProvider implements SemanticMemoryProvider {
   async save(
     request: SemanticMemorySaveRequest,
     context: AdapterContext,
-  ): Promise<SemanticMemoryResponse> {
+  ): Promise<SemanticMemoryResponse<undefined>> {
     if (request.source.kind === "history") {
       // Conversation summaries stay out of the user-owned Serenity brain.
       return { ok: true, value: undefined };

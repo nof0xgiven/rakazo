@@ -168,7 +168,8 @@ export async function confirmBankChange(page: Page) {
 export async function expectBoundBank(field: Locator, name: string, bankId?: string) {
   await expect(field.getByRole("button", { name: "Change", exact: true })).toBeEnabled();
   await expect(field.getByText(name, { exact: true })).toBeVisible();
-  if (bankId && bankId !== name) await expect(field.getByText(bankId, { exact: true })).toBeVisible();
+  if (bankId && bankId !== name)
+    await expect(field.getByText(bankId, { exact: true })).toBeVisible();
 }
 
 export async function botMemoryBank(page: Page, botId: string) {

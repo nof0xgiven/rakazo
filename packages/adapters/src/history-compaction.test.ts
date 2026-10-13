@@ -384,7 +384,7 @@ function compactionHarness(
     }),
   };
   const saveMemory = vi.fn(
-    async (): Promise<SemanticMemoryResponse> => ({ ok: true, value: undefined }),
+    async (): Promise<SemanticMemoryResponse<undefined>> => ({ ok: true, value: undefined }),
   );
   const purgeHistory = vi.fn(
     async (): Promise<SemanticMemoryResponse> => ({ ok: true, value: undefined }),

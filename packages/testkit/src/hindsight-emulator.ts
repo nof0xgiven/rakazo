@@ -1,6 +1,6 @@
 import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
-import { createServer } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 
 const CLOUD_ORIGIN = "https://api.hindsight.vectorize.io";
@@ -25,7 +25,14 @@ export const HINDSIGHT_OPERATION_STATUSES = [
 ] as const;
 export type HindsightOperationStatus = (typeof HINDSIGHT_OPERATION_STATUSES)[number];
 
-export const HINDSIGHT_ROUTES = ["list", "profile", "create", "recall", "retain", "status"] as const;
+export const HINDSIGHT_ROUTES = [
+  "list",
+  "profile",
+  "create",
+  "recall",
+  "retain",
+  "status",
+] as const;
 export type HindsightRoute = (typeof HINDSIGHT_ROUTES)[number];
 
 export interface HindsightKeyPermissions {
@@ -334,7 +341,10 @@ export async function startHindsightEmulator(
       removeBank: (bankId) => state.banks.delete(bankId),
       seedBanks: (count, prefix) => seedBanks(state, count, prefix),
       queueFailure: (route, failure) => {
-        state.failures.push({ ...parseFailure(failure, "failure"), route: parseRoute(route, "route") });
+        state.failures.push({
+          ...parseFailure(failure, "failure"),
+          route: parseRoute(route, "route"),
+        });
       },
       dropAcknowledgement: (route = "retain") => {
         state.drops.push(parseRoute(route, "route"));
@@ -378,7 +388,8 @@ export async function startHindsightEmulator(
     const permitted =
       route.name === "list"
         ? key.permissions.list
-        : (scope === "*" || scope.includes(bankId)) && (route.name !== "create" || key.permissions.create);
+        : (scope === "*" || scope.includes(bankId)) &&
+          (route.name !== "create" || key.permissions.create);
     if (!permitted) return providerError(403, "forbidden");
     if (route.name === "list") return listBanks(state, key, url);
     const body = json.ok && isRecord(json.value) ? json.value : null;
@@ -393,7 +404,8 @@ export async function startHindsightEmulator(
       if (!body || typeof body.query !== "string") return providerError(422, "invalid recall");
       return { status: 200, body: { results: recall(bank, body.query) } };
     }
-    if (route.name === "retain") return body ? retain(state, bank, body) : providerError(422, "invalid retain");
+    if (route.name === "retain")
+      return body ? retain(state, bank, body) : providerError(422, "invalid retain");
     return operationStatus(state, bank, route.operationId ?? "");
   }
 
@@ -407,7 +419,9 @@ export async function startHindsightEmulator(
     const matches = [...state.banks.values()].filter(
       (bank) =>
         (key.permissions.banks === "*" || key.permissions.banks.includes(bank.bankId)) &&
-        (!q || bank.bankId.toLowerCase().includes(q) || (bank.name ?? "").toLowerCase().includes(q)),
+        (!q ||
+          bank.bankId.toLowerCase().includes(q) ||
+          (bank.name ?? "").toLowerCase().includes(q)),
     );
     return {
       status: 200,
@@ -461,12 +475,24 @@ export async function startHindsightEmulator(
       return providerError(422, "invalid retain");
     }
     const existing = operationId ? state.operations.get(operationId) : undefined;
-    if (existing && existing.bankId !== bank.bankId) return providerError(409, "operation conflict");
+    if (existing && existing.bankId !== bank.bankId)
+      return providerError(409, "operation conflict");
     const pending: PendingItem[] = [];
     for (const item of items) {
-      if (!isRecord(item) || typeof item.content !== "string") return providerError(422, "invalid item");
-      const { document_id: documentId, context, timestamp: occurredAt, metadata, update_mode: mode } = item;
-      if (!isOptionalString(documentId) || !isOptionalString(context) || !isOptionalString(occurredAt)) {
+      if (!isRecord(item) || typeof item.content !== "string")
+        return providerError(422, "invalid item");
+      const {
+        document_id: documentId,
+        context,
+        timestamp: occurredAt,
+        metadata,
+        update_mode: mode,
+      } = item;
+      if (
+        !isOptionalString(documentId) ||
+        !isOptionalString(context) ||
+        !isOptionalString(occurredAt)
+      ) {
         return providerError(422, "invalid item");
       }
       if (metadata !== undefined && metadata !== null && !isStringRecord(metadata)) {
@@ -488,7 +514,13 @@ export async function startHindsightEmulator(
       applyItems(state, bank, pending);
       return {
         status: 200,
-        body: { success: true, bank_id: bank.bankId, items_count: pending.length, async: false, operation_id: null },
+        body: {
+          success: true,
+          bank_id: bank.bankId,
+          items_count: pending.length,
+          async: false,
+          operation_id: null,
+        },
       };
     }
     const at = timestamp();
@@ -519,7 +551,8 @@ export async function startHindsightEmulator(
 
   function operationStatus(state: FixtureState, bank: BankState, operationId: string): Reply {
     const operation = state.operations.get(operationId);
-    if (!operation || operation.bankId !== bank.bankId) return providerError(404, "operation not found");
+    if (!operation || operation.bankId !== bank.bankId)
+      return providerError(404, "operation not found");
     const next =
       operation.statuses[Math.min(operation.index, operation.statuses.length - 1)] ?? "completed";
     operation.index++;
@@ -574,7 +607,9 @@ export async function startHindsightEmulator(
       acknowledged: false,
     };
     state.requests.push(entry);
-    const reply = route ? dispatch(state, grant.key, route, json, url) : providerError(404, "not found");
+    const reply = route
+      ? dispatch(state, grant.key, route, json, url)
+      : providerError(404, "not found");
     entry.status = reply.status;
     const dropIndex = route && reply.status < 300 ? state.drops.indexOf(route.name) : -1;
     if (dropIndex >= 0) {
@@ -589,12 +624,18 @@ export async function startHindsightEmulator(
   async function handleControl(request: IncomingMessage, response: ServerResponse, url: URL) {
     const origin = request.headers.origin;
     const peer = request.socket.remoteAddress ?? "";
-    if (peer !== "::1" && !/^(::ffff:)?127\./.test(peer)) return send(response, controlError(403, "forbidden"));
+    if (peer !== "::1" && !/^(::ffff:)?127\./.test(peer))
+      return send(response, controlError(403, "forbidden"));
     if (origin !== undefined && origin !== options.allowedOrigin) {
       return send(response, controlError(403, "forbidden"));
     }
-    const cors: Record<string, string> = origin ? { "access-control-allow-origin": origin, vary: "Origin" } : {};
-    const segments = url.pathname.slice(HINDSIGHT_FIXTURE_CONTROL_PATH.length).split("/").filter(Boolean);
+    const cors: Record<string, string> = origin
+      ? { "access-control-allow-origin": origin, vary: "Origin" }
+      : {};
+    const segments = url.pathname
+      .slice(HINDSIGHT_FIXTURE_CONTROL_PATH.length)
+      .split("/")
+      .filter(Boolean);
     const fixtureId = segments[0];
     if (segments.length > 1 || (url.pathname.endsWith("/") && !fixtureId)) {
       return send(response, { ...controlError(404, "not found"), headers: cors });
@@ -618,9 +659,11 @@ export async function startHindsightEmulator(
       return send(response, { ...controlError(415, "json required"), headers: cors });
     }
     const raw = await readBody(request, MAX_CONTROL_BODY);
-    if (raw === null) return send(response, { ...controlError(413, "payload too large"), headers: cors });
+    if (raw === null)
+      return send(response, { ...controlError(413, "payload too large"), headers: cors });
     if (!fixtureId) {
-      if (method !== "POST") return send(response, { ...controlError(405, "method not allowed"), headers: cors });
+      if (method !== "POST")
+        return send(response, { ...controlError(405, "method not allowed"), headers: cors });
       const json = raw.length ? parseJson(raw) : { ok: true as const, value: {} };
       if (!json.ok) return send(response, { ...controlError(400, "invalid json"), headers: cors });
       let fixture: HindsightFixture;
@@ -640,7 +683,9 @@ export async function startHindsightEmulator(
     if (method === "GET") {
       return send(
         response,
-        state ? { status: 200, body: snapshot(state), headers: cors } : { ...controlError(404, "not found"), headers: cors },
+        state
+          ? { status: 200, body: snapshot(state), headers: cors }
+          : { ...controlError(404, "not found"), headers: cors },
       );
     }
     if (method === "DELETE") {
@@ -659,7 +704,9 @@ export async function startHindsightEmulator(
     const control =
       url.pathname === HINDSIGHT_FIXTURE_CONTROL_PATH ||
       url.pathname.startsWith(`${HINDSIGHT_FIXTURE_CONTROL_PATH}/`);
-    void (control ? handleControl(request, response, url) : handleApi(request, response, url)).catch(() => {
+    void (
+      control ? handleControl(request, response, url) : handleApi(request, response, url)
+    ).catch(() => {
       if (response.headersSent) response.destroy();
       else send(response, providerError(500, "emulator failure"));
     });
@@ -687,7 +734,9 @@ export async function startHindsightEmulator(
       throw new TypeError("Hindsight emulator refused a destination outside Hindsight Cloud");
     }
     const body =
-      request.method === "GET" || request.method === "HEAD" ? undefined : await request.arrayBuffer();
+      request.method === "GET" || request.method === "HEAD"
+        ? undefined
+        : await request.arrayBuffer();
     return upstream(`${origin}${url.pathname}${url.search}`, {
       method: request.method,
       headers: request.headers,
@@ -756,14 +805,19 @@ function parseFixtureOptions(value: unknown): NormalizedFixtureOptions {
       ...parseFailure(entry, path, ["route", "status", "retryAfter"]),
       route: parseRoute((entry as Record<string, unknown>).route, `${path}.route`),
     })),
-    dropAcknowledgements: parseArray(input.dropAcknowledgements, "dropAcknowledgements", parseRoute),
+    dropAcknowledgements: parseArray(
+      input.dropAcknowledgements,
+      "dropAcknowledgements",
+      parseRoute,
+    ),
   };
 }
 
 function parseKeyOptions(value: unknown, path: string): HindsightKeyOptions {
   const input = parseRecord(value, path, ["label", "list", "create", "banks"]);
   const { label, list, create, banks } = input;
-  if (label !== undefined && (typeof label !== "string" || !label || label.length > 64)) invalid(`${path}.label`);
+  if (label !== undefined && (typeof label !== "string" || !label || label.length > 64))
+    invalid(`${path}.label`);
   if (list !== undefined && typeof list !== "boolean") invalid(`${path}.list`);
   if (create !== undefined && typeof create !== "boolean") invalid(`${path}.create`);
   if (banks !== undefined && banks !== "*" && !(Array.isArray(banks) && banks.every(isBankId))) {
@@ -788,7 +842,13 @@ function parseBankSeed(value: unknown, path: string): HindsightBankSeed {
     name: name ?? null,
     displayAlias: displayAlias ?? null,
     documents: parseArray(input.documents, `${path}.documents`, (entry, entryPath) => {
-      const document = parseRecord(entry, entryPath, ["documentId", "content", "context", "metadata", "timestamp"]);
+      const document = parseRecord(entry, entryPath, [
+        "documentId",
+        "content",
+        "context",
+        "metadata",
+        "timestamp",
+      ]);
       const { documentId, content, context, metadata, timestamp } = document;
       if (documentId !== undefined && !isBankId(documentId)) invalid(`${entryPath}.documentId`);
       if (typeof content !== "string") invalid(`${entryPath}.content`);
@@ -806,7 +866,11 @@ function parseBankSeed(value: unknown, path: string): HindsightBankSeed {
   };
 }
 
-function parseFailure(value: unknown, path: string, keys = ["status", "retryAfter"]): HindsightFailure {
+function parseFailure(
+  value: unknown,
+  path: string,
+  keys = ["status", "retryAfter"],
+): HindsightFailure {
   const { status, retryAfter } = parseRecord(value, path, keys);
   if (typeof status !== "number" || !Number.isInteger(status) || status < 400 || status > 599) {
     invalid(`${path}.status`);
@@ -830,7 +894,9 @@ function parseStatuses(value: unknown, path: string): HindsightOperationStatus[]
   if (
     !Array.isArray(value) ||
     value.length === 0 ||
-    !value.every((status) => HINDSIGHT_OPERATION_STATUSES.includes(status as HindsightOperationStatus))
+    !value.every((status) =>
+      HINDSIGHT_OPERATION_STATUSES.includes(status as HindsightOperationStatus),
+    )
   ) {
     invalid(path);
   }
@@ -838,11 +904,16 @@ function parseStatuses(value: unknown, path: string): HindsightOperationStatus[]
 }
 
 function parseCount(value: unknown, path: string): number {
-  if (typeof value !== "number" || !Number.isInteger(value) || value < 0 || value > MAX_SEED_BANKS) invalid(path);
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0 || value > MAX_SEED_BANKS)
+    invalid(path);
   return value;
 }
 
-function parseArray<T>(value: unknown, path: string, parse: (entry: unknown, path: string) => T): T[] {
+function parseArray<T>(
+  value: unknown,
+  path: string,
+  parse: (entry: unknown, path: string) => T,
+): T[] {
   if (value === undefined) return [];
   if (!Array.isArray(value)) invalid(path);
   return value.map((entry, index) => parse(entry, `${path}[${index}]`));
@@ -946,14 +1017,19 @@ function matchRoute(method: string, pathname: string): MatchedRoute | null {
   }
   const [v1, scope, banks, bankId, resource, leaf] = segments;
   if (v1 !== "v1" || scope !== "default" || banks !== "banks") return null;
-  if (segments.length === 3) return method === "GET" ? { name: "list", bankId: null, operationId: null } : null;
+  if (segments.length === 3)
+    return method === "GET" ? { name: "list", bankId: null, operationId: null } : null;
   if (!bankId) return null;
-  const at = (name: HindsightRoute, expected: string, operationId: string | null = null): MatchedRoute | null =>
-    method === expected ? { name, bankId, operationId } : null;
+  const at = (
+    name: HindsightRoute,
+    expected: string,
+    operationId: string | null = null,
+  ): MatchedRoute | null => (method === expected ? { name, bankId, operationId } : null);
   if (segments.length === 4) return at("create", "PUT");
   if (segments.length === 5 && resource === "profile") return at("profile", "GET");
   if (segments.length === 5 && resource === "memories") return at("retain", "POST");
-  if (segments.length === 6 && resource === "memories" && leaf === "recall") return at("recall", "POST");
+  if (segments.length === 6 && resource === "memories" && leaf === "recall")
+    return at("recall", "POST");
   if (segments.length === 6 && resource === "operations" && leaf) return at("status", "GET", leaf);
   return null;
 }

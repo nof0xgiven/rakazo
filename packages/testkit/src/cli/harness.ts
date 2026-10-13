@@ -516,7 +516,8 @@ function waitForStopSignal(child: ChildProcess) {
     process.once("SIGINT", stop);
     process.once("SIGTERM", stop);
     child.once("exit", exited);
-    if (child.exitCode !== null || child.signalCode !== null) exited(child.exitCode, child.signalCode);
+    if (child.exitCode !== null || child.signalCode !== null)
+      exited(child.exitCode, child.signalCode);
   });
 }
 

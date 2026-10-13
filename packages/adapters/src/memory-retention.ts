@@ -209,11 +209,7 @@ export function createMemoryRetainHandler(
   ): MemoryRetentionSettlement => {
     if (code !== undefined && !TRANSIENT_CODES[code]) return finish("failed", code);
     const attemptCount = Math.min(row.attemptCount + 1, TRANSIENT_DELAYS_MS.length);
-    const delay = Math.max(
-      TRANSIENT_DELAYS_MS[attemptCount - 1] ?? 0,
-      floorMs,
-      retryAfterMs ?? 0,
-    );
+    const delay = Math.max(TRANSIENT_DELAYS_MS[attemptCount - 1] ?? 0, floorMs, retryAfterMs ?? 0);
     return {
       kind: "reschedule",
       attemptCount,

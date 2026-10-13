@@ -209,7 +209,10 @@ function fixture(runId = "run-1") {
       commit: memoryCommit,
       exportMarkdown: async function* () {},
     },
-    memoryProviders: { select: async () => ({ kind: "native" }), resolve: async () => ({ kind: "native" }) },
+    memoryProviders: {
+      select: async () => ({ kind: "native" }),
+      resolve: async () => ({ kind: "native" }),
+    },
     events: { append: vi.fn(async () => undefined), pauseRunForInput, finalizeRun },
     jobs: { enqueue: vi.fn(async () => undefined) },
     secrets: [],
