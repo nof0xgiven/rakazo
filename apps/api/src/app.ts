@@ -5,6 +5,7 @@ import type {
   AgentContextStrategy,
   AgentRuntime,
   BillingProvider,
+  IssueTrackerProvider,
   JobPublisher,
   ManagedConnectorProvider,
   MessagingSurface,
@@ -27,6 +28,8 @@ import {
   createCloudAgentConnection,
   createConnectorStack,
   createJobReconciler,
+  createLinearProvider,
+  createLinearService,
   createMessagingContextLoader,
   createMessagingTeamChatSender,
   createRunExecutor,
@@ -61,6 +64,7 @@ import {
   piSessionsRoot,
   reconcileCloudAgents,
   reconcileComputerUpdates,
+  reconcileLinearSources,
   removePiUserSessions,
   ScriptedAgentRuntime,
   SmtpEmailProvider,
@@ -103,6 +107,7 @@ import { mountBillingRoutes } from "./billing-webhook.js";
 import type { AppEnv } from "./env.js";
 import { loadEnv } from "./env.js";
 import { healthRoutes } from "./health.js";
+import { mountLinearWebhookHttpRoutes } from "./linear-webhook.js";
 import { mountLocalSettings } from "./local-settings.js";
 import {
   createMessagingInboundHandler,
@@ -168,6 +173,7 @@ export async function createApp(
     logger?: Logger;
     runtime?: AgentRuntime;
     contextStrategy?: AgentContextStrategy;
+    linearProvider?: IssueTrackerProvider;
   } = {},
 ): Promise<AppHandles> {
   const {
@@ -183,6 +189,7 @@ export async function createApp(
     logger: loggerOverride,
     runtime: runtimeOverride,
     contextStrategy,
+    linearProvider: linearProviderOverride,
     ...envOverrides
   } = overrides;
   const env = { ...loadEnv(process.env), ...envOverrides };
@@ -449,6 +456,16 @@ export async function createApp(
     CLOUD_AGENT_SPACE_ID: env.cloudAgentSpaceId,
   });
   const shutdown = new AbortController();
+  const linearProvider = linearProviderOverride ?? createLinearProvider();
+  const linearService = createLinearService({
+    prisma,
+    secrets,
+    provider: linearProvider,
+    jobs,
+    apiUrl: env.apiUrl,
+    signal: shutdown.signal,
+    events,
+  });
   // One cache serves models.list, selection validation, and run-time model
   // resolution alike, so a list call warms the run path in this process.
   const codexCatalog = new CodexCatalogCache();
@@ -513,6 +530,8 @@ export async function createApp(
     deploymentModelConfigured: env.deploymentModelConfigured,
     messaging,
     cloudAgent,
+    linearProvider,
+    linearSignal: shutdown.signal,
   });
   if (inMemoryJobs) {
     await inMemoryJobs.start(jobHandlers);
@@ -525,6 +544,14 @@ export async function createApp(
         notifications,
         reconcileCloudAgents: () => reconcileCloudAgents({ prisma, jobs, cloudAgent }),
         reconcileComputerUpdates: () => reconcileComputerUpdates({ prisma, jobs }),
+        reconcileLinearSources: () =>
+          reconcileLinearSources({
+            prisma,
+            secrets,
+            provider: linearProvider,
+            jobs,
+            signal: shutdown.signal,
+          }),
       })
     : undefined;
   reconciler?.start();
@@ -544,6 +571,7 @@ export async function createApp(
     home,
     secrets,
     oauthLogins,
+    linear: linearService,
     integrationSettings,
     mcpOAuth,
     composio: stack.composio,
@@ -671,6 +699,7 @@ export async function createApp(
     return actor;
   });
   mountWebhookHttpRoutes(app, { prisma, secrets, events, jobs });
+  mountLinearWebhookHttpRoutes(app, { prisma, secrets, jobs });
   if (billing && billingProvider) {
     mountBillingRoutes(app, {
       billing,
@@ -1002,6 +1031,7 @@ export async function createApp(
       await email?.drain?.();
       await reconciler?.stop();
       await jobs.close();
+      await linearProvider.close();
       await secrets.close();
       await realtime.close();
       await connector.stop();

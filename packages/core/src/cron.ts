@@ -32,6 +32,20 @@ export function hasMixedOneShotSchedule(crons: string[]): boolean {
   return crons.length > 1 && crons.some(isOneShotRoutineCron);
 }
 
+export function hasRoutineEventTrigger(routine: {
+  webhookEnabled: boolean;
+  githubEnabled: boolean;
+  messageProvider: string | null;
+  linearTrigger: object | null;
+}): boolean {
+  return Boolean(
+    routine.webhookEnabled ||
+      routine.githubEnabled ||
+      routine.messageProvider ||
+      routine.linearTrigger,
+  );
+}
+
 export const CRON_FREQS = [
   "Every hour",
   "Every day",

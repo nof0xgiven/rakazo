@@ -10,10 +10,16 @@ export const ACTIVE_RUN_STATUSES = [
 const TERMINAL: RunStatus[] = ["completed", "failed", "cancelled"];
 /**
  * These turns carry their own prompt and must not take a user message as steering.
- * Routine and webhook runs are not the conversation. The creation intro has no tools;
+ * Routine, webhook and Linear runs are not the conversation. The creation intro has no tools;
  * a message that lands during it waits, and the continuation after the intro finishes answers it.
  */
-const NON_CONVERSATIONAL_RUN_TRIGGERS = new Set(["routine", "webhook", "created", "tickets"]);
+const NON_CONVERSATIONAL_RUN_TRIGGERS = new Set([
+  "routine",
+  "webhook",
+  "linear",
+  "created",
+  "tickets",
+]);
 
 /**
  * Background triggers do internal work that must not leak into the chat: the
@@ -26,6 +32,10 @@ const BACKGROUND_RUN_TRIGGER_SET = new Set<string>(BACKGROUND_RUN_TRIGGERS);
 
 export function isBackgroundRunTrigger(trigger: string | null | undefined): boolean {
   return BACKGROUND_RUN_TRIGGER_SET.has(trigger ?? "");
+}
+
+export function isRoutineRunTrigger(trigger: string | null | undefined): boolean {
+  return trigger === "routine" || trigger === "linear";
 }
 
 const allowed: Record<RunStatus, RunStatus[]> = {

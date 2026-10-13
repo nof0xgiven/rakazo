@@ -129,9 +129,9 @@ class RakazoNotificationService : Service() {
                   run.status == "failed" && settings.needsAttention ->
                     immediate += run to attentionCopy(run)
                   run.status != "completed" -> Unit
-                  run.trigger == "routine" && settings.scheduledTasks ->
+                  run.trigger in ROUTINE_TRIGGERS && settings.scheduledTasks ->
                     replyLookups += run to true
-                  run.trigger != "routine" && settings.messages ->
+                  run.trigger !in ROUTINE_TRIGGERS && settings.messages ->
                     replyLookups += run to false
                 }
               }
@@ -479,6 +479,7 @@ private fun latestReply(endpoint: String, token: String, spaceId: String, run: R
   return ""
 }
 
+private val ROUTINE_TRIGGERS = setOf("routine", "linear")
 private val TABLE_ROW = Regex("\\s*\\|(.+)\\|\\s*")
 private val BREAK_LINE = Regex("\\s*[-*_]{3,}\\s*")
 private val FENCE_OPEN = Regex("^ {0,3}(`{3,}|~{3,})(.*)$")

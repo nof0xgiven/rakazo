@@ -8,6 +8,7 @@ import {
   describeCronPreset,
   formatCron,
   hasMixedOneShotSchedule,
+  hasRoutineEventTrigger,
   isOneShotRoutineCrons,
   nextCronDate,
   nextCronDateAcross,
@@ -237,6 +238,24 @@ describe("isOneShotRoutineCrons", () => {
     expect(isOneShotRoutineCrons(["0 9 * * *"])).toBe(false);
     expect(isOneShotRoutineCrons([ONCE_ROUTINE_CRON, "0 9 * * *"])).toBe(false);
     expect(isOneShotRoutineCrons([])).toBe(false);
+  });
+});
+
+describe("hasRoutineEventTrigger", () => {
+  const none = {
+    webhookEnabled: false,
+    githubEnabled: false,
+    messageProvider: null,
+    linearTrigger: null,
+  };
+
+  it("treats a Linear trigger as an independent event trigger", () => {
+    expect(hasRoutineEventTrigger(none)).toBe(false);
+    expect(hasRoutineEventTrigger({ ...none, linearTrigger: { routineId: "routine-1" } })).toBe(
+      true,
+    );
+    expect(hasRoutineEventTrigger({ ...none, webhookEnabled: true })).toBe(true);
+    expect(hasRoutineEventTrigger({ ...none, messageProvider: "telegram" })).toBe(true);
   });
 });
 

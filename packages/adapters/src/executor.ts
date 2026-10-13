@@ -49,6 +49,7 @@ import {
   HistoryReadInputSchema,
   HistorySearchInputSchema,
   isAttachmentImageMimeType,
+  LINEAR_CONNECTOR_ID,
   OPENAI_COMPATIBLE_PROVIDER_ID,
 } from "@rakazo/contracts";
 import type { ActionApprovalRule, ToolCallStreak } from "@rakazo/core";
@@ -68,12 +69,14 @@ import {
   expandSkillReferencesInPrompt,
   formatSkillRunPrompt,
   formatSkillsCatalogInstruction,
+  hasRoutineEventTrigger,
   humanizeToolName,
   inferAttachmentMimeType,
   isBackgroundRunTrigger,
   isCallClientNonce,
   isMessagingChannelRun,
   isOneShotRoutineCrons,
+  isRoutineRunTrigger,
   isTerminal,
   messagingChannelId,
   messagingChannelPrivacyBlock,
@@ -117,6 +120,7 @@ import {
   SpaceLimitError,
   searchHistory,
   withModelConfigurationOwnerLock,
+  withTransactionRetry,
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import { parse as parseShellCommand } from "shell-quote";
@@ -255,6 +259,7 @@ import {
   CATALOG_EXECUTE,
   uniquifyInstalledToolName,
 } from "./lazy-tool-catalog.js";
+import { authorizeLinearRun, LINEAR_RUN_UNAUTHORIZED } from "./linear-run-authorization.js";
 import {
   buildMcpCredentialBlob,
   needsOAuthProbe,
@@ -2947,6 +2952,31 @@ export function isTerminalModelSetupError(error: unknown): boolean {
   );
 }
 
+export async function findRoutineTargetThreadId(
+  db: Pick<Prisma.TransactionClient, "thread">,
+  routine: { threadId: string | null; spaceId: string },
+  botId: string,
+): Promise<string | null> {
+  if (!routine.threadId) return null;
+  const thread = await db.thread.findFirst({
+    where: {
+      id: routine.threadId,
+      spaceId: routine.spaceId,
+      OR: [
+        { botId },
+        {
+          group: {
+            archivedAt: null,
+            members: { some: { botId } },
+          },
+        },
+      ],
+    },
+    select: { id: true },
+  });
+  return thread?.id ?? null;
+}
+
 export function createRunExecutor(deps: ExecutorDeps) {
   const contextStrategy = deps.contextStrategy ?? DEFAULT_CONTEXT_STRATEGY;
   const web = deps.web ?? createWebProvider();
@@ -3106,25 +3136,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
         return;
       }
       if (!bot?.thread) return;
-      const targetThread = routine.threadId
-        ? await deps.prisma.thread.findFirst({
-            where: {
-              id: routine.threadId,
-              spaceId: routine.spaceId,
-              OR: [
-                { botId: bot.id },
-                {
-                  group: {
-                    archivedAt: null,
-                    members: { some: { botId: bot.id } },
-                  },
-                },
-              ],
-            },
-            select: { id: true },
-          })
-        : null;
-      const thread = targetThread ?? bot.thread;
+      const targetThreadId = await findRoutineTargetThreadId(deps.prisma, routine, bot.id);
+      const thread = targetThreadId ? { id: targetThreadId } : bot.thread;
       // A schedule with no valid parseable cron among its crons (e.g. a
       // legacy row accepted before cron validation was added) fires the
       // already-due run once, then nextRunAt stays null and the routine
@@ -3142,79 +3155,99 @@ export function createRunExecutor(deps: ExecutorDeps) {
         userId: routine.userId,
       });
       const routinePrompt = expandSkillReferencesInPrompt(routine.prompt, skillRecords);
-      const claim = async (tx: Prisma.TransactionClient) => {
-        const updated = await tx.routine.updateMany({
-          where: {
-            id: routine.id,
-            userId: routine.userId,
-            active: true,
-            nextRunAt: scheduledAt,
-            bot: { archivedAt: null },
-          },
-          data: {
-            lastRunAt: new Date(),
-            nextRunAt,
-            ...(nextRunAt ? {} : { active: false }),
-          },
-        });
-        if (updated.count !== 1) return null;
-        // The claim locks the row, so this is the model that was committed when it fired.
-        const currentModel = await tx.routine.findUnique({
-          where: { id: routine.id },
-          select: { modelProvider: true, modelId: true, thinkingLevel: true },
-        });
-        if (!currentModel) return null;
-        const task = await tx.task.create({
-          data: {
-            spaceId: routine.spaceId,
-            botId: bot.id,
-            threadId: thread.id,
-            userId: routine.userId,
-            prompt: routinePrompt,
-            status: "queued",
-          },
-        });
-        return tx.run.create({
-          data: {
-            spaceId: routine.spaceId,
-            botId: bot.id,
-            threadId: thread.id,
-            taskId: task.id,
-            userId: routine.userId,
-            status: "queued",
-            trigger: "routine",
-            routineId: routine.id,
-            ...routineRunModelPin(currentModel),
-          },
-        });
-      };
-      const claimed = await withModelConfigurationOwnerLock(deps.prisma, routine.userId, claim);
+      const claimed = await withModelConfigurationOwnerLock(
+        deps.prisma,
+        routine.userId,
+        async (tx) => {
+          await tx.$queryRaw`SELECT id FROM bots WHERE id = ${bot.id} FOR SHARE`;
+          await tx.$queryRaw`SELECT id FROM routines WHERE id = ${routine.id} FOR UPDATE`;
+          const triggers = await tx.routine.findUnique({
+            where: { id: routine.id },
+            select: {
+              webhookEnabled: true,
+              githubEnabled: true,
+              messageProvider: true,
+              linearTrigger: { select: { routineId: true } },
+            },
+          });
+          if (!triggers) return null;
+          const deactivate = !nextRunAt && !hasRoutineEventTrigger(triggers);
+          const updated = await tx.routine.updateMany({
+            where: {
+              id: routine.id,
+              userId: routine.userId,
+              active: true,
+              nextRunAt: scheduledAt,
+              bot: { archivedAt: null },
+            },
+            data: {
+              lastRunAt: new Date(),
+              nextRunAt,
+              ...(deactivate ? { active: false } : {}),
+            },
+          });
+          if (updated.count !== 1) return null;
+          // The claim locks the row, so this is the model that was committed when it fired.
+          const currentModel = await tx.routine.findUnique({
+            where: { id: routine.id },
+            select: { modelProvider: true, modelId: true, thinkingLevel: true },
+          });
+          if (!currentModel) return null;
+          const task = await tx.task.create({
+            data: {
+              spaceId: routine.spaceId,
+              botId: bot.id,
+              threadId: thread.id,
+              userId: routine.userId,
+              prompt: routinePrompt,
+              status: "queued",
+            },
+          });
+          const run = await tx.run.create({
+            data: {
+              spaceId: routine.spaceId,
+              botId: bot.id,
+              threadId: thread.id,
+              taskId: task.id,
+              userId: routine.userId,
+              status: "queued",
+              trigger: "routine",
+              routineId: routine.id,
+              ...routineRunModelPin(currentModel),
+            },
+          });
+          return { id: run.id, taskId: run.taskId, deactivated: deactivate };
+        },
+      );
       if (!claimed) return;
       // Enqueue continuation first so a thread-signal failure cannot strand the run.
       try {
         await deps.jobs.enqueue(runContinueJob(claimed.id));
       } catch (error) {
         // Restore the claim so wakeup retry / routine reconciliation can fire again.
-        await deps.prisma.$transaction(async (tx) => {
-          await tx.run.deleteMany({
-            where: { id: claimed.id, status: "queued" },
-          });
-          await tx.task.deleteMany({
-            where: { id: claimed.taskId, status: "queued" },
-          });
-          await tx.routine.updateMany({
-            where: {
-              id: routine.id,
-              nextRunAt,
-              ...(nextRunAt ? {} : { active: false }),
-            },
-            data: {
-              nextRunAt: scheduledAt,
-              active: true,
-              lastRunAt: previousLastRunAt,
-            },
-          });
-        });
+        await withTransactionRetry(() =>
+          deps.prisma.$transaction(async (tx) => {
+            await tx.$queryRaw`SELECT id FROM bots WHERE id = ${bot.id} FOR SHARE`;
+            await tx.routine.updateMany({
+              where: {
+                id: routine.id,
+                nextRunAt,
+                ...(nextRunAt ? {} : { active: !claimed.deactivated }),
+              },
+              data: {
+                nextRunAt: scheduledAt,
+                active: true,
+                lastRunAt: previousLastRunAt,
+              },
+            });
+            await tx.run.deleteMany({
+              where: { id: claimed.id, status: "queued" },
+            });
+            await tx.task.deleteMany({
+              where: { id: claimed.taskId, status: "queued" },
+            });
+          }),
+        );
         throw error;
       }
       try {
@@ -3249,7 +3282,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
 
       const fence = nextFence(run.leaseFence);
       const now = new Date();
-      const leased = await deps.prisma.run.updateMany({
+      const claim = {
         where: {
           id: runId,
           ...continueRunClaimFence(run),
@@ -3269,30 +3302,37 @@ export function createRunExecutor(deps: ExecutorDeps) {
           error: null,
           checkpoint: null,
         },
-      });
-      if (leased.count !== 1) return;
+      };
+      if (run.trigger === "linear") {
+        if ((await authorizeLinearRun(deps, { runId, workerId, fence, claim })) !== "authorized") {
+          return;
+        }
+      } else {
+        const leased = await deps.prisma.run.updateMany(claim);
+        if (leased.count !== 1) return;
 
-      const current = await deps.prisma.run.findUniqueOrThrow({
-        where: { id: runId },
-      });
-      if (
-        current.status === "queued" ||
-        current.status === "leased" ||
-        current.status === "waiting_input" ||
-        current.status === "waiting_takeover"
-      ) {
-        assertTransition(current.status as RunStatus, "running");
+        const current = await deps.prisma.run.findUniqueOrThrow({
+          where: { id: runId },
+        });
+        if (
+          current.status === "queued" ||
+          current.status === "leased" ||
+          current.status === "waiting_input" ||
+          current.status === "waiting_takeover"
+        ) {
+          assertTransition(current.status as RunStatus, "running");
+        }
+        const started = await deps.prisma.run.updateMany({
+          where: {
+            id: runId,
+            status: "leased",
+            leaseOwner: workerId,
+            leaseFence: fence,
+          },
+          data: { status: "running", startedAt: current.startedAt ?? new Date() },
+        });
+        if (started.count !== 1) return;
       }
-      const started = await deps.prisma.run.updateMany({
-        where: {
-          id: runId,
-          status: "leased",
-          leaseOwner: workerId,
-          leaseFence: fence,
-        },
-        data: { status: "running", startedAt: current.startedAt ?? new Date() },
-      });
-      if (started.count !== 1) return;
       const leaseTarget = await deps.prisma.bot.findUniqueOrThrow({
         where: { id: run.botId },
         select: { computerId: true, computerSwitching: true },
@@ -3387,7 +3427,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
             : Promise.resolve(undefined),
           deps.prisma.task.findUniqueOrThrow({ where: { id: run.taskId } }),
           deps.prisma.connection.findMany({
-            where: { userId: run.userId, spaceId: run.spaceId },
+            where: {
+              userId: run.userId,
+              spaceId: run.spaceId,
+              connectorId: { not: LINEAR_CONNECTOR_ID },
+            },
             select: {
               id: true,
               connectorId: true,
@@ -4509,6 +4553,15 @@ export function createRunExecutor(deps: ExecutorDeps) {
           const claimOrReturn = async (
             from: "approved" | "intended",
           ): Promise<unknown | undefined> => {
+            if (
+              from === "approved" &&
+              run.trigger === "linear" &&
+              (await authorizeLinearRun(deps, { runId, workerId, fence })) !== "authorized"
+            ) {
+              leaseValid = false;
+              runAbortController?.abort();
+              return { error: LINEAR_RUN_UNAUTHORIZED };
+            }
             const claim = from === "approved" ? claimApprovedEffect : claimIntendedEffect;
             if (await claim(deps.prisma, applied!.effect.id)) {
               claimedEffect = true;
@@ -6474,6 +6527,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
         ) {
           return;
         }
+        if (
+          run.trigger === "linear" &&
+          (await authorizeLinearRun(deps, { runId, workerId, fence })) !== "authorized"
+        ) {
+          return;
+        }
 
         let fallbackModels: { provider: string; modelId: string }[] = [];
         if (!scripted) {
@@ -7386,37 +7445,52 @@ export function parseUpdateBotPatch(
 
 export async function runNotificationsEnabled(
   prisma: PrismaClient,
-  run: { spaceId: string; userId: string; botId: string; threadId: string },
+  run: { id: string; spaceId: string; userId: string; botId: string; threadId: string },
+  kind: NotificationMessage["kind"],
 ): Promise<boolean> {
-  return (await runNotice(prisma, run)).enabled;
+  return (await runNotice(prisma, run, kind)).enabled;
 }
 
 async function runNotice(
   prisma: PrismaClient,
-  run: { spaceId: string; userId: string; botId: string; threadId: string },
+  run: { id: string; spaceId: string; userId: string; botId: string; threadId: string },
+  kind: NotificationMessage["kind"],
 ): Promise<{ enabled: boolean; groupId: string | null }> {
   const source = await prisma.run.findFirst({
     where: {
+      id: run.id,
       botId: run.botId,
       threadId: run.threadId,
       spaceId: run.spaceId,
       userId: run.userId,
     },
     select: {
+      trigger: true,
       bot: { select: { notifyOnFinish: true } },
       thread: { select: { groupId: true } },
+      routine: { select: { notify: true } },
     },
   });
   if (!source) return { enabled: false, groupId: null };
+  const finish = kind === "completion" || kind === "failure";
   return {
-    enabled: Boolean(source.thread.groupId || source.bot.notifyOnFinish),
+    enabled:
+      Boolean(source.thread.groupId || source.bot.notifyOnFinish) &&
+      (source.trigger !== "linear" || !finish || source.routine?.notify === true),
     groupId: source.thread.groupId,
   };
 }
 
 async function notifyRun(
   deps: ExecutorDeps,
-  run: { spaceId: string; userId: string; botId: string; threadId: string; trigger: string },
+  run: {
+    id: string;
+    spaceId: string;
+    userId: string;
+    botId: string;
+    threadId: string;
+    trigger: string;
+  },
   message: NotificationMessage,
 ) {
   if (
@@ -7424,7 +7498,7 @@ async function notifyRun(
     (isBackgroundRunTrigger(run.trigger) && message.kind !== "help" && message.kind !== "takeover")
   )
     return;
-  const notice = await runNotice(deps.prisma, run).catch((error) => {
+  const notice = await runNotice(deps.prisma, run, message.kind).catch((error) => {
     getLogger().error("notification preference lookup", error);
     return null;
   });
@@ -7859,7 +7933,7 @@ export function threadContextForRun<T>(
 ) {
   // Routine runs stay isolated from thread history. The creation intro does
   // too: a message that arrives during it waits and is answered afterward.
-  if (trigger === "created" || trigger === "routine") {
+  if (trigger === "created" || isRoutineRunTrigger(trigger)) {
     return {
       messages: [] as T[],
       summary: null,
@@ -7913,11 +7987,11 @@ export const LONG_WORK_PROGRESS_GUIDANCE =
 export const ROUTINE_SILENT_REPLY_GUIDANCE = `If this routine's prompt says to stay silent when there is nothing to report, the entire final assistant reply must be exactly ${NO_RESPONSE} — no surrounding prose, no variants, no progress updates, no all-clear, and no meta note that you are staying silent. Do not call message_user unless you have something to report.`;
 
 export function runAllowsSilentEmpty(trigger: string): boolean {
-  return trigger === "routine" || isBackgroundRunTrigger(trigger);
+  return isRoutineRunTrigger(trigger) || isBackgroundRunTrigger(trigger);
 }
 
 export function runPromotesMidTurnNarration(trigger: string): boolean {
-  return trigger !== "routine" && !isBackgroundRunTrigger(trigger);
+  return !isRoutineRunTrigger(trigger) && !isBackgroundRunTrigger(trigger);
 }
 
 export const TICKET_SILENT_REPLY_GUIDANCE =
@@ -8009,7 +8083,7 @@ export function completionMarksUnread(
 ): boolean {
   if (trigger === "bot_message") return userFacingPeerReply;
   if (isBackgroundRunTrigger(trigger)) return false;
-  return trigger !== "routine" || Boolean(text);
+  return !isRoutineRunTrigger(trigger) || Boolean(text);
 }
 
 export function missingTurnImagesInstruction(
@@ -8059,7 +8133,7 @@ export function subagentMarksUnread(
   return (
     status === "failed" ||
     (trigger === "bot_message" && userFacingPeerReply) ||
-    (trigger !== "routine" && trigger !== "bot_message")
+    (!isRoutineRunTrigger(trigger) && trigger !== "bot_message")
   );
 }
 
@@ -8603,6 +8677,7 @@ export function selectRunConnections<
       .map((row) => `${row.connectorId}:${row.provider.trim().toLowerCase()}`),
   );
   return rows.filter((row) => {
+    if (row.connectorId === LINEAR_CONNECTOR_ID) return false;
     if (row.status === "connected") return true;
     if (row.status === "revoked") return false;
     // Recover a pending/error Composio row only when this provider has no

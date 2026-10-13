@@ -8,7 +8,8 @@ import {
   isCloudflareAiGatewayProvider,
 } from "./cloudflare-ai-gateway.js";
 import { ThreadMessageSchema } from "./events.js";
-import { Id, MemoryScope, RunStatus, SandboxKind } from "./ids.js";
+import { ConnectionStatus, Id, MemoryScope, RunStatus, SandboxKind } from "./ids.js";
+import { LinearTriggerSchema } from "./linear.js";
 import { McpHeadersSchema, McpRemoteEndpointSchema, McpTransportSchema } from "./mcp.js";
 import { RunTriggerSchema } from "./runs.js";
 
@@ -443,6 +444,7 @@ export const RoutineSchema = z.object({
   modelProvider: z.string().nullable(),
   modelId: z.string().nullable(),
   thinkingLevel: ThinkingLevelSchema.nullable(),
+  linearTrigger: LinearTriggerSchema.nullable(),
   lastRunAt: z.string().nullable(),
   nextRunAt: z.string().nullable(),
   createdAt: z.string(),
@@ -470,6 +472,7 @@ export const CreateRoutineInput = z
     modelProvider: z.string().trim().min(1).max(80).nullable().default(null),
     modelId: z.string().trim().min(1).max(MODEL_REFERENCE_MAX_LENGTH).nullable().default(null),
     thinkingLevel: ThinkingLevelSchema.nullable().default(null),
+    linearTrigger: LinearTriggerSchema.nullable().default(null),
   })
   .superRefine((value, ctx) => {
     routineModelIssues(value, ctx);
@@ -477,11 +480,12 @@ export const CreateRoutineInput = z
       value.crons.length === 0 &&
       !value.webhookEnabled &&
       !value.githubEnabled &&
-      !value.messageProvider
+      !value.messageProvider &&
+      !value.linearTrigger
     ) {
       ctx.addIssue({
         code: "custom",
-        message: "Add a schedule, webhook, GitHub, or message trigger",
+        message: "Add a trigger",
         path: ["crons"],
       });
     }
@@ -647,7 +651,7 @@ export const ConnectionSchema = z.object({
   connectorId: z.string(),
   provider: z.string(),
   displayName: z.string(),
-  status: z.enum(["pending", "connected", "revoked", "error"]),
+  status: ConnectionStatus,
   capabilities: z.array(z.string()),
   createdAt: z.string(),
 });

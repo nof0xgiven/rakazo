@@ -20,6 +20,34 @@ vi.mock("./computer-lifecycle.js", async (importOriginal) => ({
   provisionComputer: async () => ({ id: "computer-1", kind: "desktop" }),
 }));
 
+type AuthorizeInput = {
+  runId: string;
+  workerId: string;
+  fence: number;
+  claim?: { where: unknown; data: Record<string, unknown> };
+};
+const { authorizeLinearRunMock } = vi.hoisted(() => ({
+  authorizeLinearRunMock: vi.fn(
+    async (
+      deps: { prisma: { run: { updateMany(args: unknown): Promise<{ count: number }> } } },
+      input: AuthorizeInput,
+    ) => {
+      if (input.claim) {
+        await deps.prisma.run.updateMany(input.claim);
+        await deps.prisma.run.updateMany({
+          where: { id: input.runId, status: "leased" },
+          data: { status: "running", startedAt: new Date() },
+        });
+      }
+      return "authorized";
+    },
+  ),
+}));
+vi.mock("./linear-run-authorization.js", () => ({
+  authorizeLinearRun: authorizeLinearRunMock,
+  LINEAR_RUN_UNAUTHORIZED: "This Linear automation is no longer authorized to run.",
+}));
+
 const reviewMock = vi.fn();
 const autoReviewProvider: AutoReviewProvider = {
   describe: () => ({
@@ -328,20 +356,22 @@ describe("connector read-only metadata and approval enforcement", () => {
     reviewMock.mockReset();
   });
 
-  it.each(["shell", "write_file"])(
-    "forces owner approval for webhook-triggered %s despite an allow rule",
-    async (name) => {
-      const f = fixture({
-        name,
-        trigger: "webhook",
-        rules: [{ effect: "always_allow", matchKind: "tool", matchValue: name }],
-      });
-      await f.run();
-      expect(f.pauseRunForInput).toHaveBeenCalledOnce();
-      expect(isApprovalPausedResult(f.results[0])).toBe(true);
-      expect(reviewMock).not.toHaveBeenCalled();
-    },
-  );
+  it.each([
+    ["webhook", "shell"],
+    ["webhook", "write_file"],
+    ["linear", "shell"],
+    ["linear", "write_file"],
+  ])("forces owner approval for %s-triggered %s despite an allow rule", async (trigger, name) => {
+    const f = fixture({
+      name,
+      trigger,
+      rules: [{ effect: "always_allow", matchKind: "tool", matchValue: name }],
+    });
+    await f.run();
+    expect(f.pauseRunForInput).toHaveBeenCalledOnce();
+    expect(isApprovalPausedResult(f.results[0])).toBe(true);
+    expect(reviewMock).not.toHaveBeenCalled();
+  });
 
   it("writes shared memory directly, including when an always-allow rule exists", async () => {
     const args = { path: " MEMORY.md ", content: "Printing: all print jobs go to Clyde." };
@@ -580,41 +610,66 @@ describe("connector read-only metadata and approval enforcement", () => {
       expect(reviewMock).not.toHaveBeenCalled();
     });
 
-    it("forces owner approval for webhook-triggered writes despite an allow rule", async () => {
-      const f = fixture({
-        catalog,
-        name: "demo_send_message",
-        trigger: "webhook",
-        rules: [{ effect: "always_allow", matchKind: "tool", matchValue: "demo_send_message" }],
-      });
-      await f.run();
-      expect(f.execute).not.toHaveBeenCalled();
-      expect(f.pauseRunForInput).toHaveBeenCalledOnce();
-      expect(isApprovalPausedResult(f.results[0])).toBe(true);
-      expect(reviewMock).not.toHaveBeenCalled();
-    });
+    it.each(["webhook", "linear"])(
+      "forces owner approval for %s-triggered writes despite an allow rule",
+      async (trigger) => {
+        const f = fixture({
+          catalog,
+          name: "demo_send_message",
+          trigger,
+          rules: [{ effect: "always_allow", matchKind: "tool", matchValue: "demo_send_message" }],
+        });
+        await f.run();
+        expect(f.execute).not.toHaveBeenCalled();
+        expect(f.pauseRunForInput).toHaveBeenCalledOnce();
+        expect(isApprovalPausedResult(f.results[0])).toBe(true);
+        expect(reviewMock).not.toHaveBeenCalled();
+      },
+    );
 
-    it("forces owner approval for a webhook-triggered read-named write operation", async () => {
-      const f = fixture({
-        catalog,
-        name: "demo_read_profile_card",
-        readOnly: false,
-        trigger: "webhook",
-        rules: [
-          { effect: "always_allow", matchKind: "tool", matchValue: "demo_read_profile_card" },
-        ],
-      });
-      await f.run();
-      expect(f.execute).not.toHaveBeenCalled();
-      expect(f.pauseRunForInput).toHaveBeenCalledOnce();
-      expect(isApprovalPausedResult(f.results[0])).toBe(true);
-    });
+    it.each(["webhook", "linear"])(
+      "forces owner approval for a %s-triggered read-named write operation",
+      async (trigger) => {
+        const f = fixture({
+          catalog,
+          name: "demo_read_profile_card",
+          readOnly: false,
+          trigger,
+          rules: [
+            { effect: "always_allow", matchKind: "tool", matchValue: "demo_read_profile_card" },
+          ],
+        });
+        await f.run();
+        expect(f.execute).not.toHaveBeenCalled();
+        expect(f.pauseRunForInput).toHaveBeenCalledOnce();
+        expect(isApprovalPausedResult(f.results[0])).toBe(true);
+      },
+    );
 
-    it("lets a webhook-triggered declared read run unattended", async () => {
-      const f = fixture({ catalog, trigger: "webhook" });
+    it.each(["webhook", "linear"])(
+      "lets a %s-triggered declared read run unattended",
+      async (trigger) => {
+        const f = fixture({ catalog, trigger });
+        await f.run();
+        expect(f.execute).toHaveBeenCalledOnce();
+        expect(f.pauseRunForInput).not.toHaveBeenCalled();
+      },
+    );
+
+    it("authorizes a Linear run before start and before opening the model", async () => {
+      authorizeLinearRunMock.mockClear();
+      const f = fixture({ catalog, trigger: "linear" });
       await f.run();
-      expect(f.execute).toHaveBeenCalledOnce();
-      expect(f.pauseRunForInput).not.toHaveBeenCalled();
+      expect(authorizeLinearRunMock).toHaveBeenCalledTimes(2);
+      expect(authorizeLinearRunMock.mock.calls[0]?.[1]).toMatchObject({
+        workerId: "worker-1",
+        claim: { data: { status: "leased", leaseOwner: "worker-1" } },
+      });
+      expect(authorizeLinearRunMock.mock.calls[1]?.[1]).toEqual({
+        runId: expect.any(String),
+        workerId: "worker-1",
+        fence: expect.any(Number),
+      });
     });
 
     it("treats a read-named write operation as consequential for automatic review", async () => {

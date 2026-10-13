@@ -20,7 +20,6 @@ export {
   hasValidGithubSignature,
 } from "./github-webhook.js";
 export {
-  formatUntrustedDeliveryPayload,
   formatWebhookPrompt,
   WEBHOOK_MAX_BODY_BYTES,
   WEBHOOK_SECRET_KIND,

@@ -8,7 +8,7 @@ import type {
   MessageReaction,
   Routine,
 } from "@rakazo/contracts";
-import { canReactToThreadMessage, MESSAGE_REACTIONS } from "@rakazo/contracts";
+import { canReactToThreadMessage, LINEAR_CONNECTOR_ID, MESSAGE_REACTIONS } from "@rakazo/contracts";
 import type { SlashActionId, ThreadItem } from "@rakazo/core";
 import {
   abortableDelay,
@@ -633,6 +633,7 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
           id: routine.id,
           name: routine.name,
           crons: routine.crons,
+          linearTrigger: routine.linearTrigger,
           botId: routine.botId,
           botName: routine.botName,
         })),
@@ -786,7 +787,9 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
       ),
     ]).then(([connections, catalog]) => {
       if (cancelled) return;
-      const connected = connections.filter((row) => row.status === "connected");
+      const connected = connections.filter(
+        (row) => row.status === "connected" && row.connectorId !== LINEAR_CONNECTOR_ID,
+      );
       const options: Array<{
         id: string;
         name: string;
@@ -799,7 +802,7 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
         connectionId: row.id,
       }));
       for (const item of catalog) {
-        if (item.connected || item.noAuth) continue;
+        if (item.connected || item.noAuth || item.connectorId === LINEAR_CONNECTOR_ID) continue;
         if (
           connected.some(
             (row) =>

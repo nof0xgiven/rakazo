@@ -4,6 +4,7 @@ import path from "node:path";
 import { loadRootEnv } from "@rakazo/core/node/load-root-env";
 import { PostgreSqlContainer } from "@testcontainers/postgresql";
 import type { createApp } from "../../../../apps/api/src/app.ts";
+import { handleLinearFixture, LINEAR_FIXTURE_PATH, seedLinearEmulator } from "./linear-fixture.js";
 import { runProcess } from "./process.js";
 
 loadRootEnv();
@@ -108,6 +109,7 @@ async function main() {
         "packages/testkit/src/search.test.ts",
         "packages/testkit/src/executor-lifecycle.test.ts",
         "packages/testkit/src/connections.test.ts",
+        "packages/testkit/src/linear-connections.test.ts",
         "packages/testkit/src/bot-secrets.test.ts",
         "packages/db/src/space-membership.postgres.test.ts",
         "packages/db/src/messaging.postgres.test.ts",
@@ -118,6 +120,10 @@ async function main() {
         "packages/adapters/src/realtime.postgres.test.ts",
         "packages/adapters/src/job-reconciler.postgres.test.ts",
         "packages/adapters/src/cloud-agent.postgres.test.ts",
+        "packages/adapters/src/linear-service.postgres.test.ts",
+        "packages/adapters/src/linear-run-authorization.postgres.test.ts",
+        "packages/adapters/src/linear-sync.postgres.test.ts",
+        "packages/adapters/src/linear.postgres.test.ts",
       ];
       // Each app reconciles all durable work in its database, including intentionally
       // unfinished fixture runs. Clone the pristine migrated schema so one suite
@@ -165,7 +171,14 @@ async function main() {
     }
 
     const [
-      { ComposioEmulator, EmailEmulator, PipedreamConnector, ThirdPartyConnectorEmulator },
+      {
+        ComposioEmulator,
+        EmailEmulator,
+        PipedreamConnector,
+        ThirdPartyConnectorEmulator,
+        createLinearEmulator,
+        createLinearProvider,
+      },
       { createApp },
     ] = await Promise.all([import("@rakazo/adapters"), import("../../../../apps/api/src/app.ts")]);
     const { serve } = await import("@hono/node-server");
@@ -181,6 +194,8 @@ async function main() {
       { fetch: thirdParties.fetch, resolveHostname: thirdParties.resolveHostname },
     );
     const email = new EmailEmulator();
+    const linear = createLinearEmulator();
+    seedLinearEmulator(linear);
     const handles = await createApp({
       databaseUrl,
       prisma: undefined,
@@ -192,13 +207,19 @@ async function main() {
         resolveHostname: thirdParties.resolveHostname,
       },
       integrationsCatalogUrl: "https://catalog.example.test/",
+      linearProvider: createLinearProvider({ fetch: linear.fetch }),
+      apiUrl: "https://rakazo.example.com",
     });
     let activeRequests = 0;
     const requestWaiters = new Set<() => void>();
     const server = serve({
       fetch: async (request) => {
-        if (new URL(request.url).pathname === "/__e2e/emails") {
+        const pathname = new URL(request.url).pathname;
+        if (pathname === "/__e2e/emails") {
           return Response.json(email.sent, { headers: { "cache-control": "no-store" } });
+        }
+        if (pathname === LINEAR_FIXTURE_PATH) {
+          return handleLinearFixture(request, linear, handles, `http://127.0.0.1:${apiPort}`);
         }
         activeRequests += 1;
         try {

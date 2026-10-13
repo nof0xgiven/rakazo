@@ -1,6 +1,7 @@
 import type {
   AgentHomeStore,
   AgentRuntime,
+  IssueTrackerProvider,
   JobPublisher,
   MessagingSurface,
   SandboxProvider,
@@ -44,6 +45,8 @@ describe("createBackgroundJobHandlers", () => {
       secretStore: {} as unknown as EncryptedSecretStore,
       memoryProviders: { resolve: vi.fn(async () => null) },
       messaging: {} as unknown as MessagingSurface,
+      linearProvider: {} as unknown as IssueTrackerProvider,
+      linearSignal: new AbortController().signal,
     });
 
     await handlers["run.continue"]({ runId: "run-1" });
@@ -85,6 +88,8 @@ describe("createBackgroundJobHandlers", () => {
       memoryProviders,
       deploymentModelKey: "openrouter-key",
       deploymentModelConfigured: true,
+      linearProvider: {} as unknown as IssueTrackerProvider,
+      linearSignal: new AbortController().signal,
     });
 
     await handlers["history.compact"]({ threadId: "thread-1" });
@@ -124,6 +129,8 @@ describe("createBackgroundJobHandlers", () => {
         runtime,
         secretStore: {} as unknown as EncryptedSecretStore,
         memoryProviders: { resolve: vi.fn(async () => null) },
+        linearProvider: {} as unknown as IssueTrackerProvider,
+        linearSignal: new AbortController().signal,
       });
 
       await handlers["history.compact"]({ threadId: "thread-fixture" });

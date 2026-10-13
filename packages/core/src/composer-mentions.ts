@@ -1,3 +1,4 @@
+import type { LinearTrigger } from "@rakazo/contracts";
 import { formatCron } from "./cron.js";
 import { hasMentionToken } from "./group-mentions.js";
 
@@ -25,6 +26,7 @@ export type MentionPickerRoutine = {
   id: string;
   name: string;
   crons: string[];
+  linearTrigger: LinearTrigger | null;
   botId: string;
   botName?: string;
 };
@@ -137,10 +139,14 @@ export function appendConnectorIntent(text: string, names: readonly string[]): s
   return trimmed ? `${trimmed}\n\n${line}` : line;
 }
 
-export function routineScheduleSubtitle(crons: readonly string[], botName?: string): string {
-  const schedule = crons.map((cron) => formatCron(cron)).join(" · ");
-  if (botName?.trim()) return `${schedule} · ${botName.trim()}`;
-  return schedule;
+export function routineTriggerSubtitle(
+  routine: Pick<MentionPickerRoutine, "crons" | "linearTrigger">,
+  botName?: string,
+): string {
+  const parts = routine.crons.map((cron) => formatCron(cron));
+  if (routine.linearTrigger) parts.push("Linear");
+  if (botName?.trim()) parts.push(botName.trim());
+  return parts.join(" · ");
 }
 
 export function buildComposerMentionOptions(input: {
@@ -204,7 +210,7 @@ export function buildComposerMentionOptions(input: {
       id: routine.id,
       name: routine.name,
       botId: routine.botId,
-      subtitle: routineScheduleSubtitle(routine.crons, duplicate ? routine.botName : undefined),
+      subtitle: routineTriggerSubtitle(routine, duplicate ? routine.botName : undefined),
     });
   }
 

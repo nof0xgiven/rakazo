@@ -36,4 +36,22 @@ describe("run activity notification preference", () => {
     expect(activityNotificationsEnabled(null, false)).toBe(false);
     expect(activityNotificationsEnabled("group-1", false)).toBe(true);
   });
+
+  it("requires the routine notify setting for Linear runs except when they need the user", () => {
+    expect(
+      activityNotificationsEnabled("group-1", false, { status: "completed", routineNotify: false }),
+    ).toBe(false);
+    expect(
+      activityNotificationsEnabled("group-1", false, { status: "failed", routineNotify: null }),
+    ).toBe(false);
+    expect(
+      activityNotificationsEnabled(null, true, { status: "completed", routineNotify: true }),
+    ).toBe(true);
+    expect(
+      activityNotificationsEnabled(null, true, { status: "waiting_input", routineNotify: false }),
+    ).toBe(true);
+    expect(
+      activityNotificationsEnabled(null, false, { status: "waiting_input", routineNotify: true }),
+    ).toBe(false);
+  });
 });

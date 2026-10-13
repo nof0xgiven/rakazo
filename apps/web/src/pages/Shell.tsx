@@ -29,6 +29,7 @@ import {
   ATTACHMENT_MAX_BYTES,
   ATTACHMENT_MAX_COUNT,
   canReactToThreadMessage,
+  LINEAR_CONNECTOR_ID,
   MESSAGE_REACTIONS,
   normalizeCreateBotProfile,
 } from "@rakazo/contracts";
@@ -250,6 +251,7 @@ import { ActivityList } from "./ActivityList";
 import type { ContextMenuPosition } from "./BotContextMenu";
 import { CreateGroupForm, GroupSettings, memberName } from "./GroupPanel";
 import { HostComputerPrompt } from "./HostComputerPrompt";
+import { linearTriggerFromDraft, sameLinearTrigger } from "./LinearTriggerCard";
 import { ResizableSidePanel } from "./ResizableSidePanel";
 import type { RoutineDraftState } from "./RoutineEditor";
 import {
@@ -556,6 +558,8 @@ export function ShellPage() {
     commitSnapshot(update(snapshotRef.current));
   }
   const [pluginsOpen, setPluginsOpen] = useState(false);
+  const [pluginsLinear, setPluginsLinear] = useState(false);
+  const [linearConnectionsTick, setLinearConnectionsTick] = useState(0);
   const [mcpOpen, setMcpOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsSection, setSettingsSection] = useState<SettingsSection>("general");
@@ -1852,6 +1856,7 @@ export function ShellPage() {
           id: routine.id,
           name: routine.name,
           crons: routine.crons,
+          linearTrigger: routine.linearTrigger,
           botId: routine.botId,
           botName: routine.botName,
         })),
@@ -1909,7 +1914,9 @@ export function ShellPage() {
       rpc.connections.catalog({}).catch(() => [] as ConnectionCatalogItem[]),
     ]).then(([connections, catalog]) => {
       if (cancelled) return;
-      const connected = connections.filter((row) => row.status === "connected");
+      const connected = connections.filter(
+        (row) => row.status === "connected" && row.connectorId !== LINEAR_CONNECTOR_ID,
+      );
       const options: Array<{
         id: string;
         name: string;
@@ -1922,7 +1929,7 @@ export function ShellPage() {
         connectionId: row.id,
       }));
       for (const item of catalog) {
-        if (item.connected || item.noAuth) continue;
+        if (item.connected || item.noAuth || item.connectorId === LINEAR_CONNECTOR_ID) continue;
         if (
           connected.some(
             (row) =>
@@ -4018,6 +4025,11 @@ export function ShellPage() {
                 onEnsureWebhook={async () => {
                   await ensureWebhookSecret(active.id);
                 }}
+                linearConnectionsTick={linearConnectionsTick}
+                onConnectLinear={() => {
+                  setPluginsLinear(true);
+                  setPluginsOpen(true);
+                }}
                 onSave={async () => {
                   if (routineSavePending.current) return;
                   const targetBotId = active.id;
@@ -4027,11 +4039,16 @@ export function ShellPage() {
                     !routineDraft.schedules.length &&
                     !routineDraft.webhookEnabled &&
                     !routineDraft.githubEnabled &&
-                    !routineDraft.messageProvider
+                    !routineDraft.messageProvider &&
+                    !routineDraft.linearTrigger
                   ) {
-                    setRoutineError(t`Add a schedule, webhook, GitHub, or message trigger`);
+                    setRoutineError(t`Add a schedule, webhook, GitHub, Linear, or message trigger`);
                     return;
                   }
+                  const linearTrigger = routineDraft.linearTrigger
+                    ? linearTriggerFromDraft(routineDraft.linearTrigger)
+                    : null;
+                  if (routineDraft.linearTrigger && !linearTrigger) return;
                   const saveRequest = ++routineSaveRequest.current;
                   routineSavePending.current = true;
                   setSavingRoutine(true);
@@ -4071,6 +4088,9 @@ export function ShellPage() {
                         webhookEnabled: routineDraft.webhookEnabled,
                         githubEnabled: routineDraft.githubEnabled,
                         messageProvider: routineDraft.messageProvider,
+                        ...(sameLinearTrigger(linearTrigger, targetRoutine.linearTrigger)
+                          ? {}
+                          : { linearTrigger }),
                         ...routineModel,
                         ...(runAt ? { runAt } : {}),
                       });
@@ -4086,6 +4106,7 @@ export function ShellPage() {
                         webhookEnabled: routineDraft.webhookEnabled,
                         githubEnabled: routineDraft.githubEnabled,
                         messageProvider: routineDraft.messageProvider,
+                        linearTrigger,
                         ...routineModel,
                       });
                     }
@@ -4538,9 +4559,16 @@ export function ShellPage() {
         {pluginsOpen ? (
           <PluginsOverlay
             activeBotId={activeBotId.current}
-            onClose={() => setPluginsOpen(false)}
+            openLinear={pluginsLinear}
+            onClose={() => {
+              setPluginsOpen(false);
+              setPluginsLinear(false);
+              setLinearConnectionsTick((tick) => tick + 1);
+            }}
             onOpenMcp={() => {
               setPluginsOpen(false);
+              setPluginsLinear(false);
+              setLinearConnectionsTick((tick) => tick + 1);
               setMcpOpen(true);
             }}
           />

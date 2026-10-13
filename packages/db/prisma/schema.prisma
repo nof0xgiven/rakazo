@@ -644,6 +644,8 @@ model Run {
   sourceMessage        Message?         @relation("RunSourceMessage", fields: [sourceMessageId], references: [id], onDelete: SetNull)
   routineId            String?
   routine              Routine?         @relation(fields: [routineId], references: [id], onDelete: SetNull)
+  linearEventId        String?
+  linearEvent          LinearEvent?     @relation(fields: [linearEventId], references: [id], onDelete: SetNull)
   startedAt            DateTime?
   completedAt          DateTime?
   botOutcomeReturnedAt DateTime?
@@ -667,6 +669,7 @@ model Run {
   @@index([sourceMessageId])
   @@index([threadId, status, createdAt])
   @@index([routineId])
+  @@index([linearEventId])
   @@map("runs")
 }
 
@@ -793,6 +796,7 @@ model Routine {
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
   runs           Run[]
+  linearTrigger  RoutineLinearTrigger?
 
   @@index([active, nextRunAt])
   @@index([spaceId, botId])
@@ -877,9 +881,92 @@ model Connection {
   metadata    Json     @default("{}")
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+  linearSource LinearSource?
 
   @@index([spaceId, userId, connectorId])
   @@map("connections")
+}
+
+model LinearSource {
+  connectionId     String                 @id
+  connection       Connection             @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  organizationId   String
+  viewerId         String
+  organizationName String
+  revision         Int                    @default(1)
+  generation       Int                    @default(1)
+  webhookSecretId  String?                @unique
+  webhookSecret    Secret?                @relation(fields: [webhookSecretId], references: [id], onDelete: SetNull)
+  webhookRevision  Int                    @default(0)
+  monitoringSince  DateTime?
+  issuesThrough    DateTime?
+  commentsThrough  DateTime?
+  issueWindowEnd   DateTime?
+  commentWindowEnd DateTime?
+  issueCursor      String?
+  commentCursor    String?
+  nextPollAt       DateTime?
+  nextSyncAt       DateTime?
+  rateLimitedUntil DateTime?
+  leaseToken       String?
+  leaseExpiresAt   DateTime?
+  lastPolledAt     DateTime?
+  lastWebhookAt    DateTime?
+  lastEventAt      DateTime?
+  errorCount       Int                    @default(0)
+  errorCode        String?
+  createdAt        DateTime               @default(now())
+  updatedAt        DateTime               @updatedAt
+  triggers         RoutineLinearTrigger[]
+  events           LinearEvent[]
+
+  @@index([nextSyncAt, connectionId])
+  @@map("linear_sources")
+}
+
+model RoutineLinearTrigger {
+  routineId    String       @id
+  routine      Routine      @relation(fields: [routineId], references: [id], onDelete: Cascade)
+  connectionId String
+  source       LinearSource @relation(fields: [connectionId], references: [connectionId], onDelete: Cascade)
+  teamId       String
+  events       String[]
+  projectId    String?
+  assigneeId   String?
+  stateId      String?
+  labelIds     String[]
+  revision     Int          @default(1)
+  activatedAt  DateTime?
+
+  @@index([connectionId, routineId])
+  @@map("routine_linear_triggers")
+}
+
+model LinearEvent {
+  id               String       @id @default(cuid())
+  connectionId     String
+  source           LinearSource @relation(fields: [connectionId], references: [connectionId], onDelete: Cascade)
+  sourceGeneration Int
+  eventKey         String
+  kind             String
+  entityId         String
+  issueId          String
+  occurredAt       DateTime
+  receivedAt       DateTime
+  transport        String
+  deliveryId       String?
+  seed             Json?
+  snapshot         Json?
+  status           String
+  afterRoutineId   String?
+  nextAttemptAt    DateTime
+  errorCount       Int          @default(0)
+  errorCode        String?
+  runs             Run[]
+
+  @@unique([connectionId, eventKey])
+  @@index([connectionId, status, nextAttemptAt, id])
+  @@map("linear_events")
 }
 
 model CapabilityInstall {
@@ -1147,6 +1234,7 @@ model Secret {
   mcpServers        McpServer[]
   spaceMemoryConfig SpaceMemoryConfig?
   agentSecret       AgentSecret?
+  linearWebhookSource LinearSource?
 
   @@index([userId, spaceId])
   @@map("secrets")

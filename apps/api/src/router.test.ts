@@ -12,6 +12,7 @@ import {
   ComputerScreenUnavailableError,
   EncryptedSecretStore,
   IntegrationProviderSettings,
+  LinearServiceError,
   LocalAgentHomeStore,
   screenLeaseIdForRun,
 } from "@rakazo/adapters";
@@ -3482,6 +3483,7 @@ describe("routines.update", () => {
     modelProvider: null,
     modelId: null,
     thinkingLevel: null,
+    linearTrigger: null,
     lastRunAt: null,
     nextRunAt: null,
     createdAt: new Date("2026-09-01T00:00:00.000Z"),
@@ -3495,7 +3497,6 @@ describe("routines.update", () => {
     const savedRoutine = { ...routine, ...model };
     const update = vi.fn(
       async (args: { where: Record<string, unknown>; data: Record<string, unknown> }) => {
-        if (archivedBeforeWrite) throw Object.assign(new Error("not found"), { code: "P2025" });
         return {
           ...savedRoutine,
           ...Object.fromEntries(
@@ -3528,12 +3529,30 @@ describe("routines.update", () => {
       ),
       update,
     };
+    const queryRaw = vi.fn(async () => [
+      { locked: 1, archivedAt: archivedBeforeWrite ? new Date() : null },
+    ]);
+    const txFindFirst = vi.fn(async () => savedRoutine);
     const tx = {
-      ...modelConfigurationClient(),
+      $queryRaw: queryRaw,
       spaceModelPreference: preferences,
       userModelCredential: credentials,
-      routine: routineApi,
+      spaceMember: {
+        findMany: vi.fn(async () => []),
+        findUnique: vi.fn(async () => ({
+          organizationId: "org-1",
+          space: { deletingAt: null },
+        })),
+      },
+      routine: { findFirst: txFindFirst, update },
+      linearSource: { findMany: vi.fn(async () => [] as unknown[]) },
+      routineLinearTrigger: {
+        create: vi.fn(async () => ({})),
+        update: vi.fn(async () => ({})),
+        delete: vi.fn(async () => ({})),
+      },
     };
+    const validateTrigger = vi.fn(async () => ({ sourceRevision: 1 }));
     const prisma = {
       spaceModelPreference: preferences,
       userModelCredential: credentials,
@@ -3570,6 +3589,7 @@ describe("routines.update", () => {
         env: { sandboxProvider: "fake" },
         events: { append: vi.fn(async () => undefined) },
         jobs: { enqueue, cancel: vi.fn(async () => undefined) },
+        linear: { validateTrigger },
       } as unknown as RouterDeps),
     );
     const call = (patch: Record<string, unknown> = {}) =>
@@ -3594,6 +3614,9 @@ describe("routines.update", () => {
       call,
       findFirst: prisma.routine.findFirst,
       transaction: prisma.$transaction,
+      txFindFirst,
+      tx,
+      validateTrigger,
     };
   }
 
@@ -3611,7 +3634,7 @@ describe("routines.update", () => {
     expect(response.status).toBe(200);
     expect(update).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: "routine-1", bot: { archivedAt: null } },
+        where: { id: "routine-1" },
         data: expect.objectContaining({ active: true }),
       }),
     );
@@ -3634,9 +3657,7 @@ describe("routines.update", () => {
   it("leaves model columns out of unrelated updates", async () => {
     const { call, update } = fixture(false, false, ownModel);
     expect((await call({ name: "Renamed" })).response.status).toBe(200);
-    expect(update).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { id: "routine-1", bot: { archivedAt: null } } }),
-    );
+    expect(update).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "routine-1" } }));
     const data = update.mock.calls[0]![0].data;
     for (const column of ["modelProvider", "modelId", "thinkingLevel"])
       expect(data).not.toHaveProperty(column);
@@ -3645,23 +3666,21 @@ describe("routines.update", () => {
   it.each(["modelProvider", "modelId", "thinkingLevel"])(
     "rejects a partial model patch when %s changes before the write",
     async (column) => {
-      const { call, update, enqueue } = fixture(false, false, ownModel);
-      update.mockImplementationOnce(async (args) => {
-        const current: Record<string, unknown> = { ...ownModel, [column]: "concurrent-choice" };
-        expect(args.where).toMatchObject(ownModel);
-        if (args.where[column] !== current[column]) {
-          throw Object.assign(new Error("not found"), { code: "P2025" });
-        }
-        throw new Error("Concurrent model change was not guarded");
-      });
+      const { call, update, enqueue, txFindFirst } = fixture(false, false, ownModel);
+      txFindFirst.mockResolvedValueOnce({
+        ...routine,
+        ...ownModel,
+        [column]: "concurrent-choice",
+      } as never);
       expect((await call({ thinkingLevel: "low" })).response.status).toBe(409);
+      expect(update).not.toHaveBeenCalled();
       expect(enqueue).not.toHaveBeenCalled();
     },
   );
 
   it("returns not found if a model update races with a parent archive", async () => {
     const { call, findFirst } = fixture(false, true, ownModel);
-    findFirst.mockResolvedValueOnce({ ...routine, ...ownModel }).mockResolvedValueOnce(null);
+    findFirst.mockResolvedValueOnce({ ...routine, ...ownModel } as never);
     expect((await call({ thinkingLevel: "low" })).response.status).toBe(404);
   });
 
@@ -3700,6 +3719,151 @@ describe("routines.update", () => {
   it("rejects thinking without a resulting model", async () => {
     const { call, update } = fixture(false);
     expect((await call({ thinkingLevel: "high" })).response.status).toBe(400);
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  const savedLinearTrigger = {
+    routineId: "routine-1",
+    connectionId: "connection-1",
+    teamId: "team-1",
+    events: ["issue.updated", "issue.created"],
+    projectId: null,
+    assigneeId: null,
+    stateId: null,
+    labelIds: ["label-2", "label-1"],
+    revision: 3,
+    activatedAt: new Date("2026-09-02T00:00:00.000Z"),
+  };
+
+  const ownedSource = (userId: string) => ({
+    connectionId: "connection-1",
+    revision: 1,
+    connection: {
+      id: "connection-1",
+      spaceId: "space-1",
+      userId,
+      status: "connected",
+      secretId: null,
+      displayName: "Linear",
+    },
+  });
+
+  it("keeps an unchanged Linear trigger on a prompt-only edit without remote validation", async () => {
+    const { call, update, tx, validateTrigger } = fixture(false, false, {
+      crons: [],
+      active: true,
+      linearTrigger: savedLinearTrigger,
+    });
+    const { response } = await call({ runAt: undefined, prompt: "Summarize the issue" });
+    expect(response.status).toBe(200);
+    expect(validateTrigger).not.toHaveBeenCalled();
+    expect(tx.routineLinearTrigger.update).not.toHaveBeenCalled();
+    expect(update.mock.calls[0]![0].data).toMatchObject({ nextRunAt: null });
+    const body = (await response.json()) as { json: { linearTrigger: unknown } };
+    expect(body.json.linearTrigger).toEqual({
+      connectionId: "connection-1",
+      teamId: "team-1",
+      events: ["issue.created", "issue.updated"],
+      projectId: null,
+      assigneeId: null,
+      stateId: null,
+      labelIds: ["label-1", "label-2"],
+    });
+  });
+
+  it("validates a new Linear trigger before writing and maps its errors", async () => {
+    const { call, update, tx, validateTrigger } = fixture(false, false, {
+      crons: [],
+      webhookEnabled: true,
+      active: true,
+    });
+    validateTrigger.mockRejectedValueOnce(
+      new LinearServiceError("BAD_REQUEST", "Choose an available Linear option"),
+    );
+    const { response } = await call({
+      runAt: undefined,
+      linearTrigger: { connectionId: "connection-1", teamId: "team-1", events: ["issue.created"] },
+    });
+    expect(response.status).toBe(400);
+    expect(validateTrigger).toHaveBeenCalledOnce();
+    expect(update).not.toHaveBeenCalled();
+    expect(tx.routineLinearTrigger.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects attaching a Linear connection the actor does not own", async () => {
+    const { call, update, tx } = fixture(false, false, {
+      crons: [],
+      webhookEnabled: true,
+      active: true,
+    });
+    tx.linearSource.findMany.mockResolvedValueOnce([ownedSource("user-2")]);
+    const { response } = await call({
+      runAt: undefined,
+      linearTrigger: { connectionId: "connection-1", teamId: "team-1", events: ["issue.created"] },
+    });
+    expect(response.status).toBe(400);
+    expect(update).not.toHaveBeenCalled();
+    expect(tx.routineLinearTrigger.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects a Linear activation when the automation changed during validation", async () => {
+    const inactive = { ...savedLinearTrigger, activatedAt: null };
+    const { call, update, tx, txFindFirst } = fixture(false, false, {
+      crons: [],
+      active: false,
+      linearTrigger: inactive,
+    });
+    tx.linearSource.findMany.mockResolvedValueOnce([ownedSource("user-1")]);
+    txFindFirst.mockResolvedValueOnce({
+      ...routine,
+      crons: [],
+      active: false,
+      linearTrigger: { ...inactive, revision: 4 },
+    } as never);
+    const { response } = await call({ runAt: undefined, active: true });
+    expect(response.status).toBe(409);
+    expect(update).not.toHaveBeenCalled();
+    expect(tx.routineLinearTrigger.update).not.toHaveBeenCalled();
+  });
+
+  it("keeps a concurrently attached Linear trigger when a rename omits lifecycle fields", async () => {
+    const { call, update, tx, txFindFirst, validateTrigger } = fixture(false, false, {
+      crons: [],
+      webhookEnabled: true,
+      active: true,
+    });
+    txFindFirst.mockResolvedValueOnce({
+      ...routine,
+      crons: [],
+      webhookEnabled: true,
+      active: true,
+      linearTrigger: savedLinearTrigger,
+    } as never);
+    const { response } = await call({ name: "Renamed", active: undefined, runAt: undefined });
+    expect(response.status).toBe(409);
+    expect(validateTrigger).not.toHaveBeenCalled();
+    expect(tx.routineLinearTrigger.delete).not.toHaveBeenCalled();
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it("does not recreate a concurrently removed Linear trigger on a rename", async () => {
+    const { call, update, tx, txFindFirst } = fixture(false, false, {
+      crons: [],
+      webhookEnabled: true,
+      active: true,
+      linearTrigger: savedLinearTrigger,
+    });
+    txFindFirst.mockResolvedValueOnce({
+      ...routine,
+      crons: [],
+      webhookEnabled: true,
+      active: true,
+      linearTrigger: null,
+    } as never);
+    const { response } = await call({ name: "Renamed", active: undefined, runAt: undefined });
+    expect(response.status).toBe(409);
+    expect(tx.routineLinearTrigger.create).not.toHaveBeenCalled();
+    expect(tx.routineLinearTrigger.update).not.toHaveBeenCalled();
     expect(update).not.toHaveBeenCalled();
   });
 });

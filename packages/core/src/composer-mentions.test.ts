@@ -7,11 +7,21 @@ import {
   mentionChipKey,
   partitionComposerMentions,
   resolveComposerSendPlan,
-  routineScheduleSubtitle,
+  routineTriggerSubtitle,
   stripMentionKinds,
   stripMentionToken,
   toThreadMentionPayload,
 } from "./composer-mentions.js";
+
+const linearTrigger = {
+  connectionId: "conn_linear_1",
+  teamId: "team_1",
+  events: ["issue.created" as const],
+  projectId: null,
+  assigneeId: null,
+  stateId: null,
+  labelIds: [],
+};
 
 describe("buildComposerMentionOptions", () => {
   it("lists bots groups routines connectors and everyone", () => {
@@ -21,7 +31,14 @@ describe("buildComposerMentionOptions", () => {
       bots: [{ id: "b1", name: "Chief", color: "#111" }],
       groups: [{ id: "g1", name: "Planning" }],
       routines: [
-        { id: "r1", name: "Daily digest", crons: ["0 9 * * 1-5"], botId: "b1", botName: "Chief" },
+        {
+          id: "r1",
+          name: "Daily digest",
+          crons: ["0 9 * * 1-5"],
+          linearTrigger: null,
+          botId: "b1",
+          botName: "Chief",
+        },
       ],
       connectors: [
         { id: "c1", name: "Gmail", authStatus: "connected", connectionId: "c1" },
@@ -48,14 +65,28 @@ describe("buildComposerMentionOptions", () => {
       bots: [],
       groups: [],
       routines: [
-        { id: "r1", name: "Daily", crons: ["0 9 * * *"], botId: "b1", botName: "Chief" },
-        { id: "r2", name: "Daily", crons: ["0 10 * * *"], botId: "b2", botName: "Writer" },
+        {
+          id: "r1",
+          name: "Daily",
+          crons: ["0 9 * * *"],
+          linearTrigger: null,
+          botId: "b1",
+          botName: "Chief",
+        },
+        {
+          id: "r2",
+          name: "Daily",
+          crons: [],
+          linearTrigger,
+          botId: "b2",
+          botName: "Writer",
+        },
       ],
       connectors: [],
     });
     expect(options).toHaveLength(2);
     expect(options[0]?.subtitle).toContain("Chief");
-    expect(options[1]?.subtitle).toContain("Writer");
+    expect(options[1]?.subtitle).toBe("Linear · Writer");
     expect(mentionChipKey(options[0]!)).toBe("routine:r1");
     expect(mentionChipKey(options[1]!)).toBe("routine:r2");
   });
@@ -240,7 +271,16 @@ describe("strip and connector intent", () => {
   });
 
   it("formats routine subtitles", () => {
-    expect(routineScheduleSubtitle(["0 9 * * 1-5"])).toMatch(/Weekdays/i);
-    expect(routineScheduleSubtitle(["0 9 * * 1-5"], "Chief")).toContain("Chief");
+    expect(routineTriggerSubtitle({ crons: ["0 9 * * 1-5"], linearTrigger: null })).toMatch(
+      /Weekdays/i,
+    );
+    expect(
+      routineTriggerSubtitle({ crons: ["0 9 * * 1-5"], linearTrigger: null }, "Chief"),
+    ).toContain("Chief");
+    expect(routineTriggerSubtitle({ crons: [], linearTrigger })).toBe("Linear");
+    expect(routineTriggerSubtitle({ crons: [], linearTrigger }, "Chief")).toBe("Linear · Chief");
+    expect(routineTriggerSubtitle({ crons: ["0 9 * * 1-5"], linearTrigger })).toMatch(
+      /Weekdays.* · Linear$/i,
+    );
   });
 });

@@ -122,6 +122,16 @@ describe("unattendedTriggerToolRequiresApproval", () => {
     expect(unattendedTriggerToolRequiresApproval("user", "shell", false)).toBe(false);
   });
 
+  it("applies the unattended rule to Linear automation runs", () => {
+    expect(unattendedTriggerToolRequiresApproval("linear", "shell", false)).toBe(true);
+    expect(unattendedTriggerToolRequiresApproval("linear", "read_file", false)).toBe(false);
+    expect(unattendedTriggerToolRequiresApproval("linear", "github_get_issue", true)).toBe(false);
+    expect(unattendedTriggerToolRequiresApproval("linear", "github_create_issue", true)).toBe(
+      true,
+    );
+    expect(unattendedTriggerToolRequiresApproval("routine", "shell", false)).toBe(false);
+  });
+
   it("forces approval for webhook-triggered declared writes with read-looking names", () => {
     for (const name of ["read_profile_card", "find_validator_record", "get_status"]) {
       expect(unattendedTriggerToolRequiresApproval("webhook", name, true, false)).toBe(true);

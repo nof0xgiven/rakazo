@@ -31,8 +31,15 @@ export function activityPromptSnippet(
 export function activityNotificationsEnabled(
   groupId: string | null,
   notifyOnFinish: boolean,
+  linear?: { status: string; routineNotify: boolean | null },
 ): boolean {
-  return groupId !== null || notifyOnFinish;
+  if (groupId === null && !notifyOnFinish) return false;
+  return (
+    !linear ||
+    linear.status === "waiting_input" ||
+    linear.status === "waiting_takeover" ||
+    linear.routineNotify === true
+  );
 }
 
 export async function listSpaceRuns(
@@ -53,6 +60,7 @@ export async function listSpaceRuns(
     },
     include: {
       bot: { select: { name: true, archivedAt: true, notifyOnFinish: true } },
+      routine: { select: { notify: true } },
       task: { select: { prompt: true } },
       sourceMessage: { select: { blocks: true } },
       thread: {
@@ -78,7 +86,13 @@ export async function listSpaceRuns(
     threadId: row.threadId,
     status: row.status as RunActivityRow["status"],
     trigger: row.trigger as RunActivityRow["trigger"],
-    notificationsEnabled: activityNotificationsEnabled(row.thread.groupId, row.bot.notifyOnFinish),
+    notificationsEnabled: activityNotificationsEnabled(
+      row.thread.groupId,
+      row.bot.notifyOnFinish,
+      row.trigger === "linear"
+        ? { status: row.status, routineNotify: row.routine?.notify ?? null }
+        : undefined,
+    ),
     promptSnippet: activityPromptSnippet({
       trigger: row.trigger,
       prompt: row.task.prompt,

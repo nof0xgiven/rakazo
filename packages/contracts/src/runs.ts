@@ -16,6 +16,7 @@ export const RUN_TRIGGERS = [
   "cloud_agent",
   "created",
   "tickets",
+  "linear",
 ] as const;
 export const RunTriggerSchema = z.enum(RUN_TRIGGERS);
 export type RunTrigger = z.infer<typeof RunTriggerSchema>;

@@ -170,6 +170,13 @@ describeWithDatabase("API authorization and resource isolation", () => {
       ["connections/begin", connectionInput("Unauthenticated")],
       ["connections/complete", { connectionId: "missing-connection" }],
       ["connections/revoke", { connectionId: "missing-connection" }],
+      ["linear/connect", { apiKey: "not-a-real-key", displayName: "Unauthenticated" }],
+      ["linear/status", { connectionId: "missing-connection" }],
+      ["linear/options", { connectionId: "missing-connection", kind: "teams" }],
+      [
+        "linear/configureWebhook",
+        { connectionId: "missing-connection", expectedRevision: 1, signingSecret: null },
+      ],
       ["approvalRules/list"],
       [
         "approvalRules/set",
@@ -415,6 +422,21 @@ describeWithDatabase("API authorization and resource isolation", () => {
       ["agentSkills/remove", { skillId: ownerAgentSkill.id }],
       ["memory/update", { documentId: ownerMemory.id, content: "stolen" }],
       ["connections/complete", { connectionId: ownerConnection.connectionId }],
+      ["linear/status", { connectionId: ownerConnection.connectionId }],
+      ["linear/options", { connectionId: ownerConnection.connectionId, kind: "teams" }],
+      [
+        "linear/configureWebhook",
+        { connectionId: ownerConnection.connectionId, expectedRevision: 1, signingSecret: null },
+      ],
+      [
+        "linear/connect",
+        {
+          apiKey: "not-a-real-key",
+          displayName: "Stolen",
+          connectionId: ownerConnection.connectionId,
+          expectedRevision: 1,
+        },
+      ],
     ] satisfies Array<[string, unknown]>;
     await Promise.all(
       resourceIdCalls.map(([procedure, input]) => expectDenied(app, intruder, procedure, input)),

@@ -1,13 +1,22 @@
 import type { JobPublisher } from "@rakazo/adapter-kit";
-import { routineJobKey, routineWakeupJob } from "@rakazo/adapter-kit";
+import { linearSyncJob, routineJobKey, routineWakeupJob, runJobKey } from "@rakazo/adapter-kit";
 import {
+  ACTIVE_RUN_STATUSES,
   cronFromPreset,
   isOneShotRoutineCron,
   isOneShotRoutineCrons,
+  isRoutineRunTrigger,
   nextCronDate,
   ONCE_ROUTINE_CRON,
 } from "@rakazo/core";
 import type { PrismaClient, ThreadEvents } from "@rakazo/db";
+import { withTransactionRetry } from "@rakazo/db";
+import { getLogger } from "@rakazo/logging";
+import { lockLinearSources, refreshLinearSourceMonitoring } from "./linear-lifecycle.js";
+import {
+  cancelLinearRunsInTransaction,
+  publishCancelledLinearRuns,
+} from "./linear-run-authorization.js";
 
 export { isOneShotRoutineCron, ONCE_ROUTINE_CRON };
 
@@ -17,7 +26,9 @@ export function filterBuiltinToolsForRun<T extends { name: string }>(
   tools: T[],
   runTrigger: string,
 ): T[] {
-  return runTrigger === "routine" ? tools.filter((tool) => tool.name !== "schedule_create") : tools;
+  return isRoutineRunTrigger(runTrigger)
+    ? tools.filter((tool) => tool.name !== "schedule_create")
+    : tools;
 }
 
 /** Keep cross-bot messaging thread-specific while exposing schedules in DMs and groups. */
@@ -331,7 +342,59 @@ export async function cancelScheduleFromTool(
   });
   if (!existing) return { error: "Schedule not found." };
 
-  await deps.prisma.routine.delete({ where: { id: existing.id } });
+  const removed = await withTransactionRetry(() =>
+    deps.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM bots WHERE id = ${existing.botId} FOR SHARE`;
+      const trigger = await tx.routineLinearTrigger.findUnique({
+        where: { routineId: existing.id },
+        select: { connectionId: true },
+      });
+      const connectionIds = trigger ? [trigger.connectionId] : [];
+      await lockLinearSources(tx, connectionIds);
+      const locked = await tx.$queryRaw<Array<{ id: string }>>`
+        SELECT id FROM routines WHERE id = ${existing.id} FOR UPDATE`;
+      if (locked.length === 0) return null;
+      const current = await tx.routineLinearTrigger.findUnique({
+        where: { routineId: existing.id },
+        select: { connectionId: true },
+      });
+      if (current?.connectionId !== trigger?.connectionId) return "changed" as const;
+      const runs = current
+        ? await tx.run.findMany({
+            where: {
+              routineId: existing.id,
+              trigger: "linear",
+              status: { in: [...ACTIVE_RUN_STATUSES] },
+            },
+            select: { id: true },
+          })
+        : [];
+      const cancelled = await cancelLinearRunsInTransaction(tx, runs, new Date());
+      await tx.routine.delete({ where: { id: existing.id } });
+      const linearSyncIds: string[] = [];
+      for (const connectionId of connectionIds) {
+        if ((await refreshLinearSourceMonitoring(tx, connectionId)).enqueue) {
+          linearSyncIds.push(connectionId);
+        }
+      }
+      return { cancelled, linearSyncIds };
+    }),
+  );
+  if (!removed) return { error: "Schedule not found." };
+  if (removed === "changed") return { error: "Schedule changed. Try again." };
   await deps.jobs.cancel(routineJobKey(existing.id));
+  await Promise.all([
+    ...removed.linearSyncIds.map((connectionId) =>
+      deps.jobs.enqueue(linearSyncJob({ connectionId })).catch((error: unknown) => {
+        getLogger().error("schedule cancel linear sync enqueue", error);
+      }),
+    ),
+    ...removed.cancelled.runIds.map((runId) =>
+      deps.jobs.cancel(runJobKey(runId)).catch((error: unknown) => {
+        getLogger().error("schedule cancel linear run cancel", error);
+      }),
+    ),
+  ]);
+  await publishCancelledLinearRuns(deps, removed.cancelled);
   return { ok: true as const, routineId: existing.id, name: existing.name };
 }
