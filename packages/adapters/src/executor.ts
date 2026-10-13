@@ -119,6 +119,7 @@ import {
   retireModelCredential,
   SpaceLimitError,
   searchHistory,
+  withTransactionRetry,
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import { parse as parseShellCommand } from "shell-quote";
@@ -3157,92 +3158,96 @@ export function createRunExecutor(deps: ExecutorDeps) {
         userId: routine.userId,
       });
       const routinePrompt = expandSkillReferencesInPrompt(routine.prompt, skillRecords);
-      const claimed = await deps.prisma.$transaction(async (tx) => {
-        await tx.$queryRaw`SELECT id FROM bots WHERE id = ${bot.id} FOR SHARE`;
-        await tx.$queryRaw`SELECT id FROM routines WHERE id = ${routine.id} FOR UPDATE`;
-        const triggers = await tx.routine.findUnique({
-          where: { id: routine.id },
-          select: {
-            webhookEnabled: true,
-            githubEnabled: true,
-            messageProvider: true,
-            linearTrigger: { select: { routineId: true } },
-          },
-        });
-        if (!triggers) return null;
-        const deactivate = !nextRunAt && !hasRoutineEventTrigger(triggers);
-        const updated = await tx.routine.updateMany({
-          where: {
-            id: routine.id,
-            active: true,
-            nextRunAt: scheduledAt,
-            bot: { archivedAt: null },
-          },
-          data: {
-            lastRunAt: new Date(),
-            nextRunAt,
-            ...(deactivate ? { active: false } : {}),
-          },
-        });
-        if (updated.count !== 1) return null;
-        // The claim locks the row, so this is the model that was committed when it fired.
-        const currentModel = await tx.routine.findUnique({
-          where: { id: routine.id },
-          select: { modelProvider: true, modelId: true, thinkingLevel: true },
-        });
-        if (!currentModel) return null;
-        const task = await tx.task.create({
-          data: {
-            spaceId: routine.spaceId,
-            botId: bot.id,
-            threadId: thread.id,
-            userId: routine.userId,
-            prompt: routinePrompt,
-            status: "queued",
-          },
-        });
-        const run = await tx.run.create({
-          data: {
-            spaceId: routine.spaceId,
-            botId: bot.id,
-            threadId: thread.id,
-            taskId: task.id,
-            userId: routine.userId,
-            status: "queued",
-            trigger: "routine",
-            routineId: routine.id,
-            ...routineRunModelPin(currentModel),
-          },
-        });
-        return { id: run.id, taskId: run.taskId, deactivated: deactivate };
-      });
+      const claimed = await withTransactionRetry(() =>
+        deps.prisma.$transaction(async (tx) => {
+          await tx.$queryRaw`SELECT id FROM bots WHERE id = ${bot.id} FOR SHARE`;
+          await tx.$queryRaw`SELECT id FROM routines WHERE id = ${routine.id} FOR UPDATE`;
+          const triggers = await tx.routine.findUnique({
+            where: { id: routine.id },
+            select: {
+              webhookEnabled: true,
+              githubEnabled: true,
+              messageProvider: true,
+              linearTrigger: { select: { routineId: true } },
+            },
+          });
+          if (!triggers) return null;
+          const deactivate = !nextRunAt && !hasRoutineEventTrigger(triggers);
+          const updated = await tx.routine.updateMany({
+            where: {
+              id: routine.id,
+              active: true,
+              nextRunAt: scheduledAt,
+              bot: { archivedAt: null },
+            },
+            data: {
+              lastRunAt: new Date(),
+              nextRunAt,
+              ...(deactivate ? { active: false } : {}),
+            },
+          });
+          if (updated.count !== 1) return null;
+          // The claim locks the row, so this is the model that was committed when it fired.
+          const currentModel = await tx.routine.findUnique({
+            where: { id: routine.id },
+            select: { modelProvider: true, modelId: true, thinkingLevel: true },
+          });
+          if (!currentModel) return null;
+          const task = await tx.task.create({
+            data: {
+              spaceId: routine.spaceId,
+              botId: bot.id,
+              threadId: thread.id,
+              userId: routine.userId,
+              prompt: routinePrompt,
+              status: "queued",
+            },
+          });
+          const run = await tx.run.create({
+            data: {
+              spaceId: routine.spaceId,
+              botId: bot.id,
+              threadId: thread.id,
+              taskId: task.id,
+              userId: routine.userId,
+              status: "queued",
+              trigger: "routine",
+              routineId: routine.id,
+              ...routineRunModelPin(currentModel),
+            },
+          });
+          return { id: run.id, taskId: run.taskId, deactivated: deactivate };
+        }),
+      );
       if (!claimed) return;
       // Enqueue continuation first so a thread-signal failure cannot strand the run.
       try {
         await deps.jobs.enqueue(runContinueJob(claimed.id));
       } catch (error) {
         // Restore the claim so wakeup retry / routine reconciliation can fire again.
-        await deps.prisma.$transaction(async (tx) => {
-          await tx.$queryRaw`SELECT id FROM bots WHERE id = ${bot.id} FOR SHARE`;
-          await tx.routine.updateMany({
-            where: {
-              id: routine.id,
-              nextRunAt,
-              ...(nextRunAt ? {} : { active: !claimed.deactivated }),
-            },
-            data: {
-              nextRunAt: scheduledAt,
-              active: true,
-              lastRunAt: previousLastRunAt,
-            },
-          });
-          await tx.run.deleteMany({
-            where: { id: claimed.id, status: "queued" },
-          });
-          await tx.task.deleteMany({
-            where: { id: claimed.taskId, status: "queued" },
-          });
-        });
+        await withTransactionRetry(() =>
+          deps.prisma.$transaction(async (tx) => {
+            await tx.$queryRaw`SELECT id FROM bots WHERE id = ${bot.id} FOR SHARE`;
+            await tx.routine.updateMany({
+              where: {
+                id: routine.id,
+                nextRunAt,
+                ...(nextRunAt ? {} : { active: !claimed.deactivated }),
+              },
+              data: {
+                nextRunAt: scheduledAt,
+                active: true,
+                lastRunAt: previousLastRunAt,
+              },
+            });
+            await tx.run.deleteMany({
+              where: { id: claimed.id, status: "queued" },
+            });
+            await tx.task.deleteMany({
+              where: { id: claimed.taskId, status: "queued" },
+            });
+          }),
+        );
         throw error;
       }
       try {

@@ -5,7 +5,12 @@ import type {
   JobPublisher,
   SecretStore,
 } from "@rakazo/adapter-kit";
-import { isIssueTrackerError, linearSyncJob, linearSyncJobKey, runJobKey } from "@rakazo/adapter-kit";
+import {
+  isIssueTrackerError,
+  linearSyncJob,
+  linearSyncJobKey,
+  runJobKey,
+} from "@rakazo/adapter-kit";
 import type {
   Connection,
   ConnectionStatus,
@@ -51,7 +56,11 @@ import { persistPreparedSecret } from "./secret-persistence.js";
 
 export type LinearActor = { userId: string; spaceId: string };
 
-export type LinearServiceErrorCode = "BAD_REQUEST" | "NOT_FOUND" | "CONFLICT" | "SERVICE_UNAVAILABLE";
+export type LinearServiceErrorCode =
+  | "BAD_REQUEST"
+  | "NOT_FOUND"
+  | "CONFLICT"
+  | "SERVICE_UNAVAILABLE";
 
 export class LinearServiceError extends Error {
   readonly code: LinearServiceErrorCode;
@@ -86,7 +95,10 @@ export interface LinearService {
     actor: LinearActor,
     input: LinearConfigureWebhookInput,
   ): Promise<LinearConnectionStatus>;
-  revoke(actor: LinearActor, input: { connectionId: string }): Promise<{ cancelledRunIds: string[] }>;
+  revoke(
+    actor: LinearActor,
+    input: { connectionId: string },
+  ): Promise<{ cancelledRunIds: string[] }>;
   validateTrigger(
     actor: LinearActor,
     trigger: LinearTrigger,
@@ -249,6 +261,7 @@ export function createLinearService(deps: LinearServiceDeps): LinearService {
           where: { connectionId },
           data: {
             rateLimitedUntil: deadline,
+            errorCode: "rate_limit",
             ...(source.nextPollAt && source.nextPollAt < deadline ? { nextPollAt: deadline } : {}),
           },
         });
@@ -321,9 +334,7 @@ export function createLinearService(deps: LinearServiceDeps): LinearService {
     }
   }
 
-  async function buildStatus(
-    source: OwnedLinearSource,
-  ): Promise<LinearConnectionStatus> {
+  async function buildStatus(source: OwnedLinearSource): Promise<LinearConnectionStatus> {
     const owner = {
       connectionId: source.connectionId,
       spaceId: source.connection.spaceId,
