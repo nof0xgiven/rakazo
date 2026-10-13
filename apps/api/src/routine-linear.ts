@@ -117,13 +117,15 @@ export function assertAttachableLinearSource(
   if (
     !source ||
     source.connection.userId !== actor.userId ||
-    source.connection.spaceId !== actor.spaceId ||
-    source.connection.status !== "connected"
+    source.connection.spaceId !== actor.spaceId
   ) {
     throw new ORPCError("BAD_REQUEST", { message: UNAVAILABLE_LINEAR_OPTION_MESSAGE });
   }
   if (source.revision !== sourceRevision) {
     throw new ORPCError("CONFLICT", { message: AUTOMATION_CHANGED_MESSAGE });
+  }
+  if (source.connection.status !== "connected") {
+    throw new ORPCError("BAD_REQUEST", { message: UNAVAILABLE_LINEAR_OPTION_MESSAGE });
   }
 }
 
