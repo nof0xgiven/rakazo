@@ -16,6 +16,12 @@ const PRIVACY_URLS: Record<string, string> = {
   cartesia: "https://cartesia.ai/legal/privacy",
   "fish-audio": "https://fish.audio/privacy/",
   supermemory: "https://supermemory.ai/privacy",
+  hindsight: "https://vectorize.io/privacy",
+};
+
+const MEMORY_PROVIDER_NAMES: Record<string, string> = {
+  supermemory: "Supermemory",
+  hindsight: "Hindsight Cloud",
 };
 
 /** Never expose endpoint paths, query parameters, user info, or credentials in a disclosure. */
@@ -48,7 +54,7 @@ export function aiRecipient(input: {
 
 function recipientName(provider: string, use: AiDataUse) {
   if (use === "voice") return voiceCatalogEntry(provider)?.name ?? provider;
-  if (use === "memory") return provider === "supermemory" ? "Supermemory" : provider;
+  if (use === "memory") return MEMORY_PROVIDER_NAMES[provider] ?? provider;
   if (provider === "cursor") return "Cursor";
   return listPiCatalog().find((entry) => entry.provider === provider)?.providerName ?? provider;
 }

@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type {
   AdapterContext,
   DurableMemoryScope,
+  SemanticMemoryCapabilities,
   SemanticMemoryForgetRequest,
   SemanticMemoryProvider,
   SemanticMemoryRecallRequest,
@@ -23,6 +24,12 @@ import {
 } from "./serenity-client.js";
 
 export const SERENITY_PROVIDER_ID = "serenity";
+export const SERENITY_CAPABILITIES = {
+  recall: true,
+  save: true,
+  purgeHistory: true,
+  sharedScope: true,
+} as const satisfies SemanticMemoryCapabilities;
 
 /** Thrown when prepare would probe a private endpoint without deployment-owner authorization. */
 export class MemoryProviderDeploymentOwnerRequiredError extends Error {
@@ -209,12 +216,7 @@ export class SerenityMemoryProvider implements SemanticMemoryProvider {
       id: SERENITY_PROVIDER_ID,
       contractVersion: "1",
       adapterVersion: "0.1.0",
-      capabilities: {
-        recall: true,
-        save: true,
-        purgeHistory: true,
-        sharedScope: true,
-      } as const,
+      capabilities: SERENITY_CAPABILITIES,
     };
   }
 

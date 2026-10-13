@@ -176,9 +176,7 @@ function displayName(bankId: string, ...candidates: Array<string | undefined>): 
 }
 
 function bankPath(bankId: string, ...rest: string[]): string {
-  return [API_PREFIX, ...[bankId, ...rest].map((segment) => encodeURIComponent(segment))].join(
-    "/",
-  );
+  return [API_PREFIX, ...[bankId, ...rest].map((segment) => encodeURIComponent(segment))].join("/");
 }
 
 function failure<T>(code: MemoryFailureCode, retryAfterMs?: number): HindsightResult<T> {
@@ -214,7 +212,7 @@ function retryAfterMs(header: string | null): number | undefined {
   return Math.min(Math.max(delayMs, RETRY_AFTER_MIN_MS), RETRY_AFTER_MAX_MS);
 }
 
-function keyForms(apiKey: string): string[] {
+export function credentialForms(apiKey: string): string[] {
   const base64 = Buffer.from(apiKey).toString("base64");
   const forms = [
     apiKey,
@@ -245,7 +243,7 @@ export class HindsightClient {
 
   constructor(options: HindsightClientOptions) {
     this.apiKey = normalizeHindsightApiKey(options.apiKey);
-    this.forms = this.apiKey === null ? [] : keyForms(this.apiKey);
+    this.forms = this.apiKey === null ? [] : credentialForms(this.apiKey);
     this.fetchImpl = options.fetch ?? ((input, init) => globalThis.fetch(input, init));
     this.signal = options.signal;
   }
