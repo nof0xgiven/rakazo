@@ -12,6 +12,7 @@ import type { Bot, SpaceMemoryConfig } from "@rakazo/contracts";
 import { RECALLED_MEMORY_PREFIX } from "@rakazo/core";
 import { describe, expect, it, vi } from "vitest";
 import { type AppHandles, createApp } from "../../../apps/api/src/app.ts";
+import { compatibleConnection } from "./compatible-connection.js";
 import { discardBotIntroRun } from "./discard-bot-intro.js";
 import { startHindsightEmulator } from "./hindsight-emulator.js";
 import { sessionCookieHeader } from "./index.js";
@@ -203,14 +204,10 @@ describe.skipIf(!databaseAvailable)("Hindsight Cloud memory through the app (Pos
       const alpha = await createBot("Greenhouse");
       const beta = await createBot("Orchard");
       const gamma = await createBot("Greenhouse partner");
-      await call("models/connect", {
-        provider: model.model.provider,
-        modelId: model.model.id,
-        baseUrl: model.baseUrl,
-        apiKey: modelKey,
-        contextWindow: 160_000,
-        maxTokens: 4096,
-      });
+      await call(
+        "models/connect",
+        compatibleConnection({ baseUrl: model.baseUrl, modelId: model.model.id, apiKey: modelKey }),
+      );
       for (const bot of [alpha, beta, gamma]) {
         await call("bots/update", {
           botId: bot.id,
