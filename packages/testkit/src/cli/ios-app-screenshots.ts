@@ -41,6 +41,9 @@ async function main() {
   const email = requiredEnv("RAKAZO_SCREENSHOT_EMAIL");
   const emptyEmail = requiredEnv("RAKAZO_SCREENSHOT_EMPTY_EMAIL");
   const password = requiredEnv("RAKAZO_SCREENSHOT_PASSWORD");
+  const hindsightKey = sections.some((section) => section.id === "memory")
+    ? requiredEnv("RAKAZO_SCREENSHOT_HINDSIGHT_KEY")
+    : null;
   const outDir = path.resolve(
     process.env.IOS_SCREENSHOT_OUT || path.join(ROOT, "test-report", "ios-screenshots"),
   );
@@ -88,6 +91,7 @@ async function main() {
           `RAKAZO_SCREENSHOT_GROUP_ID=${fixture.groupId}`,
           "-e",
           `RAKAZO_SCREENSHOT_ROUTINE_ID=${fixture.routineId}`,
+          ...(hindsightKey ? ["-e", `RAKAZO_SCREENSHOT_HINDSIGHT_KEY=${hindsightKey}`] : []),
           path.join(CATALOG_DIR, section.flow),
         ],
         process.env,

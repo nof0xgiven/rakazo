@@ -27,5 +27,12 @@ Run one section:
 pnpm ios:screenshots -- --section settings
 ```
 
+The `memory` section connects Hindsight Cloud with a synthetic key and picks
+fixture banks, so it also needs `RAKAZO_SCREENSHOT_HINDSIGHT_KEY`. Run
+`pnpm test:mobile-screenshots -- --serve` to get a disposable API with a
+Hindsight emulator; it prints every variable this command needs. Point Metro at
+that API (`EXPO_PUBLIC_API_URL=http://127.0.0.1:3110`), then run
+`pnpm ios:screenshots -- --section memory`.
+
 Output defaults to `test-report/ios-screenshots` (gitignored). Override it with
 `IOS_SCREENSHOT_OUT`. Open `index.html` in that folder. Maestro must be on `PATH`.
