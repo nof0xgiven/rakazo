@@ -6,6 +6,7 @@ import {
   lockSpaceForContentCreation,
   Prisma,
   SpaceDeletionInProgressError,
+  withModelConfigurationOwnerLock,
   withTransactionRetry,
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
@@ -299,12 +300,13 @@ async function dispatchLinearCandidate(
 ): Promise<CandidateOutcome> {
   for (let attempt = 1; ; attempt += 1) {
     try {
-      return await withTransactionRetry(() =>
-        deps.prisma.$transaction((tx) => createLinearCandidateRun(tx, lease, input)),
+      return await withModelConfigurationOwnerLock(deps.prisma, lease.userId, (tx) =>
+        createLinearCandidateRun(tx, lease, input),
       );
     } catch (error) {
       // A clientNonce unique race aborts the transaction; the retry adopts the winner.
-      const unique = error && typeof error === "object" && "code" in error && error.code === "P2002";
+      const unique =
+        error && typeof error === "object" && "code" in error && error.code === "P2002";
       if (attempt >= 2 || !unique) throw error;
     }
   }

@@ -115,6 +115,8 @@ async function render(draft: RoutineDraftState) {
         onTestRun={() => undefined}
         onDelete={() => undefined}
         onEnsureWebhook={async () => undefined}
+        linearConnectionsTick={0}
+        onConnectLinear={() => undefined}
       />,
     );
   });
@@ -152,6 +154,7 @@ function routine(overrides: Partial<Routine>): Routine {
     modelProvider: null,
     modelId: null,
     thinkingLevel: null,
+    linearTrigger: null,
     lastRunAt: null,
     nextRunAt: "2026-10-14T09:00:00.000Z",
     createdAt: "2026-10-01T00:00:00.000Z",
@@ -181,6 +184,8 @@ function SavingEditor({ editing }: { editing: Routine }) {
       onTestRun={() => undefined}
       onDelete={() => undefined}
       onEnsureWebhook={async () => undefined}
+      linearConnectionsTick={0}
+      onConnectLinear={() => undefined}
     />
   );
 }

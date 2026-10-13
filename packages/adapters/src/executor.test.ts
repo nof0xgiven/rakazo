@@ -2137,7 +2137,7 @@ description: Prepare standup notes
     });
     const claimUpdateMany = vi.fn(async () => ({ count: 1 }));
     const restoreUpdateMany = vi.fn(async () => ({ count: 1 }));
-    const claimQueryRaw = vi.fn(async () => []);
+    const claimQueryRaw = vi.fn(async () => [{ id: "user-1" }]);
     let transactionCalls = 0;
     const prisma = {
       routine: {
@@ -2196,7 +2196,7 @@ description: Prepare standup notes
     await expect(executor.wakeRoutine("routine-1", scheduledAt.toISOString())).rejects.toThrow(
       "enqueue failed",
     );
-    expect(claimQueryRaw).toHaveBeenCalledTimes(2);
+    expect(claimQueryRaw).toHaveBeenCalledTimes(3);
     const [claim] = claimUpdateMany.mock.calls.at(0) as unknown as [
       { data: Record<string, unknown> },
     ];
