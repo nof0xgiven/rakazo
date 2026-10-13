@@ -41,6 +41,7 @@ import {
   teachRecordingTtlMs,
 } from "@rakazo/core";
 import {
+  botMemoryBankInclude,
   type createRepos,
   expireComputerExecutionLeases,
   IsolationError,
@@ -175,7 +176,7 @@ async function ensureGraphicalComputer(
     }
     bot = await deps.prisma.bot.findUniqueOrThrow({
       where: { id: bot.id },
-      include: { thread: true, computer: true },
+      include: { thread: true, computer: true, memoryBank: botMemoryBankInclude },
     });
   }
   if (!bot.computer?.providerRef || bot.computer.state !== "running") {
@@ -315,7 +316,7 @@ export async function stopTeachingSession(
   }
   const bot = await deps.prisma.bot.findUnique({
     where: { id: current.botId },
-    include: { thread: true, computer: true },
+    include: { thread: true, computer: true, memoryBank: botMemoryBankInclude },
   });
   if (!bot) throw new IsolationError();
   const stopSnapshot =
@@ -347,7 +348,7 @@ export function createTaughtSkillsService(deps: TaughtSkillsDeps) {
     async start(actor: Actor, botId: string, goal: string): Promise<TaughtSkill> {
       let bot = await deps.prisma.bot.findFirst({
         where: { id: botId, spaceId: actor.spaceId, userId: actor.userId },
-        include: { thread: true, computer: true },
+        include: { thread: true, computer: true, memoryBank: botMemoryBankInclude },
       });
       if (!bot) throw new IsolationError();
       const alreadyRecording = await deps.prisma.taughtSkill.findFirst({

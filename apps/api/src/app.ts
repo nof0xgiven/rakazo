@@ -7,6 +7,7 @@ import type {
   BillingProvider,
   JobPublisher,
   ManagedConnectorProvider,
+  MemoryTransport,
   MessagingSurface,
   RealtimeFanout,
   SandboxProvider,
@@ -27,6 +28,7 @@ import {
   createCloudAgentConnection,
   createConnectorStack,
   createJobReconciler,
+  createMemoryRetentionReconciler,
   createMessagingContextLoader,
   createMessagingTeamChatSender,
   createRunExecutor,
@@ -168,6 +170,7 @@ export async function createApp(
     logger?: Logger;
     runtime?: AgentRuntime;
     contextStrategy?: AgentContextStrategy;
+    memoryTransport?: MemoryTransport;
   } = {},
 ): Promise<AppHandles> {
   const {
@@ -183,6 +186,7 @@ export async function createApp(
     logger: loggerOverride,
     runtime: runtimeOverride,
     contextStrategy,
+    memoryTransport,
     ...envOverrides
   } = overrides;
   const env = { ...loadEnv(process.env), ...envOverrides };
@@ -300,7 +304,7 @@ export async function createApp(
     remoteConnectors,
     env.mcpAllowPrivateEndpoint,
   );
-  const memoryProviders = new SpaceMemoryProviderResolver(prisma, secrets);
+  const memoryProviders = new SpaceMemoryProviderResolver({ prisma, secrets, memoryTransport });
   const oauthLogins = new PiOAuthLogins();
   const home = new LocalAgentHomeStore(env.dataDir);
   const artifacts = new LocalArtifactStore(env.dataDir);
@@ -525,6 +529,7 @@ export async function createApp(
         notifications,
         reconcileCloudAgents: () => reconcileCloudAgents({ prisma, jobs, cloudAgent }),
         reconcileComputerUpdates: () => reconcileComputerUpdates({ prisma, jobs }),
+        reconcileMemoryRetention: createMemoryRetentionReconciler({ prisma, jobs }),
       })
     : undefined;
   reconciler?.start();
@@ -541,6 +546,7 @@ export async function createApp(
     sandbox,
     memory,
     memoryProviders,
+    memoryTransport,
     home,
     secrets,
     oauthLogins,
