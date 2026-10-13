@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { PiAgentRuntime } from "@rakazo/adapters";
 import { describe, expect, it } from "vitest";
+import { compatibleConnection } from "./compatible-connection.js";
 import { HISTORY_EVAL_CASES } from "./evals/cases.js";
 import { runTrial } from "./evals/runner.js";
 import type { ModelEmulatorRequest } from "./model-emulator.js";
@@ -141,14 +142,12 @@ describe.skipIf(!enabled)("product history diagnostic loop", () => {
     try {
       const { createApp } = await import("../../../apps/api/src/app.ts");
       const result = await runTrial(scenario, 1, {
-        connection: {
-          provider: model.model.provider,
-          modelId: model.model.id,
+        connection: compatibleConnection({
           baseUrl: model.baseUrl,
+          modelId: model.model.id,
           apiKey: fixtureKey,
           contextWindow: 1_000_000,
-          maxTokens: 4096,
-        },
+        }),
         timeoutMs: 40_000,
         maxToolCalls: 30,
         createApp: (composio) =>

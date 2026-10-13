@@ -4,10 +4,11 @@ import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
-import { ModelConnectInputSchema } from "@rakazo/contracts";
+import { ModelConnectInputSchema, OPENAI_COMPATIBLE_PROVIDER_ID } from "@rakazo/contracts";
 import { loadRootEnv } from "@rakazo/core/node/load-root-env";
 import type { StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { PostgreSqlContainer } from "@testcontainers/postgresql";
+import { connectionModelLimits } from "../compatible-connection.js";
 import { EVAL_CASES, HISTORY_EVAL_CASES } from "../evals/cases.js";
 import { HISTORY_FIXTURE_VERSION } from "../evals/history-fixtures.js";
 import type { DiagnosticToolObservation, HistoryDiagnostic } from "../evals/history-observer.js";
@@ -170,20 +171,38 @@ async function main() {
   };
   if (!values.live) notRun("Live model execution requires --live; report marks all trials not-run");
   loadRootEnv();
+  const flagLimits = {
+    cacheCapabilities: values["cache-capabilities"]
+      ? readConnection(values["cache-capabilities"])
+      : undefined,
+    contextWindow: values["context-window"] ? Number(values["context-window"]) : undefined,
+    maxTokens: values["max-output-tokens"] ? Number(values["max-output-tokens"]) : undefined,
+  };
+  const flagConnection = {
+    provider: values.provider,
+    modelId: values.model ?? process.env.PI_DEFAULT_MODEL,
+    apiKey: values["api-key-env"] ? process.env[values["api-key-env"]] : undefined,
+    baseUrl: values["base-url"],
+    label: "Eval model",
+  };
   const rawConnection: unknown = values.connection
     ? readConnection(values.connection)
-    : {
-        provider: values.provider,
-        modelId: values.model ?? process.env.PI_DEFAULT_MODEL,
-        apiKey: values["api-key-env"] ? process.env[values["api-key-env"]] : undefined,
-        baseUrl: values["base-url"],
-        cacheCapabilities: values["cache-capabilities"]
-          ? readConnection(values["cache-capabilities"])
-          : undefined,
-        contextWindow: values["context-window"] ? Number(values["context-window"]) : undefined,
-        maxTokens: values["max-output-tokens"] ? Number(values["max-output-tokens"]) : undefined,
-        label: "Eval model",
-      };
+    : values.provider === OPENAI_COMPATIBLE_PROVIDER_ID
+      ? {
+          ...flagConnection,
+          models: [
+            {
+              modelId: flagConnection.modelId,
+              thinkingLevels: ["off"],
+              defaultThinkingLevel: null,
+              contextWindow: flagLimits.contextWindow ?? 32_768,
+              maxTokens: flagLimits.maxTokens ?? 4096,
+              supportsImages: false,
+              cacheCapabilities: flagLimits.cacheCapabilities,
+            },
+          ],
+        }
+      : { ...flagConnection, ...flagLimits };
   const parsedConnection = ModelConnectInputSchema.safeParse(rawConnection);
   if (!parsedConnection.success || !parsedConnection.data.modelId?.trim())
     return notRun(
@@ -205,10 +224,11 @@ async function main() {
   const connection = parsedConnection.data;
   report.model = connection.modelId!;
   report.provider = connection.provider;
-  Object.assign(report, { cacheCapabilities: connection.cacheCapabilities ?? null });
+  const modelLimits = connectionModelLimits(connection);
+  Object.assign(report, { cacheCapabilities: modelLimits.cacheCapabilities ?? null });
   report.modelLimits = {
-    contextWindow: connection.contextWindow ?? null,
-    maxOutputTokens: connection.maxTokens ?? null,
+    contextWindow: modelLimits.contextWindow ?? null,
+    maxOutputTokens: modelLimits.maxTokens ?? null,
   };
   save();
   if (values["cache-probe"]) {
@@ -246,8 +266,7 @@ async function main() {
       {
         ...connection,
         id: connection.modelId!,
-        maxImagesPerPrompt: connection.maxImagesPerPrompt ?? undefined,
-        maxTokens: connection.maxTokens ?? undefined,
+        ...modelLimits,
       },
       pricing,
       decisions,

@@ -1453,17 +1453,42 @@ describeWithDatabase("API authorization and resource isolation", () => {
   it("validates custom thinking against the saved connection capability", async () => {
     const cookie = await signup(app, `custom-thinking-${stamp}@rakazo.test`, "Custom Thinking");
     const bot = await rpc<Bot>(app, cookie, "bots/create", botInput("Thinking Bot"));
-    const connection = {
-      provider: "openai-compatible",
-      modelId: "arbitrary-model",
-      baseUrl: "http://localhost:8000/v1",
+    const modelId = "arbitrary-model";
+    const baseUrl = "http://localhost:8000/v1";
+    const model = {
+      modelId,
+      thinkingLevels: ["off"],
+      defaultThinkingLevel: null,
+      contextWindow: 160_000,
+      maxTokens: 4096,
+      supportsImages: false,
     };
-    await rpc(app, cookie, "models/connect", {
-      ...connection,
+    const reasoningLevels = ["off", "minimal", "low", "medium", "high"];
+    const created = await rpc<ModelCredential>(app, cookie, "models/connect", {
+      provider: "openai-compatible",
+      baseUrl,
       apiKey: "fake-saved-key",
-      reasoning: false,
+      modelId,
+      thinkingLevel: "off",
+      models: [model],
     });
-    await rpc(app, cookie, "models/connect", { ...connection, reasoning: true });
+    const editInput = (version: number, thinkingLevels: string[]) => ({
+      provider: "openai-compatible",
+      baseUrl,
+      credentialId: created.id,
+      expectedConfigurationVersion: version,
+      models: [{ ...model, thinkingLevels }],
+    });
+    const reasoningCredential = await rpc<ModelCredential>(
+      app,
+      cookie,
+      "models/connect",
+      editInput(created.configurationVersion!, reasoningLevels),
+    );
+    expect(reasoningCredential).toMatchObject({
+      enabledModelIds: [modelId],
+      models: [{ modelId, thinkingLevels: reasoningLevels }],
+    });
     const actor = await rpc<Actor>(app, cookie, "me");
     expect(
       await handles.executor.resolveModel({
@@ -1471,19 +1496,33 @@ describeWithDatabase("API authorization and resource isolation", () => {
         spaceId: actor.spaceId,
         botId: bot.id,
       }),
-    ).toMatchObject({ apiKey: "fake-saved-key", reasoning: true });
-    const update = {
-      botId: bot.id,
-      modelProvider: connection.provider,
-      modelId: connection.modelId,
-    };
+    ).toMatchObject({ apiKey: "fake-saved-key", reasoning: true, thinkingLevels: reasoningLevels });
+    const update = { botId: bot.id, modelProvider: "openai-compatible", modelId };
     expect(
       await rpc(app, cookie, "bots/update", { ...update, thinkingLevel: "low" }),
     ).toMatchObject({ thinkingLevel: "low" });
     expect(
       (await raw(app, cookie, "bots/update", { ...update, thinkingLevel: "xhigh" })).status,
     ).toBe(400);
-    await rpc(app, cookie, "models/connect", { ...connection, reasoning: false });
+    const inUse = await raw(
+      app,
+      cookie,
+      "models/connect",
+      editInput(reasoningCredential.configurationVersion!, ["off"]),
+    );
+    expect(inUse.status).toBe(409);
+    expect(await inUse.json()).toMatchObject({
+      json: { data: { reason: "model_effort_in_use", usages: [{ kind: "bot", id: bot.id }] } },
+    });
+    expect(
+      await rpc(app, cookie, "bots/update", { ...update, thinkingLevel: "off" }),
+    ).toMatchObject({ thinkingLevel: "off" });
+    await rpc(
+      app,
+      cookie,
+      "models/connect",
+      editInput(reasoningCredential.configurationVersion!, ["off"]),
+    );
     expect(
       (await raw(app, cookie, "bots/update", { ...update, thinkingLevel: "low" })).status,
     ).toBe(400);
@@ -1901,6 +1940,7 @@ interface ModelCredential {
   label: string;
   hasKey: boolean;
   isDefault: boolean;
+  configurationVersion?: number;
 }
 
 interface Bot {

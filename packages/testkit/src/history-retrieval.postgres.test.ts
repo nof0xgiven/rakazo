@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { ComposioEmulator } from "@rakazo/adapters";
 import { describe, expect, it } from "vitest";
+import { compatibleConnection } from "./compatible-connection.js";
 import { discardBotIntroRun } from "./discard-bot-intro.js";
 import { sessionCookieHeader } from "./index.js";
 import type { ModelEmulatorRequest } from "./model-emulator.js";
@@ -205,15 +206,10 @@ describe.skipIf(!enabled)("history retrieval through executor", () => {
             throw new Error(`${procedure}: ${body.error?.message ?? response.status}`);
           return body.json;
         };
-        await rpc("models/connect", {
-          provider: model.model.provider,
-          modelId: model.model.id,
-          baseUrl: model.baseUrl,
-          // This fixture verifies long group paging, not the compatible-model
-          // fallback window. Tiny-window metadata retry behavior has separate coverage.
-          contextWindow: 160_000,
-          maxTokens: 4096,
-        });
+        await rpc(
+          "models/connect",
+          compatibleConnection({ baseUrl: model.baseUrl, modelId: model.model.id }),
+        );
         const bot = await rpc<{ id: string }>("bots/create", {
           name: "History fixture",
           title: "",

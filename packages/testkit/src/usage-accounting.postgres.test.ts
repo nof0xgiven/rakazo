@@ -7,6 +7,7 @@ import { recordUsage } from "@rakazo/db";
 import { describe, expect, it } from "vitest";
 import { runAutoReviewJudge } from "../../adapters/src/auto-review.js";
 import { compactHistory } from "../../adapters/src/history-compaction.js";
+import { compatibleConnection } from "./compatible-connection.js";
 import { discardBotIntroRun } from "./discard-bot-intro.js";
 import { sessionCookieHeader } from "./index.js";
 import { startModelEmulator } from "./model-emulator.js";
@@ -120,17 +121,19 @@ describe.skipIf(!enabled)("persisted Pi usage accounting", () => {
           throw new Error(`${procedure}: ${body.error?.message ?? response.status}`);
         return body.json;
       };
-      await rpc("models/connect", {
-        provider: model.model.provider,
-        modelId: model.model.id,
-        baseUrl: model.baseUrl,
-        cacheCapabilities: {
-          scope: "connection",
-          retentionMode: "short",
-          retentionMs: 300000,
-          minimumTokens: 1024,
-        },
-      });
+      await rpc(
+        "models/connect",
+        compatibleConnection({
+          baseUrl: model.baseUrl,
+          modelId: model.model.id,
+          cacheCapabilities: {
+            scope: "connection",
+            retentionMode: "short",
+            retentionMs: 300000,
+            minimumTokens: 1024,
+          },
+        }),
+      );
       const bot = await rpc<{ id: string }>("bots/create", {
         name: "Usage fixture",
         title: "",

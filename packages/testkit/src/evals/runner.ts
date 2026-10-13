@@ -5,6 +5,7 @@ import { MessagingTeamChatEmulator } from "@rakazo/adapters";
 import type { ModelConnectInput, RunStatus } from "@rakazo/contracts";
 import { ACTIVE_RUN_STATUSES, isTerminal } from "@rakazo/core";
 import type { createDb } from "@rakazo/db";
+import { connectionModelLimits } from "../compatible-connection.js";
 import { discardBotIntroRun } from "../discard-bot-intro.js";
 import { sessionCookieHeader } from "../index.js";
 import type { EvalCase, Evidence } from "./cases.js";
@@ -667,14 +668,14 @@ export async function runTrial(
         measureCalls(
           [...seenUsage.values()],
           options.pricing,
-          options.connection.cacheCapabilities?.minimumTokens,
+          connectionModelLimits(options.connection).cacheCapabilities?.minimumTokens,
         ),
       );
       result.stepAccounting = measureWorkflowSteps(
         [...seenUsage.values()],
         runSteps,
         options.pricing,
-        options.connection.cacheCapabilities?.minimumTokens,
+        connectionModelLimits(options.connection).cacheCapabilities?.minimumTokens,
       );
       result.cacheDecisions = handles.cacheDecisions ? [...handles.cacheDecisions] : [];
       result.historyDiagnostics = handles.historyDiagnostics ? [...handles.historyDiagnostics] : [];
